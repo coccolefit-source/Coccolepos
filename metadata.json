@@ -1,0 +1,6 @@
+{
+  "name": "Coccole Fit",
+  "description": "Plataforma integral para la gestión de tareas diarias, control de asistencia, registro de incidencias, impulso de ventas sugeridas, cuadre de caja y tableros operativos de Coccole Fit.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
