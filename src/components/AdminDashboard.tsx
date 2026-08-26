@@ -10,7 +10,9 @@ import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardLis
 import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 
-interface AdminDashboardProps {
+export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
+
+export interface AdminDashboardProps {
   usuarios: Usuario[];
   tareas: Tarea[];
   productos: ProductoPromocion[];
@@ -37,8 +39,8 @@ interface AdminDashboardProps {
   onAddAnuncio: (anuncio: Omit<Anuncio, 'id'>) => void;
   onResolveIncidencia: (id: string) => void;
   onAddFeedback: (feedback: Omit<Feedback, 'id' | 'fecha'>) => void;
-  onCreateUsuario: (usuario: Omit<Usuario, 'id'>) => void;
-  onEditUsuario: (usuario: Usuario) => void;
+  onCreateUsuario: (usuario: Omit<Usuario, 'id'>) => Promise<boolean> | boolean | void;
+  onEditUsuario: (usuario: Usuario) => Promise<boolean> | boolean | void;
   onDeleteUsuario: (id: string) => void;
   onSaveInventarioItem: (item: Omit<InventarioItem, 'id'> & { id?: string }) => void;
   onDeleteInventarioItem: (id: string) => void;
@@ -50,13 +52,17 @@ interface AdminDashboardProps {
   onDuplicarHorarios: () => void;
   onUpdateVenta?: (venta: Venta) => void;
   onAnularVenta?: (ventaId: string, motivo: string) => void;
-  activeTab?: 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas';
-  setActiveTab?: (tab: 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas') => void;
+  openTabs?: AdminTab[];
+  activeTab?: AdminTab;
+  setActiveTab?: (tab: AdminTab) => void;
+  onCloseTab?: (tab: AdminTab) => void;
 }
 
 export default function AdminDashboard({
+  openTabs,
   activeTab: propActiveTab,
   setActiveTab: propSetActiveTab,
+  onCloseTab,
   usuarios,
   tareas,
   productos,
@@ -640,7 +646,7 @@ export default function AdminDashboard({
     setAnuncioContenido('');
   };
 
-  const handleEmpSubmit = (e: React.FormEvent) => {
+  const handleEmpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!empNombre.trim()) return;
 
@@ -660,12 +666,41 @@ export default function AdminDashboard({
       return;
     }
 
-    if (editingEmpId) {
-      const existing = usuarios.find(u => u.id === editingEmpId);
-      if (existing) {
-        onEditUsuario({
-          ...existing,
+    const resetForm = () => {
+      setEmpNombre('');
+      setEmpArea(categorias.areasTrabajo[0] || 'Cocina/Preparación');
+      setEmpMeta(6);
+      setEmpInsignia('Colaborador Fit 🥗');
+      setEmpEmail('');
+      setEmpTelefono('');
+      setEmpPin('');
+      setEmpPinError('');
+    };
+
+    try {
+      if (editingEmpId) {
+        const existing = usuarios.find(u => u.id === editingEmpId);
+        if (existing) {
+          const result = await onEditUsuario({
+            ...existing,
+            nombre: empNombre,
+            area_preferida: empArea,
+            meta_tareas_diarias: Number(empMeta),
+            foto_avatar: empAvatar,
+            insignia_actual: empInsignia,
+            email: empEmail,
+            telefono: empTelefono,
+            pin: cleanPin
+          });
+          if (result !== false) {
+            setEditingEmpId(null);
+            resetForm();
+          }
+        }
+      } else {
+        const result = await onCreateUsuario({
           nombre: empNombre,
+          rol: 'empleado',
           area_preferida: empArea,
           meta_tareas_diarias: Number(empMeta),
           foto_avatar: empAvatar,
@@ -674,30 +709,13 @@ export default function AdminDashboard({
           telefono: empTelefono,
           pin: cleanPin
         });
+        if (result !== false) {
+          resetForm();
+        }
       }
-      setEditingEmpId(null);
-    } else {
-      onCreateUsuario({
-        nombre: empNombre,
-        rol: 'empleado',
-        area_preferida: empArea,
-        meta_tareas_diarias: Number(empMeta),
-        foto_avatar: empAvatar,
-        insignia_actual: empInsignia,
-        email: empEmail,
-        telefono: empTelefono,
-        pin: cleanPin
-      });
+    } catch (err) {
+      console.error('Error al guardar perfil:', err);
     }
-
-    setEmpNombre('');
-    setEmpArea(categorias.areasTrabajo[0] || 'Cocina/Preparación');
-    setEmpMeta(6);
-    setEmpInsignia('Colaborador Fit 🥗');
-    setEmpEmail('');
-    setEmpTelefono('');
-    setEmpPin('');
-    setEmpPinError('');
   };
 
   const handleEditEmpClick = (u: Usuario) => {
@@ -957,14 +975,70 @@ export default function AdminDashboard({
     );
   };
 
+  const isTabOpen = (t: AdminTab) => openTabs ? openTabs.includes(t) : activeTab === t;
+
   return (
     <div id="admin-dashboard" className="space-y-6 w-full">
+
+      {/* Banderola Superior de Pestañas Interiores (Multi-Tab Admin) */}
+      {openTabs && openTabs.length > 0 && (
+        <div className="w-full bg-[#FFFDF6] p-2 rounded-xl border border-[#E2E8F0] shadow-xs flex flex-wrap items-center gap-1.5 mb-2">
+          <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider px-2 border-r border-slate-200 mr-1">
+            Pestañas Activas:
+          </div>
+          {openTabs.map((t) => {
+            const isActive = activeTab === t;
+            const labelMap: Record<AdminTab, string> = {
+              tareas: 'Tareas Diarias',
+              productos: 'Ventas Sugeridas',
+              inventario: 'Inventario',
+              horarios: 'Horarios',
+              calidad: 'Fichajes',
+              anuncios: 'Comunicados',
+              empleados: 'Trabajadores',
+              ventas: 'POS y Reportes',
+              supabase: 'Auditoría Supabase'
+            };
+            return (
+              <div
+                key={t}
+                onClick={() => setActiveTab && setActiveTab(t)}
+                className={`group flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
+                  isActive
+                    ? 'bg-[#4B9CD3] text-white shadow-xs'
+                    : 'bg-white text-[#2C3E50] border border-[#E2E8F0] hover:bg-[#EBF5FB] hover:text-[#4B9CD3]'
+                }`}
+              >
+                <span>{labelMap[t] || t}</span>
+                {openTabs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onCloseTab) onCloseTab(t);
+                    }}
+                    className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black transition-all ${
+                      isActive
+                        ? 'bg-white/20 hover:bg-white/40 text-white'
+                        : 'bg-slate-100 hover:bg-red-100 hover:text-red-700 text-slate-500'
+                    }`}
+                    title="Cerrar pestaña"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* CONTENIDO DE TABS */}
       <div className="w-full space-y-6">
 
       {/* 1. GESTOR DE TAREAS */}
-      {activeTab === 'tareas' && (
-        <div className="flex flex-col gap-6 w-full">
+      {isTabOpen('tareas') && (
+        <div className={activeTab === 'tareas' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
           {/* Formulario de Tarea */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
@@ -1184,8 +1258,8 @@ export default function AdminDashboard({
       )}
 
       {/* 2. GESTOR DE PRODUCTOS A PROMOCIONAR */}
-      {activeTab === 'productos' && (
-        <div className="flex flex-col gap-6 w-full">
+      {isTabOpen('productos') && (
+        <div className={activeTab === 'productos' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
           {/* Formulario de Producto */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
@@ -1277,8 +1351,8 @@ export default function AdminDashboard({
       )}
 
       {/* 3. CONTROL DE CALIDAD Y INGRESO / ASISTENCIA */}
-      {activeTab === 'calidad' && (
-        <div className="space-y-6">
+      {isTabOpen('calidad') && (
+        <div className={activeTab === 'calidad' ? 'space-y-6 w-full' : 'hidden'}>
           {/* Fichajes de hoy */}
           <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5">
@@ -1481,8 +1555,8 @@ export default function AdminDashboard({
       )}
 
       {/* 4. ANUNCIOS DEL TABLERO */}
-      {activeTab === 'anuncios' && (
-        <div className="flex flex-col gap-6 w-full">
+      {isTabOpen('anuncios') && (
+        <div className={activeTab === 'anuncios' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
           {/* Formulario de Anuncio */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
@@ -1557,8 +1631,8 @@ export default function AdminDashboard({
       )}
 
       {/* 5. SECCIÓN DE PERSONAL Y CONFIGURACIÓN DE PONDERACIÓN DEL RANKING */}
-      {activeTab === 'empleados' && (
-        <div className="flex flex-col gap-6 w-full animate-in fade-in duration-200">
+      {isTabOpen('empleados') && (
+        <div className={activeTab === 'empleados' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
           {/* Configuración de Ponderación del Ranking de Colaboradores & Ventas Sugeridas */}
           <RankingWeightsConfig
             currentWeights={rankingWeights}
@@ -1868,8 +1942,8 @@ export default function AdminDashboard({
       )}
 
       {/* 6. MÓDULO DE INVENTARIO INTEGRADO (VISTA ADMIN) */}
-      {activeTab === 'inventario' && (
-        <div className="flex flex-col gap-6 w-full animate-in fade-in duration-200">
+      {isTabOpen('inventario') && (
+        <div className={activeTab === 'inventario' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
           {/* Formulario de Inventario */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <div className="flex border-b border-[#FFFDF6] pb-3 justify-between items-center flex-wrap gap-2 mb-4">
@@ -2233,8 +2307,8 @@ export default function AdminDashboard({
       )}
 
       {/* 7. GESTIÓN DE HORARIOS Y TURNOS (VISTA ADMIN) */}
-      {activeTab === 'horarios' && (
-        <div className="flex flex-col gap-6 w-full animate-in fade-in duration-200">
+      {isTabOpen('horarios') && (
+        <div className={activeTab === 'horarios' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
           {/* Carga de Horarios */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-[#FFFDF6] pb-2">
@@ -2440,7 +2514,9 @@ export default function AdminDashboard({
       )}
 
       {/* 8. REPORTE Y REGISTRO DE VENTAS & FIDELIZACIÓN (ADMINISTRADOR) */}
-      {activeTab === 'ventas' && (() => {
+      {isTabOpen('ventas') && (
+        <div className={activeTab === 'ventas' ? 'w-full space-y-6' : 'hidden'}>
+          {(() => {
         // --- CÁLCULOS PARA LA PESTAÑA DE FIDELIZACIÓN ---
         const allClientes = clientes || [];
         const todayStr = '2026-08-22';
@@ -3537,6 +3613,96 @@ export default function AdminDashboard({
           </div>
         );
       })()}
+      </div>
+      )}
+
+      {/* 9. DIAGNÓSTICO Y AUDITORÍA DE BASE DE DATOS SUPABASE */}
+      {isTabOpen('supabase') && (
+        <div className={activeTab === 'supabase' ? 'w-full space-y-6' : 'hidden'}>
+          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-widest block">
+                    Control de Salud e Integridad del Backend
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${dbAuditReport?.allOk ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                    {dbAuditReport?.allOk ? '100% Integra (5/5 Tablas OK)' : 'Revisión Recomendada'}
+                  </span>
+                </div>
+                <h3 className="text-base font-extrabold text-[#2C3E50]">
+                  Auditoría de Base de Datos & Verificación de Tablas Supabase
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Diagnóstico interactivo para validar las 5 tablas principales (<span className="font-mono font-bold">profiles, customers, sales, inventory, time_entries</span>) y su estructura de columnas.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleRunDatabaseHealthCheck}
+                  disabled={isRunningAudit}
+                  className="flex-1 sm:flex-none px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRunningAudit ? 'animate-spin' : ''}`} />
+                  {isRunningAudit ? 'Ejecutando Health Check...' : 'Ejecutar Prueba de Salud'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
+                    setCopiedSqlAdmin(true);
+                    setTimeout(() => setCopiedSqlAdmin(false), 2500);
+                  }}
+                  className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {copiedSqlAdmin ? '¡Script Copiado!' : 'Copiar Script SQL'}
+                </button>
+              </div>
+            </div>
+
+            {dbAuditReport && (
+              <div className="p-4 bg-[#EBF5FB]/60 border border-[#AED6F1] rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-[#2C3E50] uppercase tracking-wider">
+                    Resultado del Diagnóstico en Tiempo Real
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    Verificado: {new Date(dbAuditReport.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+                <p className="text-xs font-medium text-[#2C3E50]">
+                  {dbAuditReport.summaryText}
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {dbAuditReport && (Object.entries(dbAuditReport.tables) as [string, TableAuditReport][]).map(([tableName, report]) => {
+                const isOk = report.status === 'OK';
+                return (
+                  <div key={tableName} className="p-4 rounded-xl border space-y-3 bg-white shadow-2xs">
+                    <div className="flex justify-between items-center">
+                      <span className="font-mono font-bold text-xs text-[#2C3E50]">{tableName}</span>
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${isOk ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                        {report.status}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600">{report.message}</p>
+                    {report.missingColumns && report.missingColumns.length > 0 && (
+                      <div className="text-[10px] text-amber-700 font-mono">
+                        Faltan columnas: {report.missingColumns.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal para Agregar Feedback */}
       {showFeedbackModal && (

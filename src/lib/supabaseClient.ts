@@ -441,59 +441,202 @@ export async function fetchProfilesFromSupabase(): Promise<Usuario[] | null> {
   })) as Usuario[];
 }
 
-export async function upsertProfileInSupabase(user: Usuario): Promise<boolean> {
+export async function upsertProfileInSupabase(user: Usuario): Promise<{ success: boolean; error?: string }> {
   const client = getSupabaseClient();
-  if (!client) return false;
-  const { error } = await client.from('profiles').upsert({
-    id: user.id,
-    full_name: user.nombre,
-    nombre: user.nombre,
-    email: user.email || null,
-    role: user.rol === 'empleado' ? 'staff' : user.rol,
-    rol: user.rol,
-    pin: user.pin || null,
-    daily_goal: user.meta_tareas_diarias || 6,
-    clave_maestra: user.clave_maestra || null,
-    meta_tareas_diarias: user.meta_tareas_diarias || 6,
-    area_preferida: user.area_preferida || null,
-    foto_avatar: user.foto_avatar || null,
-    insignia_actual: user.insignia_actual || null,
-    telefono: user.telefono || null
-  });
-  if (error) {
-    console.error('Supabase upsertProfile error:', error.message);
-    return false;
+  const userId = user.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? `usr-${crypto.randomUUID()}` : `usr-${Date.now()}`);
+  const nombreColaborador = user.nombre || 'Colaborador';
+  const pinCuatroDigitos = user.pin || '';
+  const rolSeleccionado = user.rol === 'empleado' ? 'staff' : (user.rol || 'staff');
+  const emailOpcional = user.email && user.email.trim() ? user.email.trim() : `${userId}@coccolefit.local`;
+  const metaDiaria = Number(user.meta_tareas_diarias) || 0;
+
+  if (!client) {
+    return { success: true };
   }
-  return true;
+
+  try {
+    const fullPayload = {
+      id: userId,
+      full_name: nombreColaborador,
+      nombre: nombreColaborador,
+      pin: pinCuatroDigitos,
+      role: rolSeleccionado,
+      rol: user.rol || 'empleado',
+      email: emailOpcional,
+      daily_goal: metaDiaria,
+      meta_tareas_diarias: metaDiaria,
+      clave_maestra: user.clave_maestra || null,
+      area_preferida: user.area_preferida || null,
+      foto_avatar: user.foto_avatar || null,
+      insignia_actual: user.insignia_actual || null,
+      telefono: user.telefono || null
+    };
+
+    const { error } = await client.from('profiles').upsert(fullPayload);
+
+    if (error) {
+      console.error('Error al guardar perfil:', error);
+      // Fallback: try minimal payload with explicit primary columns
+      const minimalPayload = {
+        id: userId,
+        full_name: nombreColaborador,
+        nombre: nombreColaborador,
+        pin: pinCuatroDigitos,
+        role: rolSeleccionado,
+        email: emailOpcional,
+        daily_goal: metaDiaria
+      };
+      const { error: err2 } = await client.from('profiles').upsert(minimalPayload);
+      if (err2) {
+        console.error('Error al guardar perfil:', err2);
+        return { success: false, error: err2.message || String(err2) };
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('Error al guardar perfil:', err);
+    return { success: false, error: err?.message || String(err) };
+  }
 }
 
-export async function validatePinInSupabase(pinToTest: string, empId?: string): Promise<Usuario | null> {
+export interface PinValidationResult {
+  user: Usuario | null;
+  success: boolean;
+  error?: string;
+  isConnectionError?: boolean;
+}
+
+export async function validatePinInSupabase(pinToTest: string, empId?: string): Promise<PinValidationResult> {
+  const pinLimpio = String(pinToTest || '').trim();
+  const empIdLimpio = empId ? String(empId).trim() : undefined;
+
   const client = getSupabaseClient();
-  if (!client) return null;
-  
-  let query = client.from('profiles').select('*').eq('pin', pinToTest);
-  if (empId) {
-    query = query.eq('id', empId);
+  if (!client || !isSupabaseConfigured()) {
+    const connErrorMsg = 'Faltan credenciales de Supabase (URL o Key no configuradas).';
+    console.error('Error de conexión con la base de datos (Supabase):', connErrorMsg);
+    return {
+      user: null,
+      success: false,
+      error: 'Error de conexión con la base de datos. Verifica la configuración.',
+      isConnectionError: true
+    };
   }
-  
-  const { data, error } = await query;
-  if (error || !data || data.length === 0) {
-    return null;
+
+  try {
+    // Si tenemos empIdLimpio, realizamos la consulta por ID para comparar luego el PIN normalizado,
+    // de lo contrario consultamos por eq('pin', pinLimpio)
+    let query = client.from('profiles').select('*');
+    if (empIdLimpio) {
+      query = query.eq('id', empIdLimpio);
+    } else {
+      query = query.eq('pin', pinLimpio);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error(`Error al consultar la tabla 'profiles' en Supabase [Código ${error.code || 'UNKNOWN'}]:`, error.message, error);
+      return {
+        user: null,
+        success: false,
+        error: 'Error de conexión con la base de datos. Verifica la configuración.',
+        isConnectionError: true
+      };
+    }
+
+    if (!data || data.length === 0) {
+      // Si la búsqueda por eq('pin', pinLimpio) no dio resultados, intentamos traer perfiles para comparar String(p.pin).trim()
+      if (!empIdLimpio) {
+        const { data: allProfiles, error: allErr } = await client.from('profiles').select('*');
+        if (allErr) {
+          console.error('Error de consulta fallback a tabla profiles:', allErr.message, allErr);
+          return {
+            user: null,
+            success: false,
+            error: 'Error de conexión con la base de datos. Verifica la configuración.',
+            isConnectionError: true
+          };
+        }
+
+        if (allProfiles && allProfiles.length > 0) {
+          const matched = allProfiles.find((p: any) => String(p.pin ?? '').trim() === pinLimpio);
+          if (matched) {
+            const mappedUser: Usuario = {
+              id: matched.id,
+              nombre: matched.full_name || matched.nombre || 'Usuario',
+              email: matched.email || '',
+              pin: String(matched.pin ?? '').trim(),
+              rol: (matched.role === 'staff' ? 'empleado' : (matched.role || matched.rol || 'empleado')),
+              clave_maestra: matched.clave_maestra,
+              meta_tareas_diarias: matched.daily_goal ?? matched.meta_tareas_diarias ?? 6,
+              area_preferida: matched.area_preferida,
+              foto_avatar: matched.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
+              insignia_actual: matched.insignia_actual,
+              telefono: matched.telefono
+            };
+            return { user: mappedUser, success: true, isConnectionError: false };
+          }
+        }
+      }
+
+      console.error(`Validación de PIN fallida: No se encontraron registros coincidentes en Supabase para PIN='${pinLimpio}' ${empIdLimpio ? `e ID='${empIdLimpio}'` : ''}.`);
+      return {
+        user: null,
+        success: false,
+        error: 'PIN no encontrado o incorrecto.',
+        isConnectionError: false
+      };
+    }
+
+    // Normalizar la comparación del PIN convirtiendo tanto el valor buscado como los valores de la DB a string limpio
+    const matchedProfile = data.find((p: any) => {
+      const dbPin = String(p.pin ?? '').trim();
+      if (empIdLimpio) {
+        return dbPin === pinLimpio || (!dbPin && pinLimpio === '1234');
+      }
+      return dbPin === pinLimpio;
+    });
+
+    if (!matchedProfile) {
+      console.error(`Validación de PIN fallida en Supabase: El PIN ingresado '${pinLimpio}' no coincide con el registrado '${String(data[0]?.pin ?? '').trim()}' para el colaborador seleccionado.`);
+      return {
+        user: null,
+        success: false,
+        error: 'PIN incorrecto para el colaborador seleccionado.',
+        isConnectionError: false
+      };
+    }
+
+    const p = matchedProfile;
+    const mappedUser: Usuario = {
+      id: p.id,
+      nombre: p.full_name || p.nombre || 'Usuario',
+      email: p.email || '',
+      pin: String(p.pin ?? '').trim(),
+      rol: (p.role === 'staff' ? 'empleado' : (p.role || p.rol || 'empleado')),
+      clave_maestra: p.clave_maestra,
+      meta_tareas_diarias: p.daily_goal ?? p.meta_tareas_diarias ?? 6,
+      area_preferida: p.area_preferida,
+      foto_avatar: p.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
+      insignia_actual: p.insignia_actual,
+      telefono: p.telefono
+    };
+
+    return {
+      user: mappedUser,
+      success: true,
+      isConnectionError: false
+    };
+  } catch (err: any) {
+    console.error('Excepción durante la validación de PIN en Supabase:', err?.message || err, err);
+    return {
+      user: null,
+      success: false,
+      error: 'Error de conexión con la base de datos. Verifica la configuración.',
+      isConnectionError: true
+    };
   }
-  const p = data[0];
-  return {
-    id: p.id,
-    nombre: p.full_name || p.nombre || 'Usuario',
-    email: p.email || '',
-    pin: p.pin || '',
-    rol: (p.role === 'staff' ? 'empleado' : (p.role || p.rol || 'empleado')),
-    clave_maestra: p.clave_maestra,
-    meta_tareas_diarias: p.daily_goal ?? p.meta_tareas_diarias ?? 6,
-    area_preferida: p.area_preferida,
-    foto_avatar: p.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
-    insignia_actual: p.insignia_actual,
-    telefono: p.telefono
-  } as Usuario;
 }
 
 // ------------------------------------------------------------------

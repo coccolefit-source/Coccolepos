@@ -13,7 +13,7 @@ import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
-import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database } from 'lucide-react';
 import { getGlobalMetrics } from './utils/metrics';
 import {
   isSupabaseConfigured,
@@ -36,6 +36,8 @@ import {
 } from './lib/supabaseClient';
 
 
+export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
+
 export default function App() {
   // Cargar estados desde localStorage o iniciar con mockData
   const [state, setState] = useState(() => loadAppState());
@@ -52,8 +54,65 @@ export default function App() {
   // Filtro de tiempo compartido ('diario', 'semanal', 'mensual')
   const [filtroGeneral, setFiltroGeneral] = useState<'diario' | 'semanal' | 'mensual'>('diario');
 
-  // Pestaña activa del administrador
-  const [activeTab, setActiveTab] = useState<'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas'>('tareas');
+  // Pestaña activa y pestañas abiertas del administrador (Multi-Tab Admin)
+  const [openTabs, setOpenTabs] = useState<AdminTab[]>(['tareas']);
+  const [activeTab, setActiveTab] = useState<AdminTab>('tareas');
+
+  const handleSelectTab = (tab: AdminTab) => {
+    if (!openTabs.includes(tab)) {
+      setOpenTabs(prev => [...prev, tab]);
+    }
+    setActiveTab(tab);
+  };
+
+  const handleCloseTab = (tabToClose: AdminTab) => {
+    setOpenTabs(prev => {
+      const nextTabs = prev.filter(t => t !== tabToClose);
+      if (nextTabs.length === 0) {
+        setActiveTab('tareas');
+        return ['tareas'];
+      }
+      if (activeTab === tabToClose) {
+        const idx = prev.indexOf(tabToClose);
+        const fallback = nextTabs[idx] || nextTabs[idx - 1] || nextTabs[0];
+        setActiveTab(fallback);
+      }
+      return nextTabs;
+    });
+  };
+
+  const handleRequestPinResetNotification = (empId: string, empNombre: string, nota?: string) => {
+    const inc: Incidencia = {
+      id: `inc-pin-${Date.now()}`,
+      usuario_id: empId,
+      tipo: 'equipo',
+      titulo: `Solicitud de Restablecimiento de PIN: ${empNombre}`,
+      descripcion: nota ? `El colaborador ${empNombre} solicita apoyo para restablecer su PIN. Comentario: ${nota}` : `El colaborador ${empNombre} solicita apoyo al Administrador para consultar o restablecer su PIN de 4 dígitos.`,
+      fecha: new Date().toISOString().split('T')[0],
+      estado: 'Pendiente'
+    };
+    setState(prev => ({
+      ...prev,
+      incidencias: [inc, ...prev.incidencias]
+    }));
+    pushNotification(`Solicitud de restablecimiento de PIN enviada para ${empNombre}.`, 'info');
+  };
+
+  const handleUpdateUserPin = (userId: string, newPin: string, newPassword?: string) => {
+    setState(prev => ({
+      ...prev,
+      usuarios: prev.usuarios.map(u => {
+        if (u.id === userId) {
+          return {
+            ...u,
+            pin: newPin,
+            ...(newPassword ? { password: newPassword } : {})
+          };
+        }
+        return u;
+      })
+    }));
+  };
   
   // Cargar ponderaciones de ranking y reglas de upsell al montar
   useEffect(() => {
@@ -247,7 +306,15 @@ export default function App() {
 
   // Si no hay usuario activo, mostramos el login
   if (!activeUserRole) {
-    return <Login usuarios={state.usuarios} onLogin={setActiveUserRole} onCreateAdmin={handleCreateAdmin} />;
+    return (
+      <Login
+        usuarios={state.usuarios}
+        onLogin={setActiveUserRole}
+        onCreateAdmin={handleCreateAdmin}
+        onRequestPinResetNotification={handleRequestPinResetNotification}
+        onUpdateUserPin={handleUpdateUserPin}
+      />
+    );
   }
 
   // Obtener métricas globales del negocio
@@ -462,26 +529,56 @@ export default function App() {
 
   // --- ACTIONS: GESTION DE TRABAJADORES (EDITAR, ELIMINAR, CREAR) ---
 
-  const handleCreateUsuario = (newUsr: Omit<Usuario, 'id'>) => {
-    const newUser: Usuario = {
-      ...newUsr,
-      id: `usr-${Date.now()}`
-    };
-    setState(prev => ({
-      ...prev,
-      usuarios: [...prev.usuarios, newUser]
-    }));
-    upsertProfileInSupabase(newUser);
-    pushNotification(`Nuevo colaborador registrado: ${newUser.nombre}.`, 'success');
+  const handleCreateUsuario = async (newUsr: Omit<Usuario, 'id'>): Promise<boolean> => {
+    try {
+      const userId = typeof crypto !== 'undefined' && crypto.randomUUID ? `usr-${crypto.randomUUID()}` : `usr-${Date.now()}`;
+      const emailVal = newUsr.email && newUsr.email.trim() ? newUsr.email.trim() : `${userId}@coccolefit.local`;
+      const newUser: Usuario = {
+        ...newUsr,
+        id: userId,
+        email: emailVal
+      };
+
+      const result = await upsertProfileInSupabase(newUser);
+      if (result.success) {
+        setState(prev => ({
+          ...prev,
+          usuarios: [...prev.usuarios, newUser]
+        }));
+        pushNotification('Colaborador registrado correctamente', 'success');
+        return true;
+      } else {
+        console.error('Error al guardar perfil:', result.error);
+        pushNotification(`Error al guardar perfil: ${result.error}`, 'alert');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error al guardar perfil:', error);
+      pushNotification(`Error al guardar perfil: ${error}`, 'alert');
+      return false;
+    }
   };
 
-  const handleEditUsuario = (updatedUsr: Usuario) => {
-    setState(prev => ({
-      ...prev,
-      usuarios: prev.usuarios.map(u => u.id === updatedUsr.id ? updatedUsr : u)
-    }));
-    upsertProfileInSupabase(updatedUsr);
-    pushNotification(`Perfil de ${updatedUsr.nombre} editado con éxito.`, 'success');
+  const handleEditUsuario = async (updatedUsr: Usuario): Promise<boolean> => {
+    try {
+      const result = await upsertProfileInSupabase(updatedUsr);
+      if (result.success) {
+        setState(prev => ({
+          ...prev,
+          usuarios: prev.usuarios.map(u => u.id === updatedUsr.id ? updatedUsr : u)
+        }));
+        pushNotification(`Perfil de ${updatedUsr.nombre} actualizado correctamente.`, 'success');
+        return true;
+      } else {
+        console.error('Error al guardar perfil:', result.error);
+        pushNotification(`Error al guardar perfil: ${result.error}`, 'alert');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error al guardar perfil:', error);
+      pushNotification(`Error al guardar perfil: ${error}`, 'alert');
+      return false;
+    }
   };
 
   const handleDeleteUsuario = (id: string) => {
@@ -1065,7 +1162,7 @@ export default function App() {
                 <button
                   id="admin-tab-tareas"
                   onClick={() => {
-                    setActiveTab('tareas');
+                    handleSelectTab('tareas');
                     pushNotification('Ingresando al gestor de tareas diarias.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1081,7 +1178,7 @@ export default function App() {
                 <button
                   id="admin-tab-productos"
                   onClick={() => {
-                    setActiveTab('productos');
+                    handleSelectTab('productos');
                     pushNotification('Revisando el módulo de ventas sugeridas.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1097,7 +1194,7 @@ export default function App() {
                 <button
                   id="admin-tab-inventario"
                   onClick={() => {
-                    setActiveTab('inventario');
+                    handleSelectTab('inventario');
                     pushNotification('Accediendo al control de stock e inventario.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1113,7 +1210,7 @@ export default function App() {
                 <button
                   id="admin-tab-horarios"
                   onClick={() => {
-                    setActiveTab('horarios');
+                    handleSelectTab('horarios');
                     pushNotification('Abriendo la agenda de horarios y turnos semanales.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1129,7 +1226,7 @@ export default function App() {
                 <button
                   id="admin-tab-calidad"
                   onClick={() => {
-                    setActiveTab('calidad');
+                    handleSelectTab('calidad');
                     pushNotification('Consultando el log de control de fichajes.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1145,7 +1242,7 @@ export default function App() {
                 <button
                   id="admin-tab-anuncios"
                   onClick={() => {
-                    setActiveTab('anuncios');
+                    handleSelectTab('anuncios');
                     pushNotification('Entrando al pizarrón de anuncios y comunicados.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1161,7 +1258,7 @@ export default function App() {
                 <button
                   id="admin-tab-empleados"
                   onClick={() => {
-                    setActiveTab('empleados');
+                    handleSelectTab('empleados');
                     pushNotification('Visualizando nómina de trabajadores.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1177,7 +1274,7 @@ export default function App() {
                 <button
                   id="admin-tab-ventas"
                   onClick={() => {
-                    setActiveTab('ventas');
+                    handleSelectTab('ventas');
                     pushNotification('Abriendo módulo de ventas y reportes históricos.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
@@ -1188,6 +1285,22 @@ export default function App() {
                 >
                   <TrendingUp className="w-3.5 h-3.5" />
                   <span>Reportes</span>
+                </button>
+
+                <button
+                  id="admin-tab-supabase"
+                  onClick={() => {
+                    handleSelectTab('supabase');
+                    pushNotification('Abriendo módulo de auditoría y diagnóstico de Supabase DB.', 'info');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    activeTab === 'supabase'
+                      ? 'bg-[#4B9CD3] text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
+                  }`}
+                >
+                  <Database className="w-3.5 h-3.5" />
+                  <span>Auditoría DB</span>
                 </button>
               </nav>
             </div>
@@ -1527,8 +1640,10 @@ export default function App() {
             {/* FILA 4: MÓDULOS DE GESTIÓN INTERACTIVOS - FULL WIDTH */}
             <div className="w-full">
               <AdminDashboard
+                openTabs={openTabs}
                 activeTab={activeTab}
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSelectTab}
+                onCloseTab={handleCloseTab}
                 rankingWeights={rankingWeights}
                 onUpdateRankingWeights={handleUpdateRankingWeights}
                 upsellRules={upsellRules}
