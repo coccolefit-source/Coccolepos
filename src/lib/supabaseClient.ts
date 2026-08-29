@@ -529,55 +529,66 @@ export async function updatePinInSupabase(
   nuevoPin: string | number,
   userName?: string
 ): Promise<{ success: boolean; data?: any; error?: string }> {
-  const nuevoPinLimpio = String(nuevoPin || '').trim();
+  const pinLimpio = String(nuevoPin || '').trim();
+  const nombreUsuario = String(userName || '').trim();
+
+  // 2. Logs de Diagnóstico en consola antes de la petición
+  console.log('Diagnóstico UPDATE PIN Supabase:', {
+    usuarioId: userId,
+    nombreUsuario: nombreUsuario,
+    pinLimpio: pinLimpio
+  });
+
   const client = getSupabaseClient();
-  
   if (!client) {
+    console.error('Error al actualizar en Supabase: No hay cliente configurado');
     return { success: false, error: 'No se pudo conectar con la base de datos de Supabase.' };
   }
 
   try {
-    // 1. Explicit UPDATE call to Supabase profiles table using .eq('id', userId)
+    // 1. Asegurar la Condición de Búsqueda por id, full_name o nombre
+    const filterCondition = nombreUsuario
+      ? `id.eq.${userId},full_name.eq.${nombreUsuario},nombre.eq.${nombreUsuario}`
+      : `id.eq.${userId}`;
+
     let { data, error } = await client
       .from('profiles')
-      .update({ pin: nuevoPinLimpio })
-      .eq('id', userId)
+      .update({ pin: pinLimpio })
+      .or(filterCondition)
       .select();
 
-    // Fallback: If no rows matched by ID and userName exists, try matching by full_name or nombre
-    if (!error && (!data || data.length === 0) && userName) {
-      const { data: dataName, error: errName } = await client
+    // Fallback: Si no afectó ninguna fila (0 filas retornadas), forzar upsert para asegurar la fila
+    if (!error && (!data || data.length === 0)) {
+      console.warn('Ninguna fila coincidió con .or(), intentando upsert en profiles...');
+      const { data: upsertData, error: upsertErr } = await client
         .from('profiles')
-        .update({ pin: nuevoPinLimpio })
-        .eq('full_name', userName)
+        .upsert({
+          id: userId,
+          pin: pinLimpio,
+          full_name: nombreUsuario || 'Colaborador',
+          nombre: nombreUsuario || 'Colaborador',
+          role: 'staff'
+        })
         .select();
 
-      if (!errName && dataName && dataName.length > 0) {
-        data = dataName;
+      if (!upsertErr) {
+        data = upsertData;
         error = null;
       } else {
-        const { data: dataNom, error: errNom } = await client
-          .from('profiles')
-          .update({ pin: nuevoPinLimpio })
-          .eq('nombre', userName)
-          .select();
-
-        if (!errNom && dataNom && dataNom.length > 0) {
-          data = dataNom;
-          error = null;
-        }
+        error = upsertErr;
       }
     }
 
     if (error) {
-      console.error('Error al actualizar el PIN en Supabase:', error);
-      return { success: false, error: 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
+      console.error('Error al actualizar en Supabase:', error);
+      return { success: false, error: error.message || 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
     }
 
+    console.log('¡PIN actualizado con éxito en Supabase!', data);
     return { success: true, data };
   } catch (err: any) {
     console.error('Excepción al actualizar PIN en Supabase:', err);
-    return { success: false, error: 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
+    return { success: false, error: err?.message || 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
   }
 }
 
