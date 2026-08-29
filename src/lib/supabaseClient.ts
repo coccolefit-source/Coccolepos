@@ -524,6 +524,63 @@ export async function upsertProfileInSupabase(user: Usuario): Promise<{ success:
   }
 }
 
+export async function updatePinInSupabase(
+  userId: string,
+  nuevoPin: string | number,
+  userName?: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  const nuevoPinLimpio = String(nuevoPin || '').trim();
+  const client = getSupabaseClient();
+  
+  if (!client) {
+    return { success: false, error: 'No se pudo conectar con la base de datos de Supabase.' };
+  }
+
+  try {
+    // 1. Explicit UPDATE call to Supabase profiles table using .eq('id', userId)
+    let { data, error } = await client
+      .from('profiles')
+      .update({ pin: nuevoPinLimpio })
+      .eq('id', userId)
+      .select();
+
+    // Fallback: If no rows matched by ID and userName exists, try matching by full_name or nombre
+    if (!error && (!data || data.length === 0) && userName) {
+      const { data: dataName, error: errName } = await client
+        .from('profiles')
+        .update({ pin: nuevoPinLimpio })
+        .eq('full_name', userName)
+        .select();
+
+      if (!errName && dataName && dataName.length > 0) {
+        data = dataName;
+        error = null;
+      } else {
+        const { data: dataNom, error: errNom } = await client
+          .from('profiles')
+          .update({ pin: nuevoPinLimpio })
+          .eq('nombre', userName)
+          .select();
+
+        if (!errNom && dataNom && dataNom.length > 0) {
+          data = dataNom;
+          error = null;
+        }
+      }
+    }
+
+    if (error) {
+      console.error('Error al actualizar el PIN en Supabase:', error);
+      return { success: false, error: 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
+    }
+
+    return { success: true, data };
+  } catch (err: any) {
+    console.error('Excepción al actualizar PIN en Supabase:', err);
+    return { success: false, error: 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
+  }
+}
+
 export interface PinValidationResult {
   user: Usuario | null;
   success: boolean;

@@ -27,6 +27,7 @@ import {
   upsertCustomerInSupabase,
   upsertInventoryInSupabase,
   upsertProfileInSupabase,
+  updatePinInSupabase,
   insertTimeEntryInSupabase,
   subscribeToRealtimeUpdates,
   fetchRankingWeightsFromSupabase,
@@ -98,20 +99,59 @@ export default function App() {
     pushNotification(`Solicitud de restablecimiento de PIN enviada para ${empNombre}.`, 'info');
   };
 
-  const handleUpdateUserPin = (userId: string, newPin: string, newPassword?: string) => {
-    setState(prev => ({
-      ...prev,
-      usuarios: prev.usuarios.map(u => {
-        if (u.id === userId) {
-          return {
-            ...u,
-            pin: newPin,
-            ...(newPassword ? { password: newPassword } : {})
-          };
-        }
-        return u;
-      })
-    }));
+  const handleUpdateUserPin = async (userId: string, newPin: string, newPassword?: string): Promise<boolean> => {
+    const pinLimpio = String(newPin || '').trim();
+    const targetUser = state.usuarios.find(u => u.id === userId);
+    const userName = targetUser?.nombre;
+
+    if (isSupabaseConfigured()) {
+      const { success, error } = await updatePinInSupabase(userId, pinLimpio, userName);
+      if (!success) {
+        console.error('Error al actualizar PIN en Supabase:', error);
+        pushNotification("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.", "alert");
+        return false;
+      }
+
+      // Fuerza re-consulta para asegurar que el estado global lea la información recién guardada en Supabase
+      const supaProfiles = await fetchProfilesFromSupabase();
+      if (supaProfiles && supaProfiles.length > 0) {
+        setState(prev => ({
+          ...prev,
+          usuarios: supaProfiles
+        }));
+      } else {
+        setState(prev => ({
+          ...prev,
+          usuarios: prev.usuarios.map(u => {
+            if (u.id === userId) {
+              return {
+                ...u,
+                pin: pinLimpio,
+                ...(newPassword ? { password: newPassword } : {})
+              };
+            }
+            return u;
+          })
+        }));
+      }
+      return true;
+    } else {
+      // Sin Supabase configurado, actualizar estado local
+      setState(prev => ({
+        ...prev,
+        usuarios: prev.usuarios.map(u => {
+          if (u.id === userId) {
+            return {
+              ...u,
+              pin: pinLimpio,
+              ...(newPassword ? { password: newPassword } : {})
+            };
+          }
+          return u;
+        })
+      }));
+      return true;
+    }
   };
   
   // Cargar ponderaciones de ranking y reglas de upsell al montar

@@ -6,6 +6,7 @@ import {
   isSupabaseConfigured, 
   validatePinInSupabase, 
   upsertProfileInSupabase,
+  updatePinInSupabase,
   SUPABASE_SQL_SCHEMA,
   saveSupabaseCredentials,
   getSupabaseCredentials,
@@ -20,7 +21,7 @@ interface LoginProps {
   onLogin: (userId: string) => void;
   onCreateAdmin?: (adminData: { nombre: string; email: string; password: string; clave_maestra: string }) => string;
   onRequestPinResetNotification?: (empId: string, empNombre: string, nota?: string) => void;
-  onUpdateUserPin?: (userId: string, newPin: string, newPassword?: string) => void;
+  onUpdateUserPin?: (userId: string, newPin: string, newPassword?: string) => Promise<boolean | void> | boolean | void;
 }
 
 export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinResetNotification, onUpdateUserPin }: LoginProps) {
@@ -358,37 +359,41 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
       return;
     }
 
-    if (forgotNewPin.length !== 4 || !/^\d{4}$/.test(forgotNewPin)) {
+    const cleanPin = String(forgotNewPin || '').trim();
+    if (cleanPin.length !== 4 || !/^\d{4}$/.test(cleanPin)) {
       setForgotError('El nuevo PIN debe tener exactamente 4 dígitos numéricos.');
       return;
     }
 
-    if (forgotNewPin !== forgotConfirmPin) {
+    if (cleanPin !== String(forgotConfirmPin || '').trim()) {
       setForgotError('El nuevo PIN y la confirmación no coinciden.');
       return;
     }
 
-    const updatedUser: Usuario = {
-      ...targetUser,
-      pin: forgotNewPin
-    };
-
     try {
-      const result = await upsertProfileInSupabase(updatedUser);
-      if (result.success) {
-        if (onUpdateUserPin) {
-          onUpdateUserPin(targetUser.id, forgotNewPin);
+      if (isSupabaseConfigured()) {
+        const { success, error } = await updatePinInSupabase(targetUser.id, cleanPin, targetUser.nombre);
+        if (!success) {
+          setForgotError("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.");
+          return;
         }
-        setForgotSuccess(`PIN de ${targetUser.nombre} restablecido y guardado correctamente en la tabla profiles de Supabase. Ya puedes ingresar con tu nuevo PIN de 4 dígitos.`);
-        setForgotEmailOrMaster('');
-        setForgotNewPin('');
-        setForgotConfirmPin('');
-      } else {
-        setForgotError(`Error al actualizar en Supabase: ${result.error || 'Fallo de conexión'}`);
       }
+
+      if (onUpdateUserPin) {
+        const updateResult = await onUpdateUserPin(targetUser.id, cleanPin);
+        if (updateResult === false) {
+          setForgotError("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.");
+          return;
+        }
+      }
+
+      setForgotSuccess(`PIN de ${targetUser.nombre} restablecido y guardado correctamente en la tabla profiles de Supabase. Ya puedes ingresar con tu nuevo PIN de 4 dígitos.`);
+      setForgotEmailOrMaster('');
+      setForgotNewPin('');
+      setForgotConfirmPin('');
     } catch (err: any) {
-      console.error('Error al guardar perfil:', err);
-      setForgotError(`Error al actualizar PIN: ${err?.message || String(err)}`);
+      console.error('Error al actualizar PIN:', err);
+      setForgotError("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.");
     }
   };
 
@@ -431,7 +436,7 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
     setAdminForgotError('');
     setAdminForgotSuccess('');
 
-    const cleanPin = adminForgotNewPin.trim();
+    const cleanPin = String(adminForgotNewPin || '').trim();
     if (!cleanPin || cleanPin.length !== 4 || !/^\d{4}$/.test(cleanPin)) {
       setAdminForgotError('El nuevo PIN debe tener exactamente 4 dígitos numéricos.');
       return;
@@ -445,28 +450,30 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
       return;
     }
 
-    const updatedAdmin: Usuario = {
-      ...targetAdmin,
-      pin: cleanPin,
-      ...(adminForgotNewPassword.trim() ? { password: adminForgotNewPassword.trim() } : {})
-    };
-
     try {
-      const result = await upsertProfileInSupabase(updatedAdmin);
-      if (result.success) {
-        if (onUpdateUserPin) {
-          onUpdateUserPin(targetAdmin.id, cleanPin, adminForgotNewPassword.trim() || undefined);
+      if (isSupabaseConfigured()) {
+        const { success, error } = await updatePinInSupabase(targetAdmin.id, cleanPin, targetAdmin.nombre);
+        if (!success) {
+          setAdminForgotError("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.");
+          return;
         }
-        setShowAdminForgotModal(false);
-        setAdminEmail(targetAdmin.email || cleanEmail);
-        setSuccessMsg(`PIN y perfil de ${targetAdmin.nombre} actualizados correctamente en la tabla profiles de Supabase. Ya puedes iniciar sesión.`);
-        setError('');
-      } else {
-        setAdminForgotError(`Error al guardar en Supabase: ${result.error || 'Fallo de sincronización'}`);
       }
+
+      if (onUpdateUserPin) {
+        const updateResult = await onUpdateUserPin(targetAdmin.id, cleanPin, adminForgotNewPassword.trim() || undefined);
+        if (updateResult === false) {
+          setAdminForgotError("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.");
+          return;
+        }
+      }
+
+      setShowAdminForgotModal(false);
+      setAdminEmail(targetAdmin.email || cleanEmail);
+      setSuccessMsg(`PIN y perfil de ${targetAdmin.nombre} actualizados correctamente en la tabla profiles de Supabase. Ya puedes iniciar sesión.`);
+      setError('');
     } catch (err: any) {
       console.error('Error al actualizar PIN de admin:', err);
-      setAdminForgotError(`Error al actualizar el PIN: ${err?.message || String(err)}`);
+      setAdminForgotError("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.");
     }
   };
 
