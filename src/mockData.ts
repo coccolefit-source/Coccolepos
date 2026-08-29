@@ -52,7 +52,7 @@ export const INITIAL_USUARIOS: Usuario[] = [
     foto_avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=120',
     email: 'mariana.silva@coccolefit.com',
     password: 'admin123',
-    clave_maestra: '123456',
+    clave_maestra: 'COCCOLE2026',
     telefono: '+54 9 11 4321-8765'
   },
   {

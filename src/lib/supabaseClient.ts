@@ -3,9 +3,23 @@ import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeight
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
-  const metaEnv = (import.meta as any).env || {};
-  const envUrl = metaEnv.VITE_SUPABASE_URL || metaEnv.REACT_APP_SUPABASE_URL || '';
-  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY || metaEnv.REACT_APP_SUPABASE_ANON_KEY || '';
+  let envUrl = '';
+  let envKey = '';
+  
+  try {
+    // Attempt to read from Vite's import.meta.env
+    const metaEnv = (import.meta as any).env || {};
+    envUrl = metaEnv.VITE_SUPABASE_URL || '';
+    envKey = metaEnv.VITE_SUPABASE_ANON_KEY || '';
+  } catch (e) {
+    console.warn("Could not read import.meta.env", e);
+  }
+
+  // Fallback to process.env if available (for some build environments)
+  if (!envUrl && typeof process !== 'undefined' && process.env) {
+    envUrl = process.env.VITE_SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL || '';
+    envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY || '';
+  }
 
   const localUrl = typeof window !== 'undefined' ? localStorage.getItem('coccole_supabase_url') || '' : '';
   const localKey = typeof window !== 'undefined' ? localStorage.getItem('coccole_supabase_key') || '' : '';
@@ -455,8 +469,18 @@ export async function upsertProfileInSupabase(user: Usuario): Promise<{ success:
   }
 
   try {
+    let resolvedId = userId;
+    
+    // Validate if a profile with the same email already exists to avoid unique constraint errors
+    if (emailOpcional && emailOpcional.includes('@')) {
+      const { data: existingProfiles } = await client.from('profiles').select('id').eq('email', emailOpcional);
+      if (existingProfiles && existingProfiles.length > 0) {
+        resolvedId = existingProfiles[0].id;
+      }
+    }
+
     const fullPayload = {
-      id: userId,
+      id: resolvedId,
       full_name: nombreColaborador,
       nombre: nombreColaborador,
       pin: pinCuatroDigitos,
@@ -475,10 +499,10 @@ export async function upsertProfileInSupabase(user: Usuario): Promise<{ success:
     const { error } = await client.from('profiles').upsert(fullPayload);
 
     if (error) {
-      console.error('Error al guardar perfil:', error);
+      console.error('Error al guardar perfil (fullPayload):', error);
       // Fallback: try minimal payload with explicit primary columns
       const minimalPayload = {
-        id: userId,
+        id: resolvedId,
         full_name: nombreColaborador,
         nombre: nombreColaborador,
         pin: pinCuatroDigitos,
@@ -510,6 +534,9 @@ export interface PinValidationResult {
 export async function validatePinInSupabase(pinToTest: string, empId?: string): Promise<PinValidationResult> {
   const pinLimpio = String(pinToTest || '').trim();
   const empIdLimpio = empId ? String(empId).trim() : undefined;
+  
+  console.log("PIN ingresado:", pinToTest, "Tipo:", typeof pinToTest);
+  console.log("PIN limpio:", pinLimpio);
 
   const client = getSupabaseClient();
   if (!client || !isSupabaseConfigured()) {
@@ -518,7 +545,7 @@ export async function validatePinInSupabase(pinToTest: string, empId?: string): 
     return {
       user: null,
       success: false,
-      error: 'Error de conexión con la base de datos. Verifica la configuración.',
+      error: 'Error de configuración: No se encontraron las claves de conexión a Supabase',
       isConnectionError: true
     };
   }
@@ -534,13 +561,14 @@ export async function validatePinInSupabase(pinToTest: string, empId?: string): 
     }
 
     const { data, error } = await query;
+    console.log("Respuesta Supabase:", { data, error });
 
     if (error) {
       console.error(`Error al consultar la tabla 'profiles' en Supabase [Código ${error.code || 'UNKNOWN'}]:`, error.message, error);
       return {
         user: null,
         success: false,
-        error: 'Error de conexión con la base de datos. Verifica la configuración.',
+        error: 'Error de red/conexión al validar PIN',
         isConnectionError: true
       };
     }
@@ -554,7 +582,7 @@ export async function validatePinInSupabase(pinToTest: string, empId?: string): 
           return {
             user: null,
             success: false,
-            error: 'Error de conexión con la base de datos. Verifica la configuración.',
+            error: 'Error de red/conexión al validar PIN',
             isConnectionError: true
           };
         }
@@ -584,7 +612,7 @@ export async function validatePinInSupabase(pinToTest: string, empId?: string): 
       return {
         user: null,
         success: false,
-        error: 'PIN no encontrado o incorrecto.',
+        error: 'PIN no encontrado',
         isConnectionError: false
       };
     }

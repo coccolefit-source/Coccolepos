@@ -240,11 +240,17 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
         if (!isSupabaseConfigured()) {
           console.warn('Supabase no configurado. Intentando validación local en dispositivo...');
         } else {
-          setError('Error de conexión con la base de datos. Verifica la configuración.');
+          setError(result.error || 'Error de red/conexión al validar PIN');
           setEnteredPin('');
           setIsLoggingIn(false);
           return;
         }
+      }
+
+      // Si no hubo error de conexión pero no hubo coincidencia (success = false), logueamos
+      if (!result.success && !result.isConnectionError) {
+         console.warn("Supabase PIN validation failed:", result.error);
+         // Fallback to local validation just in case they haven't synced yet, but we prioritize the requested error messages if it completely fails.
       }
 
       // 3. Validar contra el listado local de colaboradores con normalización de string
@@ -271,13 +277,13 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
           return;
         } else {
           console.error(`Validación local fallida: No se encontró ningún colaborador registrado con el PIN '${pinLimpio}'.`);
-          setError('PIN no encontrado o incorrecto. Ingresa un código válido de 4 dígitos.');
+          setError(result.error || 'PIN no encontrado');
           setEnteredPin('');
         }
       }
     } catch (err: any) {
       console.error('Excepción al validar PIN:', err);
-      setError('Error de conexión con la base de datos. Verifica la configuración.');
+      setError('Error de red/conexión al validar PIN');
       setEnteredPin('');
     } finally {
       setIsLoggingIn(false);
@@ -318,7 +324,7 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
     setForgotNota('');
   };
 
-  // Verificación por Correo o Clave Maestra e Inserción/Upsert en Supabase
+  // Verificación por Clave Maestra e Inserción/Upsert en Supabase
   const handleDirectPinReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setForgotError('');
@@ -336,27 +342,29 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
     }
 
     if (!forgotEmailOrMaster.trim()) {
-      setForgotError('Ingresa tu correo corporativo o la Clave Maestra de Seguridad.');
+      setForgotError('Ingresa la Clave Maestra de la Tienda (ej. COCCOLE2026).');
       return;
     }
 
-    if (forgotNewPin.length !== 4) {
+    const cleanInput = forgotEmailOrMaster.trim().toLowerCase();
+    const isMasterValid = 
+      cleanInput === 'coccole2026' || 
+      cleanInput === '123456' || 
+      admins.some(a => a.clave_maestra && a.clave_maestra.trim().toLowerCase() === cleanInput) ||
+      Boolean(targetUser.email && targetUser.email.trim().toLowerCase() === cleanInput);
+
+    if (!isMasterValid) {
+      setForgotError('La Clave Maestra de la Tienda ingresada no es válida. (Ejemplo válido: COCCOLE2026)');
+      return;
+    }
+
+    if (forgotNewPin.length !== 4 || !/^\d{4}$/.test(forgotNewPin)) {
       setForgotError('El nuevo PIN debe tener exactamente 4 dígitos numéricos.');
       return;
     }
 
     if (forgotNewPin !== forgotConfirmPin) {
       setForgotError('El nuevo PIN y la confirmación no coinciden.');
-      return;
-    }
-
-    const cleanInput = forgotEmailOrMaster.trim().toLowerCase();
-    const isAdminMasterMatch = admins.some(a => a.clave_maestra && a.clave_maestra.toLowerCase() === cleanInput) || cleanInput === '123456';
-    const isUserEmailMatch = Boolean(targetUser.email && targetUser.email.toLowerCase() === cleanInput);
-    const isAdminEmailMatch = admins.some(a => a.email && a.email.toLowerCase() === cleanInput);
-
-    if (!isAdminMasterMatch && !isUserEmailMatch && !isAdminEmailMatch) {
-      setForgotError('Verificación fallida. El correo o la Clave Maestra ingresada no coinciden con los registros.');
       return;
     }
 
@@ -371,7 +379,7 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
         if (onUpdateUserPin) {
           onUpdateUserPin(targetUser.id, forgotNewPin);
         }
-        setForgotSuccess(`PIN de ${targetUser.nombre} restablecido y guardado correctamente en la tabla profiles de Supabase. Ya puedes ingresar con tu nuevo PIN.`);
+        setForgotSuccess(`PIN de ${targetUser.nombre} restablecido y guardado correctamente en la tabla profiles de Supabase. Ya puedes ingresar con tu nuevo PIN de 4 dígitos.`);
         setForgotEmailOrMaster('');
         setForgotNewPin('');
         setForgotConfirmPin('');
@@ -384,141 +392,81 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
     }
   };
 
-  // --- HANDLERS: RECUPERACIÓN DE CUENTA ADMINISTRADOR ---
+  // --- HANDLERS: RECUPERACIÓN / DESBLOQUEO DE CUENTA CON CLAVE MAESTRA ---
 
-  // Opción A: Enviar correo de recuperación / Supabase Auth
-  const handleAdminSendRecoveryEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminForgotError('');
-    setAdminForgotSuccess('');
-    setIsAdminSendingEmail(true);
-
-    const cleanEmail = adminForgotEmail.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setAdminForgotError('Ingresa un correo electrónico corporativo válido de Administrador.');
-      setIsAdminSendingEmail(false);
-      return;
-    }
-
-    try {
-      const client = getSupabaseClient();
-      if (client) {
-        await client.auth.resetPasswordForEmail(cleanEmail);
-      }
-
-      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      setAdminForgotGeneratedOtp(generatedOtp);
-      setAdminForgotStep('verify_otp');
-      setAdminForgotSuccess(`Código de verificación de 6 dígitos enviado al correo ${cleanEmail}. (Código OTP de demostración: ${generatedOtp}). Ingresa el código a continuación para continuar.`);
-    } catch (err: any) {
-      setAdminForgotError(err?.message || 'Error al solicitar el código de recuperación por correo.');
-    } finally {
-      setIsAdminSendingEmail(false);
-    }
-  };
-
-  // Opción B: Validar Clave Maestra de Seguridad / Recovery Key
+  // Validar Clave Maestra de la Tienda (ej. COCCOLE2026)
   const handleAdminVerifyMasterKey = (e: React.FormEvent) => {
     e.preventDefault();
     setAdminForgotError('');
     setAdminForgotSuccess('');
 
-    const cleanEmail = adminForgotEmail.trim().toLowerCase();
-    const cleanKey = adminForgotMasterKey.trim();
+    const cleanKey = adminForgotMasterKey.trim().toLowerCase();
 
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setAdminForgotError('Ingresa tu correo electrónico de Administrador.');
-      return;
-    }
     if (!cleanKey) {
-      setAdminForgotError('Ingresa la Clave Maestra de Seguridad.');
+      setAdminForgotError('Ingresa la Clave Maestra de la Tienda (ej. COCCOLE2026).');
       return;
     }
 
-    const targetAdmin = admins.find(a => a.email?.toLowerCase() === cleanEmail) || admins[0];
-    const isMasterValid = Boolean(targetAdmin && targetAdmin.clave_maestra && targetAdmin.clave_maestra === cleanKey) || cleanKey === '123456';
+    const cleanEmail = adminForgotEmail.trim().toLowerCase();
+    const targetAdmin = (cleanEmail ? admins.find(a => a.email?.toLowerCase() === cleanEmail) : null) || admins[0];
+
+    const isMasterValid = 
+      cleanKey === 'coccole2026' || 
+      cleanKey === '123456' || 
+      Boolean(targetAdmin && targetAdmin.clave_maestra && targetAdmin.clave_maestra.trim().toLowerCase() === cleanKey) ||
+      admins.some(a => a.clave_maestra && a.clave_maestra.trim().toLowerCase() === cleanKey);
 
     if (!isMasterValid) {
-      setAdminForgotError('La Clave Maestra de Seguridad ingresada no es válida. Verifica e intenta nuevamente.');
+      setAdminForgotError('La Clave Maestra de la Tienda ingresada no es válida. Clave de ejemplo: COCCOLE2026');
       return;
     }
 
     setAdminForgotStep('new_password');
-    setAdminForgotSuccess('Identidad de Administrador verificada con éxito mediante la Clave Maestra de Seguridad. Ingresa tu nueva contraseña.');
+    setAdminForgotSuccess('Clave Maestra de la Tienda verificada correctamente. Procede a ingresar el nuevo PIN de 4 dígitos.');
   };
 
-  // Validar Código OTP de 6 dígitos
-  const handleAdminVerifyOtp = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminForgotError('');
-    setAdminForgotSuccess('');
-
-    const cleanCode = adminForgotOtpCode.trim();
-    if (cleanCode.length !== 6) {
-      setAdminForgotError('Ingresa el código completo de 6 dígitos numéricos.');
-      return;
-    }
-
-    if (cleanCode !== adminForgotGeneratedOtp && cleanCode !== '123456') {
-      setAdminForgotError('El código de 6 dígitos ingresado es incorrecto. Verifica el código e intenta nuevamente.');
-      return;
-    }
-
-    setAdminForgotStep('new_password');
-    setAdminForgotSuccess('Código de verificación validado correctamente. Define tu nueva contraseña de Administrador.');
-  };
-
-  // Guardar Nueva Contraseña de Administrador y sincronizar con Supabase
+  // Guardar Nuevo PIN de 4 Dígitos y actualizar en Supabase profiles
   const handleAdminSaveNewPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdminForgotError('');
     setAdminForgotSuccess('');
 
-    if (adminForgotNewPassword.length < 6) {
-      setAdminForgotError('La nueva contraseña debe tener al menos 6 caracteres de seguridad.');
-      return;
-    }
-
-    if (adminForgotNewPassword !== adminForgotConfirmPassword) {
-      setAdminForgotError('La nueva contraseña y la confirmación no coinciden.');
+    const cleanPin = adminForgotNewPin.trim();
+    if (!cleanPin || cleanPin.length !== 4 || !/^\d{4}$/.test(cleanPin)) {
+      setAdminForgotError('El nuevo PIN debe tener exactamente 4 dígitos numéricos.');
       return;
     }
 
     const cleanEmail = adminForgotEmail.trim().toLowerCase();
-    const existingAdmin = usuarios.find(u => u.email?.toLowerCase() === cleanEmail && u.rol === 'admin') || admins[0];
-    const targetAdmin: Usuario = existingAdmin || {
-      id: 'usr-admin',
-      nombre: 'Administrador Master',
-      email: cleanEmail,
-      rol: 'admin',
-      area_preferida: 'Administración'
-    };
+    const targetAdmin = (forgotEmpId ? usuarios.find(u => u.id === forgotEmpId) : null) || usuarios.find(u => u.email?.toLowerCase() === cleanEmail && u.rol === 'admin') || admins[0];
 
-    const newPin = adminForgotNewPin.trim() || targetAdmin.pin || '1234';
+    if (!targetAdmin) {
+      setAdminForgotError('Usuario Administrador no encontrado.');
+      return;
+    }
 
     const updatedAdmin: Usuario = {
       ...targetAdmin,
-      password: adminForgotNewPassword.trim(),
-      pin: newPin
+      pin: cleanPin,
+      ...(adminForgotNewPassword.trim() ? { password: adminForgotNewPassword.trim() } : {})
     };
 
     try {
       const result = await upsertProfileInSupabase(updatedAdmin);
       if (result.success) {
         if (onUpdateUserPin) {
-          onUpdateUserPin(targetAdmin.id, newPin, adminForgotNewPassword.trim());
+          onUpdateUserPin(targetAdmin.id, cleanPin, adminForgotNewPassword.trim() || undefined);
         }
         setShowAdminForgotModal(false);
-        setAdminEmail(cleanEmail);
-        setView('admin');
-        setSuccessMsg('Contraseña de Administrador actualizada correctamente. Ya puedes iniciar sesión.');
+        setAdminEmail(targetAdmin.email || cleanEmail);
+        setSuccessMsg(`PIN y perfil de ${targetAdmin.nombre} actualizados correctamente en la tabla profiles de Supabase. Ya puedes iniciar sesión.`);
         setError('');
       } else {
         setAdminForgotError(`Error al guardar en Supabase: ${result.error || 'Fallo de sincronización'}`);
       }
     } catch (err: any) {
-      console.error('Error al actualizar contraseña de admin:', err);
-      setAdminForgotError(`Error al actualizar la contraseña: ${err?.message || String(err)}`);
+      console.error('Error al actualizar PIN de admin:', err);
+      setAdminForgotError(`Error al actualizar el PIN: ${err?.message || String(err)}`);
     }
   };
 
@@ -918,31 +866,18 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
 
             <div className="border-b border-[#E2E8F0] pb-3 pr-6">
               <span className="text-[10px] font-black uppercase tracking-widest text-[#4B9CD3] block">
-                Asistencia de Acceso
+                Desbloqueo y Restablecimiento
               </span>
               <h3 className="text-base font-extrabold text-[#2C3E50]">
-                Restablecimiento y Recuperación de PIN
+                Restablecer PIN de Personal o Administrador
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Selecciona una opción para solicitar asistencia o redefinir tu PIN de 4 dígitos.
+                Ingresa la Clave Maestra de la Tienda (ej. COCCOLE2026) para actualizar el PIN de 4 dígitos directamente en Supabase.
               </p>
             </div>
 
-            {/* Selector de Modalidad (Pestañas sin emojis) */}
+            {/* Selector de Modalidad */}
             <div className="flex bg-[#EBF5FB] p-1 rounded-xl border border-[#AED6F1]/50">
-              <button
-                type="button"
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
-                  forgotMode === 'notificar' ? 'bg-[#4B9CD3] text-white shadow-xs' : 'text-[#2C3E50] hover:bg-white/50'
-                }`}
-                onClick={() => {
-                  setForgotMode('notificar');
-                  setForgotError('');
-                  setForgotSuccess('');
-                }}
-              >
-                Notificación al Administrador
-              </button>
               <button
                 type="button"
                 className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
@@ -954,7 +889,20 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
                   setForgotSuccess('');
                 }}
               >
-                Correo / Clave Maestra
+                Clave Maestra de la Tienda
+              </button>
+              <button
+                type="button"
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
+                  forgotMode === 'notificar' ? 'bg-[#4B9CD3] text-white shadow-xs' : 'text-[#2C3E50] hover:bg-white/50'
+                }`}
+                onClick={() => {
+                  setForgotMode('notificar');
+                  setForgotError('');
+                  setForgotSuccess('');
+                }}
+              >
+                Notificación al Admin
               </button>
             </div>
 
@@ -970,7 +918,83 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
               </div>
             )}
 
-            {/* Opción 1: Notificación al Administrador */}
+            {/* Opción 1: Restablecimiento directo con Clave Maestra */}
+            {forgotMode === 'restablecer' && (
+              <form onSubmit={handleDirectPinReset} className="space-y-3">
+                <div>
+                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
+                    Seleccionar Usuario / Colaborador
+                  </label>
+                  <select
+                    value={forgotEmpId}
+                    onChange={(e) => setForgotEmpId(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-bold"
+                    required
+                  >
+                    <option value="">Selecciona el usuario...</option>
+                    {usuarios.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.nombre} ({u.rol === 'admin' ? 'Administrador' : u.area_preferida || 'Personal'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
+                    Clave Maestra de la Tienda
+                  </label>
+                  <input
+                    type="password"
+                    value={forgotEmailOrMaster}
+                    onChange={(e) => setForgotEmailOrMaster(e.target.value)}
+                    placeholder="ej. COCCOLE2026"
+                    className="w-full text-xs px-3.5 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
+                      Nuevo PIN (4 dígitos)
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={4}
+                      value={forgotNewPin}
+                      onChange={(e) => setForgotNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="Ej. 1234"
+                      className="w-full text-center text-xs px-3 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white font-mono font-black"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
+                      Confirmar Nuevo PIN
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={4}
+                      value={forgotConfirmPin}
+                      onChange={(e) => setForgotConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="Ej. 1234"
+                      className="w-full text-center text-xs px-3 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white font-mono font-black"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold py-2.5 text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
+                >
+                  Restablecer y Guardar PIN en Supabase
+                </button>
+              </form>
+            )}
+
+            {/* Opción 2: Notificación al Administrador */}
             {forgotMode === 'notificar' && (
               <form onSubmit={handleSendForgotNotification} className="space-y-3">
                 <div>
@@ -1014,82 +1038,6 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
               </form>
             )}
 
-            {/* Opción 2: Verificación por Correo / Clave Maestra */}
-            {forgotMode === 'restablecer' && (
-              <form onSubmit={handleDirectPinReset} className="space-y-3">
-                <div>
-                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                    Colaborador a Restablecer
-                  </label>
-                  <select
-                    value={forgotEmpId}
-                    onChange={(e) => setForgotEmpId(e.target.value)}
-                    className="w-full text-xs px-3.5 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-bold"
-                    required
-                  >
-                    <option value="">Selecciona el usuario...</option>
-                    {usuarios.map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.nombre} ({u.email || 'Sin correo registrado'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                    Correo Registrado o Clave Maestra
-                  </label>
-                  <input
-                    type="password"
-                    value={forgotEmailOrMaster}
-                    onChange={(e) => setForgotEmailOrMaster(e.target.value)}
-                    placeholder="Correo del usuario o Clave Maestra del negocio"
-                    className="w-full text-xs px-3.5 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50]"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                      Nuevo PIN (4 dígitos)
-                    </label>
-                    <input
-                      type="password"
-                      maxLength={4}
-                      value={forgotNewPin}
-                      onChange={(e) => setForgotNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      placeholder="Ej. 5678"
-                      className="w-full text-center text-xs px-3 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white font-mono font-black"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                      Confirmar Nuevo PIN
-                    </label>
-                    <input
-                      type="password"
-                      maxLength={4}
-                      value={forgotConfirmPin}
-                      onChange={(e) => setForgotConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      placeholder="Ej. 5678"
-                      className="w-full text-center text-xs px-3 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white font-mono font-black"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold py-2.5 text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
-                >
-                  Actualizar y Guardar PIN en Supabase
-                </button>
-              </form>
-            )}
-
             <div className="pt-2 border-t border-[#E2E8F0] text-right">
               <button
                 type="button"
@@ -1103,7 +1051,7 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
         </div>
       )}
 
-      {/* MODAL DEDICADO DE RECUPERACIÓN DE CUENTA ADMINISTRADOR */}
+      {/* MODAL DEDICADO DE RECUPERACIÓN / DESBLOQUEO ADMINISTRADOR */}
       {showAdminForgotModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#FFFDF6] border-2 border-[#4B9CD3] rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 text-[#2C3E50] relative">
@@ -1112,18 +1060,18 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
               onClick={() => setShowAdminForgotModal(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-black text-xs w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer"
             >
-              X
+              ✕
             </button>
 
             <div className="border-b border-[#E2E8F0] pb-3 pr-6">
               <span className="text-[10px] font-black uppercase tracking-widest text-[#4B9CD3] block">
-                Seguridad y Acceso
+                Seguridad y Acceso Administrador
               </span>
               <h3 className="text-base font-extrabold text-[#2C3E50]">
-                Recuperación de Cuenta Administrador
+                Desbloqueo con Clave Maestra de la Tienda
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Restablece tu contraseña maestra mediante verificación por correo o Clave Maestra de Seguridad.
+                Ingresa la Clave Maestra de la Tienda (ej. COCCOLE2026) para restablecer la contraseña y el PIN de 4 dígitos en Supabase.
               </p>
             </div>
 
@@ -1140,188 +1088,77 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
               </div>
             )}
 
-            {/* PASO 1: SELECCIÓN DE OPCIÓN A / B */}
-            {adminForgotStep === 'choose_method' && (
-              <div className="space-y-4">
-                <div className="flex bg-[#EBF5FB] p-1 rounded-xl border border-[#AED6F1]/50">
-                  <button
-                    type="button"
-                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
-                      adminForgotMethod === 'email' ? 'bg-[#4B9CD3] text-white shadow-xs' : 'text-[#2C3E50] hover:bg-white/50'
-                    }`}
-                    onClick={() => {
-                      setAdminForgotMethod('email');
-                      setAdminForgotError('');
-                      setAdminForgotSuccess('');
-                    }}
-                  >
-                    Opción A: Correo / Auth
-                  </button>
-                  <button
-                    type="button"
-                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
-                      adminForgotMethod === 'master_key' ? 'bg-[#4B9CD3] text-white shadow-xs' : 'text-[#2C3E50] hover:bg-white/50'
-                    }`}
-                    onClick={() => {
-                      setAdminForgotMethod('master_key');
-                      setAdminForgotError('');
-                      setAdminForgotSuccess('');
-                    }}
-                  >
-                    Opción B: Clave Maestra
-                  </button>
-                </div>
-
-                {/* OPCIÓN A: CORREO ELECTRONICO REGISTRADO / SUPABASE AUTH */}
-                {adminForgotMethod === 'email' && (
-                  <form onSubmit={handleAdminSendRecoveryEmail} className="space-y-3">
-                    <div>
-                      <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                        Correo Electrónico Registrado de Administrador
-                      </label>
-                      <input
-                        type="email"
-                        value={adminForgotEmail}
-                        onChange={(e) => setAdminForgotEmail(e.target.value)}
-                        placeholder="admin@coccolefit.com"
-                        className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
-                        required
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={isAdminSendingEmail}
-                      className="w-full bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold py-3 text-xs rounded-xl transition-colors cursor-pointer shadow-xs disabled:opacity-50"
-                    >
-                      {isAdminSendingEmail ? 'Enviando Código...' : 'Enviar Código de Recuperación (6 Dígitos)'}
-                    </button>
-                  </form>
-                )}
-
-                {/* OPCIÓN B: CLAVE MAESTRA DE SEGURIDAD / RECOVERY KEY */}
-                {adminForgotMethod === 'master_key' && (
-                  <form onSubmit={handleAdminVerifyMasterKey} className="space-y-3">
-                    <div>
-                      <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                        Correo Electrónico de Administrador
-                      </label>
-                      <input
-                        type="email"
-                        value={adminForgotEmail}
-                        onChange={(e) => setAdminForgotEmail(e.target.value)}
-                        placeholder="admin@coccolefit.com"
-                        className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                        Clave Maestra de Seguridad / Recovery Key
-                      </label>
-                      <input
-                        type="password"
-                        value={adminForgotMasterKey}
-                        onChange={(e) => setAdminForgotMasterKey(e.target.value)}
-                        placeholder="Ej. 123456"
-                        className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
-                        required
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold py-3 text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
-                    >
-                      Validar Clave Maestra de Seguridad
-                    </button>
-                  </form>
-                )}
-              </div>
-            )}
-
-            {/* PASO 2: VALIDACIÓN DE CÓDIGO OTP (6 DÍGITOS) */}
-            {adminForgotStep === 'verify_otp' && (
-              <form onSubmit={handleAdminVerifyOtp} className="space-y-3">
+            {/* PASO 1: VALIDAR CLAVE MAESTRA */}
+            {adminForgotStep !== 'new_password' && (
+              <form onSubmit={handleAdminVerifyMasterKey} className="space-y-3">
                 <div>
                   <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                    Código de Verificación (6 dígitos)
+                    Seleccionar Administrador / Usuario
+                  </label>
+                  <select
+                    value={adminForgotEmail}
+                    onChange={(e) => setAdminForgotEmail(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
+                  >
+                    {admins.map(a => (
+                      <option key={a.id} value={a.email || a.id}>
+                        {a.nombre} ({a.email || 'Admin'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
+                    Clave Maestra de la Tienda
                   </label>
                   <input
-                    type="text"
-                    maxLength={6}
-                    value={adminForgotOtpCode}
-                    onChange={(e) => setAdminForgotOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="Ej. 849201"
-                    className="w-full text-center text-sm tracking-widest px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white font-mono font-black text-[#2C3E50]"
+                    type="password"
+                    value={adminForgotMasterKey}
+                    onChange={(e) => setAdminForgotMasterKey(e.target.value)}
+                    placeholder="ej. COCCOLE2026"
+                    className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
                     required
                   />
                 </div>
 
                 <button
                   type="submit"
-                  disabled={adminForgotOtpCode.length !== 6}
-                  className="w-full bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold py-3 text-xs rounded-xl transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  className="w-full bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold py-3 text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
                 >
-                  Validar Código de 6 Dígitos
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setAdminForgotStep('choose_method')}
-                  className="w-full text-center text-xs font-bold text-slate-500 hover:text-slate-800 py-1 transition-colors cursor-pointer"
-                >
-                  Cambiar Método de Recuperación
+                  Validar Clave Maestra de la Tienda
                 </button>
               </form>
             )}
 
-            {/* PASO 3: NUEVA CONTRASEÑA Y PIN MAESTRO */}
+            {/* PASO 2: NUEVO PIN DE 4 DÍGITOS Y CONTRASEÑA */}
             {adminForgotStep === 'new_password' && (
               <form onSubmit={handleAdminSaveNewPassword} className="space-y-3">
                 <div>
                   <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                    Nueva Contraseña de Administrador
-                  </label>
-                  <input
-                    type="password"
-                    minLength={6}
-                    value={adminForgotNewPassword}
-                    onChange={(e) => setAdminForgotNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
-                    className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                    Confirmar Nueva Contraseña
-                  </label>
-                  <input
-                    type="password"
-                    minLength={6}
-                    value={adminForgotConfirmPassword}
-                    onChange={(e) => setAdminForgotConfirmPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
-                    Nuevo PIN Maestro (4 dígitos numéricos)
+                    Nuevo PIN de 4 Dígitos Numéricos
                   </label>
                   <input
                     type="password"
                     maxLength={4}
                     value={adminForgotNewPin}
                     onChange={(e) => setAdminForgotNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    placeholder="1234"
+                    placeholder="Ej. 1234"
                     className="w-full text-center text-xs px-3.5 py-2 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white font-mono font-black"
                     required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider mb-1">
+                    Nueva Contraseña de Administrador (Opcional)
+                  </label>
+                  <input
+                    type="password"
+                    value={adminForgotNewPassword}
+                    onChange={(e) => setAdminForgotNewPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres (Dejar en blanco para mantener)"
+                    className="w-full text-xs px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3] bg-white text-[#2C3E50] font-medium"
                   />
                 </div>
 
@@ -1329,7 +1166,7 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
                   type="submit"
                   className="w-full bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold py-3 text-xs rounded-xl transition-colors cursor-pointer shadow-xs mt-2"
                 >
-                  Actualizar Contraseña y Guardar en Supabase
+                  Guardar Nuevo PIN y Actualizar en Supabase
                 </button>
               </form>
             )}
