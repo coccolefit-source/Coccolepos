@@ -56,7 +56,9 @@ export default function App() {
   const [upsellRules, setUpsellRules] = useState<UpsellRule[]>(DEFAULT_UPSELL_RULES);
 
   // Rol activo (Admin o ID de un Empleado específico)
-  const [activeUserRole, setActiveUserRole] = useState<string | null>(null);
+  const [activeUserRole, setActiveUserRole] = useState<string | null>(() => {
+    return localStorage.getItem('coccolefit_active_role') || null;
+  });
   
   // Filtro de tiempo compartido ('diario', 'semanal', 'mensual')
   const [filtroGeneral, setFiltroGeneral] = useState<'diario' | 'semanal' | 'mensual'>('diario');
@@ -186,73 +188,59 @@ export default function App() {
   // Estado para Sincronización Manual de Datos
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Función de Sincronización Manual por Perfil
+  // Función de Sincronización Manual por Perfil (Fetch In-Memory Silencioso)
   const handleSyncData = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
 
     try {
-      if (currentUser?.rol === 'admin') {
-        // En el Perfil de Administrador (Admin):
-        // Re-ejecuta consulta global a Supabase con Promise.all:
-        // 1. profiles (colaboradores y PINs)
-        // 2. sales (ventas e ingresos del día)
-        // 3. inventory (estado del stock de inventario)
-        // 4. pin_reset_requests (solicitudes de cambio de clave/PIN pendientes)
-        // 5. ranking_settings (ponderación y posiciones del ranking)
-        const [supaProfiles, supaSales, supaInventory, supaPinResets, supaWeights] = await Promise.all([
-          fetchProfilesFromSupabase(),
-          fetchSalesFromSupabase(),
-          fetchInventoryFromSupabase(),
-          fetchPinResetRequestsFromSupabase(),
-          fetchRankingWeightsFromSupabase()
-        ]);
+      // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell] = await Promise.all([
+        fetchDailyTasksFromSupabase('2026-08-20'),
+        fetchSalesFromSupabase(),
+        fetchInventoryFromSupabase(),
+        fetchProfilesFromSupabase(),
+        fetchRankingWeightsFromSupabase(),
+        fetchUpsellRulesFromSupabase()
+      ]);
 
-        setState(prev => ({
-          ...prev,
-          usuarios: supaProfiles && supaProfiles.length > 0 ? supaProfiles : prev.usuarios,
-          ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
-          inventario: supaInventory && supaInventory.length > 0 ? supaInventory : prev.inventario,
-        }));
-
-        if (supaWeights) {
-          setRankingWeights(supaWeights);
+      setState(prev => {
+        // Preservación Estricta de la Sesión Activa mediante combinación selectiva de perfiles
+        let updatedUsuarios = [...prev.usuarios];
+        if (supaProfiles && supaProfiles.length > 0) {
+          supaProfiles.forEach(supaU => {
+            const idx = updatedUsuarios.findIndex(u => u.id === supaU.id);
+            if (idx !== -1) {
+              updatedUsuarios[idx] = { ...updatedUsuarios[idx], ...supaU };
+            } else {
+              updatedUsuarios.push(supaU);
+            }
+          });
         }
-      } else {
-        // En el Perfil de Colaborador (Staff):
-        // Re-ejecuta consulta individual a Supabase con Promise.all:
-        // 1. daily_tasks (checklist y tareas del día)
-        // 2. sales (ventas asignadas al turno)
-        // 3. ranking_settings (puntuación y posición actual)
-        // 4. upsell_rules (reglas activas de ventas sugeridas)
-        const [supaTasks, supaSales, supaWeights, supaUpsell] = await Promise.all([
-          fetchDailyTasksFromSupabase('2026-08-20'),
-          fetchSalesFromSupabase(),
-          fetchRankingWeightsFromSupabase(),
-          fetchUpsellRulesFromSupabase()
-        ]);
 
-        setState(prev => ({
+        return {
           ...prev,
+          usuarios: updatedUsuarios,
           tareas: supaTasks && supaTasks.length > 0 ? supaTasks : prev.tareas,
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
-        }));
+          inventario: supaInventory && supaInventory.length > 0 ? supaInventory : prev.inventario,
+        };
+      });
 
-        if (supaWeights) {
-          setRankingWeights(supaWeights);
-        }
-        if (supaUpsell && supaUpsell.length > 0) {
-          setUpsellRules(supaUpsell);
-        }
+      if (supaWeights) {
+        setRankingWeights(supaWeights);
+      }
+      if (supaUpsell && supaUpsell.length > 0) {
+        setUpsellRules(supaUpsell);
       }
 
-      // Notificación Toast emergente de éxito (sin emojis ni íconos decorativos)
+      // Notificación Toast discreta de éxito
       triggerPushToast({
         kind: 'standard',
         type: 'success',
-        text: 'Datos sincronizados correctamente con la nube.'
+        text: 'Datos actualizados'
       });
-      pushNotification('Datos sincronizados correctamente con la nube.', 'success');
+      pushNotification('Datos actualizados', 'success');
     } catch (err) {
       console.error('Error al sincronizar datos con Supabase:', err);
       triggerPushToast({
@@ -396,6 +384,15 @@ export default function App() {
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  // Sincronizar activeUserRole con localStorage
+  useEffect(() => {
+    if (activeUserRole) {
+      localStorage.setItem('coccolefit_active_role', activeUserRole);
+    } else {
+      localStorage.removeItem('coccolefit_active_role');
+    }
+  }, [activeUserRole]);
 
   // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario para evitar datos obsoletos en localStorage
   useEffect(() => {
