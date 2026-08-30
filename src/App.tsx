@@ -36,7 +36,10 @@ import {
   fetchUpsellRulesFromSupabase,
   saveUpsellRulesToSupabase,
   fetchDailyTasksFromSupabase,
-  fetchPinResetRequestsFromSupabase
+  fetchPinResetRequestsFromSupabase,
+  insertDailyTaskInSupabase,
+  updateDailyTaskStatusInSupabase,
+  deleteDailyTaskFromSupabase
 } from './lib/supabaseClient';
 
 
@@ -223,7 +226,7 @@ export default function App() {
         // 3. ranking_settings (puntuación y posición actual)
         // 4. upsell_rules (reglas activas de ventas sugeridas)
         const [supaTasks, supaSales, supaWeights, supaUpsell] = await Promise.all([
-          fetchDailyTasksFromSupabase(),
+          fetchDailyTasksFromSupabase('2026-08-20'),
           fetchSalesFromSupabase(),
           fetchRankingWeightsFromSupabase(),
           fetchUpsellRulesFromSupabase()
@@ -394,6 +397,27 @@ export default function App() {
     saveAppState(state);
   }, [state]);
 
+  // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario para evitar datos obsoletos en localStorage
+  useEffect(() => {
+    if (!activeUserRole || !isSupabaseConfigured()) return;
+    
+    async function loadFreshTasks() {
+      try {
+        const supaTasks = await fetchDailyTasksFromSupabase('2026-08-20');
+        if (supaTasks) {
+          setState(prev => ({
+            ...prev,
+            tareas: supaTasks
+          }));
+        }
+      } catch (err) {
+        console.error("Error al cargar tareas diarias desde Supabase en transición de rol:", err);
+      }
+    }
+    
+    loadFreshTasks();
+  }, [activeUserRole]);
+
   // Agregar una notificación al feed
   const pushNotification = (text: string, type: 'success' | 'alert' | 'info' = 'info') => {
     const newNotif = {
@@ -447,48 +471,135 @@ export default function App() {
 
   // --- ACTIONS: GESTOR DE TAREAS ---
   
-  const handleAddTarea = (newTarea: Omit<Tarea, 'id'>) => {
+  const handleAddTarea = async (newTarea: Omit<Tarea, 'id'>) => {
+    const assignedUser = state.usuarios.find(u => u.id === newTarea.asignado_a);
+    const assignedName = assignedUser?.nombre || 'empleado';
+    const tareaId = `tsk-${Date.now()}`;
     const tarea: Tarea = {
       ...newTarea,
-      id: `tsk-${Date.now()}`
+      id: tareaId,
+      fecha: newTarea.fecha || new Date().toISOString().split('T')[0]
     };
+
+    // Optimistic Update
     setState(prev => ({
       ...prev,
       tareas: [tarea, ...prev.tareas]
     }));
     
-    const assignedUser = state.usuarios.find(u => u.id === newTarea.asignado_a);
-    pushNotification(`Nueva tarea asignada a ${assignedUser?.nombre || 'empleado'}.`, 'info');
+    pushNotification(`Nueva tarea asignada a ${assignedName}.`, 'info');
+
+    try {
+      const ok = await insertDailyTaskInSupabase(tarea, assignedName);
+      if (!ok) {
+        // Rollback
+        setState(prev => ({
+          ...prev,
+          tareas: prev.tareas.filter(t => t.id !== tareaId)
+        }));
+        triggerPushToast({
+          kind: 'standard',
+          type: 'alert',
+          text: 'Fallo al guardar la tarea en la nube.'
+        });
+        pushNotification('Fallo al guardar la tarea en la nube.', 'alert');
+      }
+    } catch (err) {
+      console.error('Error in handleAddTarea:', err);
+      // Rollback
+      setState(prev => ({
+        ...prev,
+        tareas: prev.tareas.filter(t => t.id !== tareaId)
+      }));
+    }
   };
 
-  const handleEditTarea = (updatedTarea: Tarea) => {
+  const handleEditTarea = async (updatedTarea: Tarea) => {
+    const originalTarea = state.tareas.find(t => t.id === updatedTarea.id);
+    if (!originalTarea) return;
+
+    // Optimistic Update
     setState(prev => ({
       ...prev,
       tareas: prev.tareas.map(t => t.id === updatedTarea.id ? updatedTarea : t)
     }));
     pushNotification(`Tarea "${updatedTarea.titulo}" actualizada correctamente.`, 'info');
+
+    try {
+      const assignedUser = state.usuarios.find(u => u.id === updatedTarea.asignado_a);
+      const ok = await insertDailyTaskInSupabase(updatedTarea, assignedUser?.nombre);
+      if (!ok) {
+        // Rollback
+        setState(prev => ({
+          ...prev,
+          tareas: prev.tareas.map(t => t.id === updatedTarea.id ? originalTarea : t)
+        }));
+        triggerPushToast({
+          kind: 'standard',
+          type: 'alert',
+          text: 'Fallo al guardar la edición de tarea en la nube.'
+        });
+        pushNotification('Fallo al actualizar la tarea en la nube.', 'alert');
+      }
+    } catch (err) {
+      console.error('Error in handleEditTarea:', err);
+      // Rollback
+      setState(prev => ({
+        ...prev,
+        tareas: prev.tareas.map(t => t.id === updatedTarea.id ? originalTarea : t)
+      }));
+    }
   };
 
-  const handleDeleteTarea = (id: string) => {
+  const handleDeleteTarea = async (id: string) => {
     const deleted = state.tareas.find(t => t.id === id);
+    if (!deleted) return;
+
+    // Optimistic Update
     setState(prev => ({
       ...prev,
       tareas: prev.tareas.filter(t => t.id !== id)
     }));
-    if (deleted) {
-      pushNotification(`Tarea eliminada: "${deleted.titulo}"`, 'alert');
+    pushNotification(`Tarea eliminada: "${deleted.titulo}"`, 'alert');
+
+    try {
+      const ok = await deleteDailyTaskFromSupabase(id);
+      if (!ok) {
+        // Rollback
+        setState(prev => ({
+          ...prev,
+          tareas: [deleted, ...prev.tareas]
+        }));
+        triggerPushToast({
+          kind: 'standard',
+          type: 'alert',
+          text: 'Fallo al eliminar la tarea de la nube.'
+        });
+        pushNotification('Fallo al eliminar la tarea de la nube.', 'alert');
+      }
+    } catch (err) {
+      console.error('Error in handleDeleteTarea:', err);
+      // Rollback
+      setState(prev => ({
+        ...prev,
+        tareas: [deleted, ...prev.tareas]
+      }));
     }
   };
 
-  const handleUpdateTareaEstado = (
+  const handleUpdateTareaEstado = async (
     id: string,
     estado: 'Pendiente' | 'En proceso' | 'Completada',
     foto_url?: string,
     nota_evidencia?: string
   ) => {
+    const originalTask = state.tareas.find(t => t.id === id);
+    if (!originalTask) return;
+
     const now = new Date();
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
+    // Paso 1: Cambiar estado localmente inmediatamente (Optimistic update)
     setState(prev => ({
       ...prev,
       tareas: prev.tareas.map(t => {
@@ -501,7 +612,6 @@ export default function App() {
             if (foto_url) updated.foto_url = foto_url;
             if (nota_evidencia) updated.nota_evidencia = nota_evidencia;
           } else {
-            // Pendiente reset
             updated.hora_inicio = undefined;
             updated.hora_fin = undefined;
           }
@@ -511,9 +621,41 @@ export default function App() {
       })
     }));
 
-    const task = state.tareas.find(t => t.id === id);
     const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
-    pushNotification(`${currentUser.nombre} ${label} la tarea: "${task?.titulo}"`, estado === 'Completada' ? 'success' : 'info');
+    pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');
+
+    // Paso 2: Ejecutar en Supabase de forma inmediata asíncrona
+    try {
+      const isCompleted = estado === 'Completada';
+      const success = await updateDailyTaskStatusInSupabase(
+        id,
+        estado,
+        isCompleted,
+        foto_url,
+        nota_evidencia,
+        estado === 'En proceso' ? (originalTask.hora_inicio || timeStr) : undefined,
+        estado === 'Completada' ? (originalTask.hora_fin || timeStr) : undefined
+      );
+
+      if (!success) {
+        throw new Error('Supabase update returned false');
+      }
+    } catch (err) {
+      console.error('Error al actualizar estado de la tarea en Supabase:', err);
+
+      // Paso 3: Retrotraer únicamente la tarea afectada al estado anterior en caso de fallo
+      setState(prev => ({
+        ...prev,
+        tareas: prev.tareas.map(t => t.id === id ? originalTask : t)
+      }));
+
+      triggerPushToast({
+        kind: 'standard',
+        type: 'alert',
+        text: 'Error de red/permisos: No se pudo actualizar el estado de la tarea en la nube.'
+      });
+      pushNotification('Error al sincronizar cambio en la tarea con la nube.', 'alert');
+    }
   };
 
   // --- ACTIONS: PRODUCTOS A PROMOCIONAR ---

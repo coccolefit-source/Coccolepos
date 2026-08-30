@@ -184,6 +184,38 @@ ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS cash_expected NUMERIC D
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS cash_counted NUMERIC DEFAULT 0;
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS observations TEXT;
 
+-- 6. Tabla: daily_tasks (Bitácora de Tareas Diarias)
+CREATE TABLE IF NOT EXISTS public.daily_tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT,
+  titulo TEXT,
+  task_name TEXT,
+  description TEXT,
+  descripcion TEXT,
+  type TEXT DEFAULT 'Apertura',
+  tipo_tarea TEXT DEFAULT 'Apertura',
+  area TEXT DEFAULT 'Operativa',
+  assigned_to TEXT,
+  asignado_a TEXT,
+  staff_id TEXT,
+  staff_name TEXT,
+  status TEXT DEFAULT 'Pendiente',
+  estado TEXT DEFAULT 'Pendiente',
+  completed BOOLEAN DEFAULT false,
+  completed_at TIMESTAMPTZ,
+  tiempo_estimado_min INT DEFAULT 15,
+  hora_inicio TEXT,
+  hora_fin TEXT,
+  requires_photo BOOLEAN DEFAULT false,
+  requiere_foto BOOLEAN DEFAULT false,
+  date TEXT DEFAULT CURRENT_DATE::text,
+  fecha TEXT DEFAULT CURRENT_DATE::text,
+  photo_url TEXT,
+  evidence_note TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Habilitar publicaciones para Realtime Subscriptions
 DO $$
 BEGIN
@@ -195,6 +227,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'customers') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.customers;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'daily_tasks') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.daily_tasks;
   END IF;
 END $$;
 `;
@@ -1203,12 +1238,16 @@ export async function saveUpsellRulesToSupabase(rules: UpsellRule[]): Promise<bo
   }
 }
 
-export async function fetchDailyTasksFromSupabase(): Promise<Tarea[] | null> {
+export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
 
   try {
-    const { data, error } = await client.from('daily_tasks').select('*');
+    let query = client.from('daily_tasks').select('*');
+    if (fecha) {
+      query = query.or(`date.eq.${fecha},fecha.eq.${fecha}`);
+    }
+    const { data, error } = await query;
     if (error) {
       console.warn('Supabase fetchDailyTasks error:', error.message);
       return null;
@@ -1217,12 +1256,12 @@ export async function fetchDailyTasksFromSupabase(): Promise<Tarea[] | null> {
 
     return data.map((t: any) => ({
       id: String(t.id),
-      titulo: t.title || t.titulo || 'Tarea Sin Título',
+      titulo: t.title || t.titulo || t.task_name || 'Tarea Sin Título',
       descripcion: t.description || t.descripcion || '',
       tipo_tarea: t.type || t.tipo_tarea || 'Apertura',
       area: t.area || 'Operativa',
-      asignado_a: t.assigned_to || t.asignado_a || '',
-      estado: (t.status || t.estado || 'Pendiente') as TaskStatus,
+      asignado_a: t.assigned_to || t.asignado_a || t.staff_id || '',
+      estado: (t.status || t.estado || (t.completed ? 'Completada' : 'Pendiente')) as TaskStatus,
       tiempo_estimado_min: Number(t.tiempo_estimado_min) || 15,
       hora_inicio: t.hora_inicio || '08:00',
       hora_fin: t.hora_fin || '08:30',
@@ -1253,4 +1292,126 @@ export async function fetchPinResetRequestsFromSupabase(): Promise<any[] | null>
     return null;
   }
 }
+
+export async function updateDailyTaskStatusInSupabase(
+  id: string,
+  estado: 'Pendiente' | 'En proceso' | 'Completada',
+  completed: boolean,
+  foto_url?: string,
+  nota_evidencia?: string,
+  hora_inicio?: string,
+  hora_fin?: string
+): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const payload: any = {
+      status: estado,
+      estado: estado,
+      completed: completed,
+      completed_at: completed ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString()
+    };
+
+    if (foto_url !== undefined) {
+      payload.photo_url = foto_url;
+      payload.foto_url = foto_url;
+    }
+    if (nota_evidencia !== undefined) {
+      payload.evidence_note = nota_evidencia;
+      payload.nota_evidencia = nota_evidencia;
+    }
+    if (hora_inicio !== undefined) {
+      payload.hora_inicio = hora_inicio;
+    }
+    if (hora_fin !== undefined) {
+      payload.hora_fin = hora_fin;
+    }
+
+    const { error } = await client
+      .from('daily_tasks')
+      .update(payload)
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error updating daily task status in Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in updateDailyTaskStatusInSupabase:', err);
+    return false;
+  }
+}
+
+export async function insertDailyTaskInSupabase(tarea: Tarea, staffName?: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const payload: any = {
+      id: tarea.id,
+      title: tarea.titulo,
+      titulo: tarea.titulo,
+      task_name: tarea.titulo,
+      description: tarea.descripcion,
+      descripcion: tarea.descripcion,
+      type: tarea.tipo_tarea,
+      tipo_tarea: tarea.tipo_tarea,
+      area: tarea.area,
+      assigned_to: tarea.asignado_a,
+      asignado_a: tarea.asignado_a,
+      staff_id: tarea.asignado_a,
+      staff_name: staffName || '',
+      status: tarea.estado,
+      estado: tarea.estado,
+      completed: tarea.estado === 'Completada',
+      completed_at: tarea.estado === 'Completada' ? new Date().toISOString() : null,
+      tiempo_estimado_min: tarea.tiempo_estimado_min,
+      hora_inicio: tarea.hora_inicio,
+      hora_fin: tarea.hora_fin,
+      requires_photo: tarea.requiere_foto,
+      requiere_foto: tarea.requiere_foto,
+      date: tarea.fecha || new Date().toISOString().split('T')[0],
+      fecha: tarea.fecha || new Date().toISOString().split('T')[0],
+      created_at: new Date().toISOString()
+    };
+
+    const { error } = await client
+      .from('daily_tasks')
+      .upsert(payload);
+
+    if (error) {
+      console.error('Error inserting daily task in Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in insertDailyTaskInSupabase:', err);
+    return false;
+  }
+}
+
+export async function deleteDailyTaskFromSupabase(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const { error } = await client
+      .from('daily_tasks')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting daily task from Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in deleteDailyTaskFromSupabase:', err);
+    return false;
+  }
+}
+
 
