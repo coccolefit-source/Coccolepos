@@ -7,6 +7,7 @@ import {
   validatePinInSupabase, 
   upsertProfileInSupabase,
   updatePinInSupabase,
+  actualizarPinEnSupabase,
   SUPABASE_SQL_SCHEMA,
   saveSupabaseCredentials,
   getSupabaseCredentials,
@@ -218,7 +219,7 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
     setEnteredPin('');
   };
 
-  // Validación de PIN mediante Supabase con fallback local
+  // Validación de PIN mediante consulta en tiempo real a Supabase (profiles)
   const validateEmployeePin = async (pinToTest: string) => {
     setIsLoggingIn(true);
     setError('');
@@ -226,35 +227,23 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
     const pinLimpio = String(pinToTest || '').trim();
 
     try {
-      // 1. Validar directamente contra la tabla profiles de Supabase
-      const result = await validatePinInSupabase(pinLimpio, selectedEmpId || undefined);
+      if (isSupabaseConfigured()) {
+        // Consultar SIEMPRE a la nube en tiempo real sin usar datos cacheados en localStorage
+        const result = await validatePinInSupabase(pinLimpio, selectedEmpId || undefined);
 
-      if (result.success && result.user) {
+        if (result.success && result.user) {
+          setIsLoggingIn(false);
+          onLogin(result.user.id);
+          return;
+        }
+
+        setError(result.error || 'PIN o contraseña incorrectos en el servidor.');
+        setEnteredPin('');
         setIsLoggingIn(false);
-        onLogin(result.user.id);
         return;
       }
 
-      // 2. Si ocurrió un error de conexión con la base de datos o credenciales no configuradas
-      if (result.isConnectionError) {
-        console.error('Error de autenticación por conexión a la base de datos Supabase:', result.error);
-        if (!isSupabaseConfigured()) {
-          console.warn('Supabase no configurado. Intentando validación local en dispositivo...');
-        } else {
-          setError(result.error || 'Error de red/conexión al validar PIN');
-          setEnteredPin('');
-          setIsLoggingIn(false);
-          return;
-        }
-      }
-
-      // Si no hubo error de conexión pero no hubo coincidencia (success = false), logueamos
-      if (!result.success && !result.isConnectionError) {
-         console.warn("Supabase PIN validation failed:", result.error);
-         // Fallback to local validation just in case they haven't synced yet, but we prioritize the requested error messages if it completely fails.
-      }
-
-      // 3. Validar contra el listado local de colaboradores con normalización de string
+      // Fallback únicamente cuando Supabase no está configurado en el entorno
       if (selectedEmpId) {
         const emp = employees.find(e => e.id === selectedEmpId);
         const empPin = String(emp?.pin ?? '').trim();
@@ -263,7 +252,6 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
           onLogin(emp.id);
           return;
         } else {
-          console.error(`Validación local fallida: El PIN ingresado '${pinLimpio}' no coincide para el colaborador seleccionado '${selectedEmpId}'.`);
           setError('PIN incorrecto para el colaborador seleccionado.');
           setEnteredPin('');
         }
@@ -277,14 +265,13 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
           onLogin(empMatch.id);
           return;
         } else {
-          console.error(`Validación local fallida: No se encontró ningún colaborador registrado con el PIN '${pinLimpio}'.`);
-          setError(result.error || 'PIN no encontrado');
+          setError('PIN no encontrado');
           setEnteredPin('');
         }
       }
     } catch (err: any) {
       console.error('Excepción al validar PIN:', err);
-      setError('Error de red/conexión al validar PIN');
+      setError('Error al validar PIN en el servidor');
       setEnteredPin('');
     } finally {
       setIsLoggingIn(false);

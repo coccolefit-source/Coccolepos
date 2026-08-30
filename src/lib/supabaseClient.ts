@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES } from '../types';
+import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus } from '../types';
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
@@ -524,6 +524,41 @@ export async function upsertProfileInSupabase(user: Usuario): Promise<{ success:
   }
 }
 
+export async function actualizarPinEnSupabase(userId: string, nuevoPin: string | number): Promise<boolean> {
+  const pinFormateado = String(nuevoPin).trim();
+  
+  console.log('Enviando UPDATE a Supabase para el usuario:', userId, 'Nuevo PIN:', pinFormateado);
+  
+  const client = getSupabaseClient();
+  if (!client) {
+    console.error('Error devuelto por Supabase al guardar PIN: No hay cliente de Supabase configurado');
+    if (typeof window !== 'undefined') {
+      alert('Error al guardar en el servidor: No hay cliente de Supabase configurado');
+    }
+    return false;
+  }
+  
+  const { data, error } = await client
+    .from('profiles')
+    .update({ pin: pinFormateado })
+    .eq('id', userId)
+    .select();
+    
+  if (error) {
+    console.error('Error devuelto por Supabase al guardar PIN:', error.message);
+    if (typeof window !== 'undefined') {
+      alert('Error al guardar en el servidor: ' + error.message);
+    }
+    return false;
+  }
+  
+  console.log('PIN actualizado exitosamente en la base de datos remota:', data);
+  if (typeof window !== 'undefined') {
+    alert('Contraseña actualizada con éxito en la nube.');
+  }
+  return true;
+}
+
 export async function updatePinInSupabase(
   userId: string,
   nuevoPin: string | number,
@@ -532,7 +567,7 @@ export async function updatePinInSupabase(
   const pinLimpio = String(nuevoPin || '').trim();
   const nombreUsuario = String(userName || '').trim();
 
-  // 2. Logs de Diagnóstico en consola antes de la petición
+  // Logs de Diagnóstico en consola antes de la petición
   console.log('Diagnóstico UPDATE PIN Supabase:', {
     usuarioId: userId,
     nombreUsuario: nombreUsuario,
@@ -546,7 +581,6 @@ export async function updatePinInSupabase(
   }
 
   try {
-    // 1. Asegurar la Condición de Búsqueda por id, full_name o nombre
     const filterCondition = nombreUsuario
       ? `id.eq.${userId},full_name.eq.${nombreUsuario},nombre.eq.${nombreUsuario}`
       : `id.eq.${userId}`;
@@ -580,11 +614,11 @@ export async function updatePinInSupabase(
     }
 
     if (error) {
-      console.error('Error al actualizar en Supabase:', error);
+      console.error('Error devuelto por Supabase al guardar PIN:', error.message);
       return { success: false, error: error.message || 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
     }
 
-    console.log('¡PIN actualizado con éxito en Supabase!', data);
+    console.log('PIN actualizado exitosamente en la base de datos remota:', data);
     return { success: true, data };
   } catch (err: any) {
     console.error('Excepción al actualizar PIN en Supabase:', err);
@@ -676,7 +710,7 @@ export async function validatePinInSupabase(pinToTest: string, empId?: string): 
         }
       }
 
-      console.error(`Validación de PIN fallida: No se encontraron registros coincidentes en Supabase para PIN='${pinLimpio}' ${empIdLimpio ? `e ID='${empIdLimpio}'` : ''}.`);
+      console.warn(`Validación de PIN fallida: No se encontraron registros coincidentes en Supabase para PIN='${pinLimpio}' ${empIdLimpio ? `e ID='${empIdLimpio}'` : ''}.`);
       return {
         user: null,
         success: false,
@@ -695,7 +729,7 @@ export async function validatePinInSupabase(pinToTest: string, empId?: string): 
     });
 
     if (!matchedProfile) {
-      console.error(`Validación de PIN fallida en Supabase: El PIN ingresado '${pinLimpio}' no coincide con el registrado '${String(data[0]?.pin ?? '').trim()}' para el colaborador seleccionado.`);
+      console.warn(`Validación de PIN fallida en Supabase: El PIN ingresado '${pinLimpio}' no coincide con el registrado '${String(data[0]?.pin ?? '').trim()}' para el colaborador seleccionado.`);
       return {
         user: null,
         success: false,
@@ -1166,6 +1200,57 @@ export async function saveUpsellRulesToSupabase(rules: UpsellRule[]): Promise<bo
   } catch (err) {
     console.error('Error in saveUpsellRulesToSupabase:', err);
     return false;
+  }
+}
+
+export async function fetchDailyTasksFromSupabase(): Promise<Tarea[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.from('daily_tasks').select('*');
+    if (error) {
+      console.warn('Supabase fetchDailyTasks error:', error.message);
+      return null;
+    }
+    if (!data) return null;
+
+    return data.map((t: any) => ({
+      id: String(t.id),
+      titulo: t.title || t.titulo || 'Tarea Sin Título',
+      descripcion: t.description || t.descripcion || '',
+      tipo_tarea: t.type || t.tipo_tarea || 'Apertura',
+      area: t.area || 'Operativa',
+      asignado_a: t.assigned_to || t.asignado_a || '',
+      estado: (t.status || t.estado || 'Pendiente') as TaskStatus,
+      tiempo_estimado_min: Number(t.tiempo_estimado_min) || 15,
+      hora_inicio: t.hora_inicio || '08:00',
+      hora_fin: t.hora_fin || '08:30',
+      requiere_foto: Boolean(t.requires_photo ?? t.requiere_foto),
+      fecha: t.date || t.fecha || '2026-08-20',
+      foto_url: t.photo_url || t.foto_url,
+      nota_evidencia: t.evidence_note || t.nota_evidencia
+    }));
+  } catch (err) {
+    console.warn('Exception in fetchDailyTasksFromSupabase:', err);
+    return null;
+  }
+}
+
+export async function fetchPinResetRequestsFromSupabase(): Promise<any[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.from('pin_reset_requests').select('*');
+    if (error) {
+      console.warn('Supabase fetchPinResetRequests error:', error.message);
+      return null;
+    }
+    return data || [];
+  } catch (err) {
+    console.warn('Exception in fetchPinResetRequestsFromSupabase:', err);
+    return null;
   }
 }
 

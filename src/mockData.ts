@@ -783,7 +783,13 @@ export const INITIAL_VENTAS_REGISTRADAS: Venta[] = [
 // Helper functions for LocalStorage management
 export const loadAppState = () => {
   try {
-    const usuarios = localStorage.getItem('coccolefit_usuarios');
+    // Clean up legacy local storage credentials key if present
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('coccolefit_usuarios');
+      localStorage.removeItem('user_pin');
+      localStorage.removeItem('users');
+    }
+
     const tareas = localStorage.getItem('coccolefit_tareas');
     const productos = localStorage.getItem('coccolefit_productos');
     const ventas = localStorage.getItem('coccolefit_ventas');
@@ -800,7 +806,7 @@ export const loadAppState = () => {
     const clientes = localStorage.getItem('coccolefit_clientes');
 
     return {
-      usuarios: usuarios ? JSON.parse(usuarios) : INITIAL_USUARIOS,
+      usuarios: INITIAL_USUARIOS,
       tareas: tareas ? JSON.parse(tareas) : INITIAL_TAREAS,
       productos: productos ? JSON.parse(productos) : INITIAL_PRODUCTOS,
       ventas: ventas ? JSON.parse(ventas) : INITIAL_REGISTRO_VENTAS,
@@ -856,7 +862,6 @@ export const saveAppState = (state: {
   clientes?: Cliente[];
 }) => {
   try {
-    localStorage.setItem('coccolefit_usuarios', JSON.stringify(state.usuarios));
     localStorage.setItem('coccolefit_tareas', JSON.stringify(state.tareas));
     localStorage.setItem('coccolefit_productos', JSON.stringify(state.productos));
     localStorage.setItem('coccolefit_ventas', JSON.stringify(state.ventas));

@@ -28,12 +28,15 @@ import {
   upsertInventoryInSupabase,
   upsertProfileInSupabase,
   updatePinInSupabase,
+  actualizarPinEnSupabase,
   insertTimeEntryInSupabase,
   subscribeToRealtimeUpdates,
   fetchRankingWeightsFromSupabase,
   saveRankingWeightsToSupabase,
   fetchUpsellRulesFromSupabase,
-  saveUpsellRulesToSupabase
+  saveUpsellRulesToSupabase,
+  fetchDailyTasksFromSupabase,
+  fetchPinResetRequestsFromSupabase
 } from './lib/supabaseClient';
 
 
@@ -105,9 +108,8 @@ export default function App() {
     const userName = targetUser?.nombre;
 
     if (isSupabaseConfigured()) {
-      const { success, error } = await updatePinInSupabase(userId, pinLimpio, userName);
+      const success = await actualizarPinEnSupabase(userId, pinLimpio);
       if (!success) {
-        console.error('Error al actualizar PIN en Supabase:', error);
         pushNotification("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.", "alert");
         return false;
       }
@@ -176,6 +178,89 @@ export default function App() {
     setUpsellRules(newRules);
     await saveUpsellRulesToSupabase(newRules);
     pushNotification('Reglas de venta sugerida actualizadas exitosamente.', 'success');
+  };
+
+  // Estado para Sincronización Manual de Datos
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Función de Sincronización Manual por Perfil
+  const handleSyncData = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+
+    try {
+      if (currentUser?.rol === 'admin') {
+        // En el Perfil de Administrador (Admin):
+        // Re-ejecuta consulta global a Supabase con Promise.all:
+        // 1. profiles (colaboradores y PINs)
+        // 2. sales (ventas e ingresos del día)
+        // 3. inventory (estado del stock de inventario)
+        // 4. pin_reset_requests (solicitudes de cambio de clave/PIN pendientes)
+        // 5. ranking_settings (ponderación y posiciones del ranking)
+        const [supaProfiles, supaSales, supaInventory, supaPinResets, supaWeights] = await Promise.all([
+          fetchProfilesFromSupabase(),
+          fetchSalesFromSupabase(),
+          fetchInventoryFromSupabase(),
+          fetchPinResetRequestsFromSupabase(),
+          fetchRankingWeightsFromSupabase()
+        ]);
+
+        setState(prev => ({
+          ...prev,
+          usuarios: supaProfiles && supaProfiles.length > 0 ? supaProfiles : prev.usuarios,
+          ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
+          inventario: supaInventory && supaInventory.length > 0 ? supaInventory : prev.inventario,
+        }));
+
+        if (supaWeights) {
+          setRankingWeights(supaWeights);
+        }
+      } else {
+        // En el Perfil de Colaborador (Staff):
+        // Re-ejecuta consulta individual a Supabase con Promise.all:
+        // 1. daily_tasks (checklist y tareas del día)
+        // 2. sales (ventas asignadas al turno)
+        // 3. ranking_settings (puntuación y posición actual)
+        // 4. upsell_rules (reglas activas de ventas sugeridas)
+        const [supaTasks, supaSales, supaWeights, supaUpsell] = await Promise.all([
+          fetchDailyTasksFromSupabase(),
+          fetchSalesFromSupabase(),
+          fetchRankingWeightsFromSupabase(),
+          fetchUpsellRulesFromSupabase()
+        ]);
+
+        setState(prev => ({
+          ...prev,
+          tareas: supaTasks && supaTasks.length > 0 ? supaTasks : prev.tareas,
+          ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
+        }));
+
+        if (supaWeights) {
+          setRankingWeights(supaWeights);
+        }
+        if (supaUpsell && supaUpsell.length > 0) {
+          setUpsellRules(supaUpsell);
+        }
+      }
+
+      // Notificación Toast emergente de éxito (sin emojis ni íconos decorativos)
+      triggerPushToast({
+        kind: 'standard',
+        type: 'success',
+        text: 'Datos sincronizados correctamente con la nube.'
+      });
+      pushNotification('Datos sincronizados correctamente con la nube.', 'success');
+    } catch (err) {
+      console.error('Error al sincronizar datos con Supabase:', err);
+      triggerPushToast({
+        kind: 'standard',
+        type: 'alert',
+        text: 'Error de conexión al sincronizar datos.'
+      });
+      pushNotification('Error de conexión al sincronizar datos.', 'alert');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   
@@ -1148,11 +1233,20 @@ export default function App() {
             </div>
 
             {/* Información del Usuario y Cerrar Sesión */}
-            <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
               <div className="flex flex-col text-right">
                 <span className="text-sm font-bold text-[#2C3E50]">{currentUser.nombre}</span>
                 <span className="text-[10px] font-bold text-[#4B9CD3] uppercase tracking-wider">{currentUser.rol === 'admin' ? 'Administrador' : 'Staff'}</span>
               </div>
+              <button
+                id="sync-data-button"
+                onClick={handleSyncData}
+                disabled={isSyncing}
+                className="px-3 py-1.5 text-xs font-bold text-white bg-[#4B9CD3] hover:bg-[#3A85B8] active:bg-[#2C6F99] disabled:bg-[#4B9CD3]/60 disabled:cursor-not-allowed rounded-lg shadow-xs transition-all cursor-pointer shrink-0"
+                title="Sincronizar datos con la nube"
+              >
+                {isSyncing ? 'Sincronizando...' : 'Actualizar Datos'}
+              </button>
               <button
                 onClick={() => {
                   setActiveUserRole(null);
