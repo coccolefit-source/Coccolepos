@@ -573,6 +573,19 @@ export default function App() {
           text: 'Fallo al eliminar la tarea de la nube.'
         });
         pushNotification('Fallo al eliminar la tarea de la nube.', 'alert');
+      } else {
+        // Sincronización silenciosa del progreso/métricas del empleado recargando las tareas frescas de Supabase
+        try {
+          const freshTasks = await fetchDailyTasksFromSupabase('2026-08-20');
+          if (freshTasks) {
+            setState(prev => ({
+              ...prev,
+              tareas: freshTasks
+            }));
+          }
+        } catch (fetchErr) {
+          console.error('Error fetching fresh tasks after deletion:', fetchErr);
+        }
       }
     } catch (err) {
       console.error('Error in handleDeleteTarea:', err);

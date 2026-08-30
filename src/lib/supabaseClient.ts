@@ -1329,14 +1329,25 @@ export async function updateDailyTaskStatusInSupabase(
       payload.hora_fin = hora_fin;
     }
 
+    const isNum = !isNaN(Number(id)) && id.trim() !== '';
+    const queryId = isNum ? Number(id) : id;
+
     const { error } = await client
       .from('daily_tasks')
       .update(payload)
-      .eq('id', id);
+      .eq('id', queryId);
 
     if (error) {
-      console.error('Error updating daily task status in Supabase:', error.message);
-      return false;
+      console.warn('Error updating task status, trying fallback with string id:', error.message);
+      const { error: fallbackError } = await client
+        .from('daily_tasks')
+        .update(payload)
+        .eq('id', id);
+
+      if (fallbackError) {
+        console.error('Fallback update also failed:', fallbackError.message);
+        return false;
+      }
     }
     return true;
   } catch (err) {
@@ -1398,14 +1409,25 @@ export async function deleteDailyTaskFromSupabase(id: string): Promise<boolean> 
   if (!client) return false;
 
   try {
+    const isNum = !isNaN(Number(id)) && id.trim() !== '';
+    const queryId = isNum ? Number(id) : id;
+
     const { error } = await client
       .from('daily_tasks')
       .delete()
-      .eq('id', id);
+      .eq('id', queryId);
 
     if (error) {
-      console.error('Error deleting daily task from Supabase:', error.message);
-      return false;
+      console.warn('Error deleting daily task from Supabase, trying fallback with string id:', error.message);
+      const { error: fallbackError } = await client
+        .from('daily_tasks')
+        .delete()
+        .eq('id', id);
+
+      if (fallbackError) {
+        console.error('Fallback delete also failed:', fallbackError.message);
+        return false;
+      }
     }
     return true;
   } catch (err) {
