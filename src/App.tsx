@@ -188,8 +188,8 @@ export default function App() {
   // Estado para Sincronización Manual de Datos
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Función de Sincronización Manual por Perfil (Fetch In-Memory Silencioso)
-  const handleSyncData = async () => {
+  // Función de Sincronización Manual y Recarga de Datos Silenciosa (Fetch In-Memory)
+  const cargarDatosSilencioso = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
 
@@ -252,6 +252,10 @@ export default function App() {
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const handleSyncData = async () => {
+    await cargarDatosSilencioso();
   };
 
   
@@ -417,8 +421,9 @@ export default function App() {
 
   // Agregar una notificación al feed
   const pushNotification = (text: string, type: 'success' | 'alert' | 'info' = 'info') => {
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const newNotif = {
-      id: Date.now().toString(),
+      id: uniqueId,
       text,
       time: 'Hace un instante',
       type
@@ -471,43 +476,43 @@ export default function App() {
   const handleAddTarea = async (newTarea: Omit<Tarea, 'id'>) => {
     const assignedUser = state.usuarios.find(u => u.id === newTarea.asignado_a);
     const assignedName = assignedUser?.nombre || 'empleado';
-    const tareaId = `tsk-${Date.now()}`;
+    const TareaId = `tsk-${Date.now()}`;
     const tarea: Tarea = {
       ...newTarea,
-      id: tareaId,
+      id: TareaId,
       fecha: newTarea.fecha || new Date().toISOString().split('T')[0]
     };
 
-    // Optimistic Update
-    setState(prev => ({
-      ...prev,
-      tareas: [tarea, ...prev.tareas]
-    }));
-    
-    pushNotification(`Nueva tarea asignada a ${assignedName}.`, 'info');
+    if (!isSupabaseConfigured()) {
+      setState(prev => ({
+        ...prev,
+        tareas: [tarea, ...prev.tareas]
+      }));
+      pushNotification(`Nueva tarea asignada a ${assignedName} (Local).`, 'info');
+      return;
+    }
 
     try {
+      // 1. Guardar en la nube (Supabase-First)
       const ok = await insertDailyTaskInSupabase(tarea, assignedName);
       if (!ok) {
-        // Rollback
-        setState(prev => ({
-          ...prev,
-          tareas: prev.tareas.filter(t => t.id !== tareaId)
-        }));
+        console.error('Error Supabase INSERT: returned false');
+        alert('Error al crear tarea en la nube: No se pudo guardar el registro.');
         triggerPushToast({
           kind: 'standard',
           type: 'alert',
           text: 'Fallo al guardar la tarea en la nube.'
         });
         pushNotification('Fallo al guardar la tarea en la nube.', 'alert');
+        return;
       }
-    } catch (err) {
+
+      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
+      await cargarDatosSilencioso();
+      pushNotification(`Nueva tarea asignada a ${assignedName}.`, 'info');
+    } catch (err: any) {
       console.error('Error in handleAddTarea:', err);
-      // Rollback
-      setState(prev => ({
-        ...prev,
-        tareas: prev.tareas.filter(t => t.id !== tareaId)
-      }));
+      alert('Error al crear la tarea en la nube: ' + (err?.message || err));
     }
   };
 
@@ -515,36 +520,37 @@ export default function App() {
     const originalTarea = state.tareas.find(t => t.id === updatedTarea.id);
     if (!originalTarea) return;
 
-    // Optimistic Update
-    setState(prev => ({
-      ...prev,
-      tareas: prev.tareas.map(t => t.id === updatedTarea.id ? updatedTarea : t)
-    }));
-    pushNotification(`Tarea "${updatedTarea.titulo}" actualizada correctamente.`, 'info');
+    if (!isSupabaseConfigured()) {
+      setState(prev => ({
+        ...prev,
+        tareas: prev.tareas.map(t => t.id === updatedTarea.id ? updatedTarea : t)
+      }));
+      pushNotification(`Tarea "${updatedTarea.titulo}" actualizada correctamente (Local).`, 'info');
+      return;
+    }
 
     try {
+      // 1. Guardar en la nube (Supabase-First)
       const assignedUser = state.usuarios.find(u => u.id === updatedTarea.asignado_a);
       const ok = await insertDailyTaskInSupabase(updatedTarea, assignedUser?.nombre);
       if (!ok) {
-        // Rollback
-        setState(prev => ({
-          ...prev,
-          tareas: prev.tareas.map(t => t.id === updatedTarea.id ? originalTarea : t)
-        }));
+        console.error('Error Supabase UPDATE: returned false');
+        alert('Error al actualizar la tarea en la nube: No se pudo guardar el registro.');
         triggerPushToast({
           kind: 'standard',
           type: 'alert',
           text: 'Fallo al guardar la edición de tarea en la nube.'
         });
         pushNotification('Fallo al actualizar la tarea en la nube.', 'alert');
+        return;
       }
-    } catch (err) {
+
+      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
+      await cargarDatosSilencioso();
+      pushNotification(`Tarea "${updatedTarea.titulo}" actualizada correctamente.`, 'info');
+    } catch (err: any) {
       console.error('Error in handleEditTarea:', err);
-      // Rollback
-      setState(prev => ({
-        ...prev,
-        tareas: prev.tareas.map(t => t.id === updatedTarea.id ? originalTarea : t)
-      }));
+      alert('Error al actualizar la tarea en la nube: ' + (err?.message || err));
     }
   };
 
@@ -552,48 +558,36 @@ export default function App() {
     const deleted = state.tareas.find(t => t.id === id);
     if (!deleted) return;
 
-    // Optimistic Update
-    setState(prev => ({
-      ...prev,
-      tareas: prev.tareas.filter(t => t.id !== id)
-    }));
-    pushNotification(`Tarea eliminada: "${deleted.titulo}"`, 'alert');
+    if (!isSupabaseConfigured()) {
+      setState(prev => ({
+        ...prev,
+        tareas: prev.tareas.filter(t => t.id !== id)
+      }));
+      pushNotification(`Tarea eliminada: "${deleted.titulo}" (Local)`, 'alert');
+      return;
+    }
 
     try {
+      // 1. Borrar en la nube (Supabase-First)
       const ok = await deleteDailyTaskFromSupabase(id);
       if (!ok) {
-        // Rollback
-        setState(prev => ({
-          ...prev,
-          tareas: [deleted, ...prev.tareas]
-        }));
+        console.error('Error Supabase DELETE: returned false');
+        alert('Error al borrar en la nube: No se pudo eliminar el registro.');
         triggerPushToast({
           kind: 'standard',
           type: 'alert',
           text: 'Fallo al eliminar la tarea de la nube.'
         });
         pushNotification('Fallo al eliminar la tarea de la nube.', 'alert');
-      } else {
-        // Sincronización silenciosa del progreso/métricas del empleado recargando las tareas frescas de Supabase
-        try {
-          const freshTasks = await fetchDailyTasksFromSupabase('2026-08-20');
-          if (freshTasks) {
-            setState(prev => ({
-              ...prev,
-              tareas: freshTasks
-            }));
-          }
-        } catch (fetchErr) {
-          console.error('Error fetching fresh tasks after deletion:', fetchErr);
-        }
+        return;
       }
-    } catch (err) {
+
+      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
+      await cargarDatosSilencioso();
+      pushNotification(`Tarea eliminada: "${deleted.titulo}"`, 'alert');
+    } catch (err: any) {
       console.error('Error in handleDeleteTarea:', err);
-      // Rollback
-      setState(prev => ({
-        ...prev,
-        tareas: [deleted, ...prev.tareas]
-      }));
+      alert('Error inesperado al borrar la tarea en la nube: ' + (err?.message || err));
     }
   };
 
@@ -609,33 +603,34 @@ export default function App() {
     const now = new Date();
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-    // Paso 1: Cambiar estado localmente inmediatamente (Optimistic update)
-    setState(prev => ({
-      ...prev,
-      tareas: prev.tareas.map(t => {
-        if (t.id === id) {
-          const updated: Tarea = { ...t, estado };
-          if (estado === 'En proceso') {
-            updated.hora_inicio = t.hora_inicio || timeStr;
-          } else if (estado === 'Completada') {
-            updated.hora_fin = t.hora_fin || timeStr;
-            if (foto_url) updated.foto_url = foto_url;
-            if (nota_evidencia) updated.nota_evidencia = nota_evidencia;
-          } else {
-            updated.hora_inicio = undefined;
-            updated.hora_fin = undefined;
+    if (!isSupabaseConfigured()) {
+      setState(prev => ({
+        ...prev,
+        tareas: prev.tareas.map(t => {
+          if (t.id === id) {
+            const updated: Tarea = { ...t, estado };
+            if (estado === 'En proceso') {
+              updated.hora_inicio = t.hora_inicio || timeStr;
+            } else if (estado === 'Completada') {
+              updated.hora_fin = t.hora_fin || timeStr;
+              if (foto_url) updated.foto_url = foto_url;
+              if (nota_evidencia) updated.nota_evidencia = nota_evidencia;
+            } else {
+              updated.hora_inicio = undefined;
+              updated.hora_fin = undefined;
+            }
+            return updated;
           }
-          return updated;
-        }
-        return t;
-      })
-    }));
+          return t;
+        })
+      }));
+      const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
+      pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}" (Local)`, estado === 'Completada' ? 'success' : 'info');
+      return;
+    }
 
-    const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
-    pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');
-
-    // Paso 2: Ejecutar en Supabase de forma inmediata asíncrona
     try {
+      // 1. Ejecutar en Supabase (Supabase-First)
       const isCompleted = estado === 'Completada';
       const success = await updateDailyTaskStatusInSupabase(
         id,
@@ -650,15 +645,15 @@ export default function App() {
       if (!success) {
         throw new Error('Supabase update returned false');
       }
-    } catch (err) {
+
+      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
+      await cargarDatosSilencioso();
+
+      const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
+      pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');
+    } catch (err: any) {
       console.error('Error al actualizar estado de la tarea en Supabase:', err);
-
-      // Paso 3: Retrotraer únicamente la tarea afectada al estado anterior en caso de fallo
-      setState(prev => ({
-        ...prev,
-        tareas: prev.tareas.map(t => t.id === id ? originalTask : t)
-      }));
-
+      alert('Error al actualizar tarea en la nube: ' + (err?.message || err));
       triggerPushToast({
         kind: 'standard',
         type: 'alert',
@@ -1356,7 +1351,13 @@ export default function App() {
   const handleResetData = () => {
     if (window.confirm('¿Seguro que deseas reiniciar los datos de simulación? Se borrará todo el historial creado.')) {
       localStorage.clear();
-      window.location.reload();
+      setActiveUserRole(null);
+      setState(loadAppState());
+      triggerPushToast({
+        kind: 'standard',
+        type: 'success',
+        text: 'Datos reiniciados con éxito'
+      });
     }
   };
 

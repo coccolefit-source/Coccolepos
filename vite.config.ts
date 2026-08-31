@@ -4,6 +4,7 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const disableHmr = process.env.DISABLE_HMR === 'true';
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -12,11 +13,10 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // In middlewareMode, do not set port/strictPort since Express handles port 3000.
+      // If DISABLE_HMR is true, disable HMR entirely to prevent client connection loops.
+      hmr: disableHmr ? false : { overlay: false },
+      watch: disableHmr ? null : {},
     },
   };
 });

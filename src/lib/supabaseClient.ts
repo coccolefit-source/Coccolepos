@@ -1293,6 +1293,52 @@ export async function fetchPinResetRequestsFromSupabase(): Promise<any[] | null>
   }
 }
 
+export async function insertWithResilientColumns(client: any, table: string, payload: any): Promise<{ success: boolean; error?: any }> {
+  let currentPayload = { ...payload };
+  const maxRetries = 15;
+  for (let i = 0; i < maxRetries; i++) {
+    const { error } = await client.from(table).upsert(currentPayload);
+    if (!error) {
+      return { success: true };
+    }
+    const msg = error.message || '';
+    if (msg.includes("Could not find the '") && msg.includes("' column of '")) {
+      const match = msg.match(/Could not find the '([^']+)' column/);
+      if (match && match[1]) {
+        const missingCol = match[1];
+        console.warn(`[Supabase Resilience] Column '${missingCol}' not found in remote schema cache. Stripping it and retrying...`);
+        delete currentPayload[missingCol];
+        continue;
+      }
+    }
+    return { success: false, error };
+  }
+  return { success: false, error: { message: "Exceeded max retries of resilient column stripping" } };
+}
+
+export async function updateWithResilientColumns(client: any, table: string, payload: any, id: string): Promise<{ success: boolean; error?: any }> {
+  let currentPayload = { ...payload };
+  const maxRetries = 15;
+  for (let i = 0; i < maxRetries; i++) {
+    const { error } = await client.from(table).update(currentPayload).eq('id', String(id));
+    if (!error) {
+      return { success: true };
+    }
+    const msg = error.message || '';
+    if (msg.includes("Could not find the '") && msg.includes("' column of '")) {
+      const match = msg.match(/Could not find the '([^']+)' column/);
+      if (match && match[1]) {
+        const missingCol = match[1];
+        console.warn(`[Supabase Resilience] Column '${missingCol}' not found in remote schema cache during update. Stripping it and retrying...`);
+        delete currentPayload[missingCol];
+        continue;
+      }
+    }
+    return { success: false, error };
+  }
+  return { success: false, error: { message: "Exceeded max retries of resilient column stripping" } };
+}
+
 export async function updateDailyTaskStatusInSupabase(
   id: string,
   estado: 'Pendiente' | 'En proceso' | 'Completada',
@@ -1329,25 +1375,11 @@ export async function updateDailyTaskStatusInSupabase(
       payload.hora_fin = hora_fin;
     }
 
-    const isNum = !isNaN(Number(id)) && id.trim() !== '';
-    const queryId = isNum ? Number(id) : id;
+    const { success, error } = await updateWithResilientColumns(client, 'daily_tasks', payload, id);
 
-    const { error } = await client
-      .from('daily_tasks')
-      .update(payload)
-      .eq('id', queryId);
-
-    if (error) {
-      console.warn('Error updating task status, trying fallback with string id:', error.message);
-      const { error: fallbackError } = await client
-        .from('daily_tasks')
-        .update(payload)
-        .eq('id', id);
-
-      if (fallbackError) {
-        console.error('Fallback update also failed:', fallbackError.message);
-        return false;
-      }
+    if (!success) {
+      console.error('Error updating task status in Supabase:', error?.message);
+      return false;
     }
     return true;
   } catch (err) {
@@ -1389,12 +1421,10 @@ export async function insertDailyTaskInSupabase(tarea: Tarea, staffName?: string
       created_at: new Date().toISOString()
     };
 
-    const { error } = await client
-      .from('daily_tasks')
-      .upsert(payload);
+    const { success, error } = await insertWithResilientColumns(client, 'daily_tasks', payload);
 
-    if (error) {
-      console.error('Error inserting daily task in Supabase:', error.message);
+    if (!success) {
+      console.error('Error inserting daily task in Supabase:', error?.message);
       return false;
     }
     return true;
@@ -1409,25 +1439,14 @@ export async function deleteDailyTaskFromSupabase(id: string): Promise<boolean> 
   if (!client) return false;
 
   try {
-    const isNum = !isNaN(Number(id)) && id.trim() !== '';
-    const queryId = isNum ? Number(id) : id;
-
     const { error } = await client
       .from('daily_tasks')
       .delete()
-      .eq('id', queryId);
+      .eq('id', String(id));
 
     if (error) {
-      console.warn('Error deleting daily task from Supabase, trying fallback with string id:', error.message);
-      const { error: fallbackError } = await client
-        .from('daily_tasks')
-        .delete()
-        .eq('id', id);
-
-      if (fallbackError) {
-        console.error('Fallback delete also failed:', fallbackError.message);
-        return false;
-      }
+      console.error('Error deleting daily task from Supabase:', error.message);
+      return false;
     }
     return true;
   } catch (err) {
