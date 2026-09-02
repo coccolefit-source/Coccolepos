@@ -108,6 +108,8 @@ export default function AdminDashboard({
   const activeTab = propActiveTab || localActiveTab;
   const setActiveTab = propSetActiveTab || setLocalActiveTab;
 
+  const [selectedPreviewPhoto, setSelectedPreviewPhoto] = useState<string | null>(null);
+
   // --- EXPORTADOR DE REPORTES CONSOLIDADOS (CSV) ---
   const downloadCSV = (filename: string, headers: string[], rows: any[][]) => {
     const csvContent = [
@@ -1222,9 +1224,30 @@ export default function AdminDashboard({
                           {t.tiempo_estimado_min} min
                         </td>
                         <td className="py-3 px-3 text-center">
-                          <span className={t.requiere_foto ? 'text-[#4B9CD3] font-bold' : 'text-slate-300'}>
-                            {t.requiere_foto ? 'Sí' : 'No'}
-                          </span>
+                          <div className="flex flex-col items-center justify-center gap-1">
+                            <span className={t.requiere_foto ? 'text-[#4B9CD3] font-bold text-[10px]' : 'text-slate-400 text-[10px]'}>
+                              {t.requiere_foto ? 'Requerida' : 'Opcional'}
+                            </span>
+                            {t.foto_url ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPreviewPhoto(t.foto_url || null)}
+                                className="mt-1 group relative focus:outline-hidden transition-transform hover:scale-105"
+                              >
+                                <img 
+                                  src={t.foto_url} 
+                                  alt="Evidencia" 
+                                  className="w-10 h-10 object-cover rounded-md border border-slate-200 cursor-pointer shadow-2xs" 
+                                  title="Click para ampliar foto de evidencia"
+                                />
+                                {t.nota_evidencia && (
+                                  <span className="absolute -bottom-1 -right-1 bg-emerald-500 w-2.5 h-2.5 rounded-full border-2 border-white" title={t.nota_evidencia} />
+                                )}
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Sin evidencia</span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-3 text-center">
                           {getEstadoBadge(t.estado)}
@@ -1513,12 +1536,19 @@ export default function AdminDashboard({
                   <div key={t.id} className="border border-[#E2E8F0] rounded-xl overflow-hidden flex flex-col justify-between bg-white">
                     <div className="relative h-40 bg-[#FFFDF6] flex items-center justify-center overflow-hidden">
                       {t.foto_url ? (
-                        <img
-                          src={t.foto_url}
-                          alt={t.titulo}
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPreviewPhoto(t.foto_url || null)}
+                          className="w-full h-full cursor-pointer hover:opacity-90 transition-opacity focus:outline-hidden"
+                          title="Click para ver en tamaño completo"
+                        >
+                          <img
+                            src={t.foto_url}
+                            alt={t.titulo}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </button>
                       ) : (
                         <div className="p-4 text-center text-slate-400 text-xs flex flex-col items-center">
                           <FileText className="w-8 h-8 text-slate-300 mb-1" />
@@ -4226,6 +4256,65 @@ export default function AdminDashboard({
                 className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
               >
                 Cerrar Ventana
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PREVIEW DE EVIDENCIA FOTOGRÁFICA */}
+      {selectedPreviewPhoto && (
+        <div 
+          className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150"
+          onClick={() => setSelectedPreviewPhoto(null)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Cabecera */}
+            <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                  Vista Ampliada de Evidencia
+                </h3>
+                <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                  Inspección visual de la tarea cargada por el colaborador.
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedPreviewPhoto(null)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold bg-slate-200/50 hover:bg-slate-200 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Contenido / Imagen */}
+            <div className="p-4 bg-slate-950 flex justify-center items-center overflow-hidden max-h-[70vh]">
+              <img 
+                src={selectedPreviewPhoto} 
+                alt="Evidencia Ampliada" 
+                className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-md animate-in fade-in zoom-in-90 duration-300"
+              />
+            </div>
+
+            {/* Pie */}
+            <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+              <a 
+                href={selectedPreviewPhoto} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="text-xs text-[#4B9CD3] hover:text-[#3A82B4] font-bold flex items-center gap-1 cursor-pointer"
+              >
+                Abrir en nueva pestaña ↗
+              </a>
+              <button
+                type="button"
+                onClick={() => setSelectedPreviewPhoto(null)}
+                className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
+              >
+                Cerrar Vista
               </button>
             </div>
           </div>
