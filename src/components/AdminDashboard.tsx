@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule } from '../types';
 
 import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders } from 'lucide-react';
+import { calcularTiempoTarea } from '../lib/taskUtils';
 import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 
@@ -109,6 +110,15 @@ export default function AdminDashboard({
   const setActiveTab = propSetActiveTab || setLocalActiveTab;
 
   const [selectedPreviewPhoto, setSelectedPreviewPhoto] = useState<string | null>(null);
+
+  // Ticker para actualizar la duración transcurrida de tareas en tiempo real
+  const [ticker, setTicker] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTicker(t => t + 1);
+    }, 10000); // 10 segundos
+    return () => clearInterval(interval);
+  }, []);
 
   // --- EXPORTADOR DE REPORTES CONSOLIDADOS (CSV) ---
   const downloadCSV = (filename: string, headers: string[], rows: any[][]) => {
@@ -1198,6 +1208,7 @@ export default function AdminDashboard({
                       <th className="py-2 px-3 text-center">Área</th>
                       <th className="py-2 px-3">Asignado</th>
                       <th className="py-2 px-3 text-center">Tiempo Est.</th>
+                      <th className="py-2 px-3 text-center">Duración</th>
                       <th className="py-2 px-3 text-center">Foto</th>
                       <th className="py-2 px-3 text-center">Estado</th>
                       <th className="py-2 px-3 text-right">Acciones</th>
@@ -1222,6 +1233,21 @@ export default function AdminDashboard({
                         </td>
                         <td className="py-3 px-3 text-center font-bold text-slate-700">
                           {t.tiempo_estimado_min} min
+                        </td>
+                        <td className="py-3 px-3 text-center font-semibold">
+                          {t.started_at ? (
+                            <span className={`px-2 py-0.5 rounded text-[10px] ${
+                              t.estado === 'Completada' 
+                                ? 'bg-[#EBF5FB] text-[#4B9CD3] border border-blue-100' 
+                                : t.estado === 'En proceso'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {calcularTiempoTarea(t.started_at, t.completed_at)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic text-[10px]">Sin iniciar</span>
+                          )}
                         </td>
                         <td className="py-3 px-3 text-center">
                           <div className="flex flex-col items-center justify-center gap-1">

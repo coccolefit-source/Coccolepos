@@ -23,6 +23,7 @@ export interface Tarea {
   nota_evidencia?: string;
   tipo_tarea?: string;
   started_at?: string;
+  completed_at?: string;
 }
 
 export interface ProductoPromocion {

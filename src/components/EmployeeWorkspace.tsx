@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, UpsellRule, DEFAULT_UPSELL_RULES } from '../types';
 
 import { calculateLeaderboard } from '../utils/metrics';
+import { calcularTiempoTarea } from '../lib/taskUtils';
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
@@ -238,6 +239,15 @@ export default function EmployeeWorkspace({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [evidencePhoto, setEvidencePhoto] = useState(PHOTO_PRESETS[0].url);
   const [evidenceNote, setEvidenceNote] = useState('');
+
+  // Ticker para forzar re-renderizado de tiempos transcurridos en tiempo real
+  const [ticker, setTicker] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTicker(t => t + 1);
+    }, 10000); // Actualiza cada 10 segundos
+    return () => clearInterval(interval);
+  }, []);
 
   const [showIncidenciaModal, setShowIncidenciaModal] = useState(false);
   const [incidenciaTitulo, setIncidenciaTitulo] = useState('');
@@ -871,6 +881,13 @@ export default function EmployeeWorkspace({
                               </div>
 
                               <div className="flex items-center gap-2.5">
+                                {t.started_at && (
+                                  <span className="text-slate-500 font-bold bg-slate-50 border border-slate-200 px-2 py-0.5 rounded shrink-0 flex items-center gap-1">
+                                    <Clock className="w-2.5 h-2.5 text-[#4B9CD3]" />
+                                    <span>Duración: {calcularTiempoTarea(t.started_at, t.completed_at)}</span>
+                                  </span>
+                                )}
+
                                 {t.estado === 'En proceso' && (t.hora_inicio || t.started_at) && (
                                   <span className="text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 animate-pulse shrink-0">
                                     Iniciado: {t.hora_inicio || (t.started_at ? new Date(t.started_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '')}

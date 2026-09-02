@@ -1274,7 +1274,8 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
         fecha: t.date || t.fecha || '2026-08-20',
         foto_url: t.photo_url || t.foto_url,
         nota_evidencia: t.evidence_note || t.nota_evidencia,
-        started_at: t.started_at || undefined
+        started_at: t.started_at || undefined,
+        completed_at: t.completed_at || undefined
       };
     });
   } catch (err) {

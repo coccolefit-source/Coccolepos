@@ -611,13 +611,17 @@ export default function App() {
             const updated: Tarea = { ...t, estado };
             if (estado === 'En proceso') {
               updated.hora_inicio = t.hora_inicio || timeStr;
+              updated.started_at = t.started_at || now.toISOString();
             } else if (estado === 'Completada') {
               updated.hora_fin = t.hora_fin || timeStr;
+              updated.completed_at = t.completed_at || now.toISOString();
               if (foto_url) updated.foto_url = foto_url;
               if (nota_evidencia) updated.nota_evidencia = nota_evidencia;
             } else {
               updated.hora_inicio = undefined;
               updated.hora_fin = undefined;
+              updated.started_at = undefined;
+              updated.completed_at = undefined;
             }
             return updated;
           }
