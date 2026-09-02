@@ -283,8 +283,29 @@ export default function EmployeeWorkspace({
   };
 
   const handleCompletarConFoto = (taskId: string) => {
+    const existing = tareas.find(t => t.id === taskId);
+    if (existing && existing.foto_url) {
+      setEvidencePhoto(existing.foto_url);
+      setEvidenceNote(existing.nota_evidencia || '');
+    } else {
+      setEvidencePhoto(PHOTO_PRESETS[0].url);
+      setEvidenceNote('');
+    }
     setSelectedTaskId(taskId);
     setShowPhotoModal(true);
+  };
+
+  const handleModalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          setEvidencePhoto(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSavePhotoEvidence = () => {
@@ -793,29 +814,71 @@ export default function EmployeeWorkspace({
                               </p>
                             )}
 
+                            {t.foto_url && (
+                              <div className="mt-2.5 relative inline-block border border-slate-200 rounded-lg overflow-hidden bg-slate-50 shadow-xs max-w-[200px]">
+                                <img src={t.foto_url} alt="Evidencia" className="h-16 w-32 object-cover" />
+                                <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[8px] text-center py-0.5 font-bold truncate">
+                                  Evidencia Adjunta
+                                </span>
+                              </div>
+                            )}
+
                             <div className="flex flex-wrap items-center justify-between gap-2 mt-2.5 pt-2 border-t border-slate-100 text-[10px]">
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
                                   {t.area}
                                 </span>
-                                {t.requiere_foto && (
+                                
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <button
                                     type="button"
                                     onClick={() => handleCompletarConFoto(t.id)}
-                                    className={`font-bold px-2 py-0.5 rounded-md transition-colors ${
+                                    className={`font-bold px-2 py-0.5 rounded-md transition-colors text-[9px] flex items-center gap-1 cursor-pointer ${
                                       t.foto_url
                                         ? 'text-[#4B9CD3] bg-[#EBF5FB]'
-                                        : 'text-amber-700 bg-amber-50 hover:bg-amber-100'
+                                        : t.requiere_foto
+                                        ? 'text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                                        : 'text-slate-600 bg-slate-100 hover:bg-slate-200'
                                     }`}
                                   >
-                                    {t.foto_url ? 'Evidencia Registrada' : 'Adjuntar Evidencia'}
+                                    <ImageIcon className="w-2.5 h-2.5 shrink-0" />
+                                    {t.foto_url ? 'Ver Evidencia' : t.requiere_foto ? 'Adjuntar Evidencia (Obligatoria)' : 'Adjuntar Evidencia'}
                                   </button>
-                                )}
+
+                                  <label className="relative overflow-hidden inline-block cursor-pointer">
+                                    <span className="text-[9px] bg-white text-slate-700 hover:bg-slate-50 px-2 py-0.5 rounded-md font-semibold border border-slate-200 shadow-3xs transition-colors">
+                                      Subir de Galería...
+                                    </span>
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          const reader = new FileReader();
+                                          reader.onloadend = () => {
+                                            if (typeof reader.result === 'string') {
+                                              onUpdateTareaEstado(t.id, t.estado, reader.result, t.nota_evidencia || 'Cargado directo de galería');
+                                            }
+                                          };
+                                          reader.readAsDataURL(file);
+                                        }
+                                      }}
+                                      className="absolute left-0 top-0 opacity-0 cursor-pointer w-full h-full"
+                                    />
+                                  </label>
+                                </div>
                               </div>
 
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2.5">
+                                {t.estado === 'En proceso' && (t.hora_inicio || t.started_at) && (
+                                  <span className="text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 animate-pulse shrink-0">
+                                    Iniciado: {t.hora_inicio || (t.started_at ? new Date(t.started_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '')}
+                                  </span>
+                                )}
+
                                 {isCompleted && (t.hora_fin || t.hora_inicio) && (
-                                  <span className="text-slate-400 font-medium">
+                                  <span className="text-slate-400 font-medium shrink-0">
                                     Completado a las {t.hora_fin || t.hora_inicio}
                                   </span>
                                 )}
@@ -824,10 +887,10 @@ export default function EmployeeWorkspace({
                                   <button
                                     type="button"
                                     onClick={() => onUpdateTareaEstado(t.id, t.estado === 'En proceso' ? 'Pendiente' : 'En proceso')}
-                                    className={`text-[9px] font-bold px-2 py-1 rounded transition-colors ${
+                                    className={`text-[9px] font-black px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
                                       t.estado === 'En proceso'
-                                        ? 'bg-amber-100 text-amber-800'
-                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
                                     }`}
                                   >
                                     {t.estado === 'En proceso' ? 'En Proceso' : 'Marcar En Proceso'}
@@ -1493,9 +1556,9 @@ export default function EmployeeWorkspace({
               <p className="text-[10px] text-slate-500">Esta tarea requiere prueba visual del estándar exigido.</p>
             </div>
 
-            {/* Presets de foto para simulación realista */}
+             {/* Presets de foto para simulación realista */}
             <div className="space-y-1.5">
-              <label className="block text-[10px] font-bold text-slate-400 uppercase">Selecciona imagen de prueba</label>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase">Selecciona imagen de prueba o sube tu archivo</label>
               <div className="grid grid-cols-2 gap-2">
                 {PHOTO_PRESETS.map((p, idx) => (
                   <button
@@ -1512,6 +1575,17 @@ export default function EmployeeWorkspace({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Subir archivo real en el modal */}
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase">Sube una foto real de tu dispositivo</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleModalFileChange}
+                className="w-full text-xs text-slate-500 file:mr-3 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-[#EBF5FB] file:text-[#4B9CD3] hover:file:bg-[#D5EBF9]"
+              />
             </div>
 
             {/* Vista previa de imagen seleccionada */}

@@ -1254,22 +1254,29 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
     }
     if (!data) return null;
 
-    return data.map((t: any) => ({
-      id: String(t.id),
-      titulo: t.title || t.titulo || t.task_name || 'Tarea Sin Título',
-      descripcion: t.description || t.descripcion || '',
-      tipo_tarea: t.type || t.tipo_tarea || 'Apertura',
-      area: t.area || 'Operativa',
-      asignado_a: t.assigned_to || t.asignado_a || t.staff_id || '',
-      estado: (t.status || t.estado || (t.completed ? 'Completada' : 'Pendiente')) as TaskStatus,
-      tiempo_estimado_min: Number(t.tiempo_estimado_min) || 15,
-      hora_inicio: t.hora_inicio || '08:00',
-      hora_fin: t.hora_fin || '08:30',
-      requiere_foto: Boolean(t.requires_photo ?? t.requiere_foto),
-      fecha: t.date || t.fecha || '2026-08-20',
-      foto_url: t.photo_url || t.foto_url,
-      nota_evidencia: t.evidence_note || t.nota_evidencia
-    }));
+    return data.map((t: any) => {
+      let rawEstado = t.estado || t.status || (t.completed ? 'Completada' : 'Pendiente');
+      if (rawEstado === 'en_proceso' || rawEstado === 'En Proceso' || rawEstado === 'en-proceso') {
+        rawEstado = 'En proceso';
+      }
+      return {
+        id: String(t.id),
+        titulo: t.title || t.titulo || t.task_name || 'Tarea Sin Título',
+        descripcion: t.description || t.descripcion || '',
+        tipo_tarea: t.type || t.tipo_tarea || 'Apertura',
+        area: t.area || 'Operativa',
+        asignado_a: t.assigned_to || t.asignado_a || t.staff_id || '',
+        estado: rawEstado as TaskStatus,
+        tiempo_estimado_min: Number(t.tiempo_estimado_min) || 15,
+        hora_inicio: t.hora_inicio || '',
+        hora_fin: t.hora_fin || '',
+        requiere_foto: Boolean(t.requires_photo ?? t.requiere_foto),
+        fecha: t.date || t.fecha || '2026-08-20',
+        foto_url: t.photo_url || t.foto_url,
+        nota_evidencia: t.evidence_note || t.nota_evidencia,
+        started_at: t.started_at || undefined
+      };
+    });
   } catch (err) {
     console.warn('Exception in fetchDailyTasksFromSupabase:', err);
     return null;
@@ -1353,12 +1360,16 @@ export async function updateDailyTaskStatusInSupabase(
 
   try {
     const payload: any = {
-      status: estado,
+      status: estado === 'En proceso' ? 'en_proceso' : estado,
       estado: estado,
       completed: completed,
       completed_at: completed ? new Date().toISOString() : null,
       updated_at: new Date().toISOString()
     };
+
+    if (estado === 'En proceso') {
+      payload.started_at = new Date().toISOString();
+    }
 
     if (foto_url !== undefined) {
       payload.photo_url = foto_url;

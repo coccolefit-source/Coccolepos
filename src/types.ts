@@ -22,6 +22,7 @@ export interface Tarea {
   foto_url?: string;
   nota_evidencia?: string;
   tipo_tarea?: string;
+  started_at?: string;
 }
 
 export interface ProductoPromocion {
