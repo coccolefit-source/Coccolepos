@@ -767,44 +767,38 @@ export default function AdminDashboard({
       }
     ];
 
-    const cajeEmp = empleados.find(e => e.area_preferida === 'Atención/Caja') || empleados[0];
-    const cocinEmp = empleados.find(e => e.area_preferida === 'Cocina/Preparación') || empleados[1] || empleados[0];
-    const empaqEmp = empleados.find(e => e.area_preferida === 'Empaque/Despacho') || empleados[2] || empleados[0];
-    const limpEmp = empleados.find(e => e.area_preferida === 'Limpieza') || empleados[3] || empleados[0];
-
-    const getAssigneeId = (area: string) => {
-      if (area === "Atención/Caja") return cajeEmp.id;
-      if (area === "Cocina/Preparación") return cocinEmp.id;
-      if (area === "Empaque/Despacho") return empaqEmp.id;
-      if (area === "Limpieza") return limpEmp.id;
-      return empleados[0].id;
-    };
-
-    if (confirm(`¿Estás seguro que deseas generar la asignación diaria con las 24 tareas oficiales para hoy? Se asignarán inteligentemente según las áreas de los colaboradores.`)) {
+    if (confirm(`¿Estás seguro que deseas generar y asignar las 24 tareas predeterminadas a cada uno de los colaboradores en orden estricto?`)) {
       try {
-        const tareasParaCrear = defaultTasksTemplates.map(template => ({
-          titulo: template.titulo,
-          descripcion: template.descripcion,
-          area: template.area as AreaType,
-          fecha: '2026-08-20',
-          estado: 'Pendiente' as const,
-          asignado_a: getAssigneeId(template.area),
-          tiempo_estimado_min: template.tiempo_estimado_min,
-          requiere_foto: template.requiere_foto,
-          tipo_tarea: template.tipo_tarea
-        }));
+        const tareasParaCrear: Omit<Tarea, 'id'>[] = [];
+        
+        // Recorrer cada empleado y generar sus 24 tareas oficiales en orden estricto
+        for (const emp of empleados) {
+          for (const template of defaultTasksTemplates) {
+            tareasParaCrear.push({
+              titulo: template.titulo,
+              descripcion: template.descripcion,
+              area: template.area as AreaType,
+              fecha: '2026-08-20',
+              estado: 'Pendiente' as const,
+              asignado_a: emp.id,
+              tiempo_estimado_min: template.tiempo_estimado_min,
+              requiere_foto: template.requiere_foto,
+              tipo_tarea: template.tipo_tarea
+            });
+          }
+        }
 
         if (onAddTareasBulk) {
           const ok = await onAddTareasBulk(tareasParaCrear);
           if (ok) {
-            alert("¡Éxito! Las 24 tareas oficiales han sido generadas y asignadas correctamente.");
+            alert("¡Éxito! Las 24 tareas se han generado y asignado a todos los trabajadores en orden!");
           }
         } else {
           // Fallback sequential
           for (const item of tareasParaCrear) {
             await onAddTarea(item);
           }
-          alert("¡Éxito! Las 24 tareas oficiales han sido generadas y asignadas correctamente.");
+          alert("¡Éxito! Las 24 tareas se han generado y asignado a todos los trabajadores en orden!");
         }
       } catch (err: any) {
         console.error("Error al autogenerar tareas:", err);
