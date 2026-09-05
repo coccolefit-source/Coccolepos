@@ -1074,6 +1074,9 @@ export function subscribeToRealtimeUpdates(
     .on('postgres_changes', { event: '*', schema: 'public', table: 'productos_promocion' }, () => {
       if (onCampaignUpdate) onCampaignUpdate();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'upsell_rules' }, () => {
+      if (onCampaignUpdate) onCampaignUpdate();
+    })
     .subscribe();
 
   return () => {
@@ -1482,28 +1485,38 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
 
   try {
     const { data, error } = await client
-      .from('campaign_products')
+      .from('upsell_rules')
       .select('*');
 
     if (error || !data || data.length === 0) {
-      // fallback to alternative table
-      const { data: altData, error: altError } = await client.from('productos_promocion').select('*');
-      if (altError || !altData) return [];
+      // fallback to campaign_products and alternative table
+      const { data: altData, error: altError } = await client.from('campaign_products').select('*');
+      if (altError || !altData || altData.length === 0) {
+        const { data: altData2 } = await client.from('productos_promocion').select('*');
+        if (!altData2) return [];
+        return altData2.map((d: any) => ({
+          id: d.id,
+          nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+          fecha: d.fecha || d.date || '2026-08-20',
+          meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+          puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
+        }));
+      }
       return altData.map((d: any) => ({
         id: d.id,
-        nombre_producto: d.nombre_producto || d.name || '',
+        nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
         fecha: d.fecha || d.date || '2026-08-20',
-        meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? 15),
-        puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? 10)
+        meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+        puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
       }));
     }
 
     return data.map((d: any) => ({
       id: d.id,
-      nombre_producto: d.nombre_producto || d.name || '',
+      nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
       fecha: d.fecha || d.date || '2026-08-20',
-      meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? 15),
-      puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? 10)
+      meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+      puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
     }));
   } catch (err) {
     console.error('Error fetching campaign products from Supabase:', err);
@@ -1520,18 +1533,28 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       id: prod.id,
       nombre_producto: prod.nombre_producto,
       name: prod.nombre_producto,
+      producto_sugerido_nombre: prod.nombre_producto,
+      producto_base_nombre: prod.nombre_producto,
       fecha: prod.fecha,
       date: prod.fecha,
       meta_diaria_unidades: prod.meta_diaria_unidades,
       meta: prod.meta_diaria_unidades,
+      meta_diaria: prod.meta_diaria_unidades,
       puntos_por_unidad: prod.puntos_por_unidad,
       points: prod.puntos_por_unidad,
+      puntos: prod.puntos_por_unidad,
+      descuento_promocional_pct: 0,
+      activa: true,
       created_at: new Date().toISOString()
     };
 
-    let { success } = await insertWithResilientColumns(client, 'campaign_products', payload);
+    let { success } = await insertWithResilientColumns(client, 'upsell_rules', payload);
     if (!success) {
-      const { success: altSuccess } = await insertWithResilientColumns(client, 'productos_promocion', payload);
+      const { success: altSuccess } = await insertWithResilientColumns(client, 'campaign_products', payload);
+      if (!altSuccess) {
+        const { success: altSuccess2 } = await insertWithResilientColumns(client, 'productos_promocion', payload);
+        return altSuccess2;
+      }
       return altSuccess;
     }
     return true;
@@ -1549,18 +1572,28 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
     const payload = {
       nombre_producto: prod.nombre_producto,
       name: prod.nombre_producto,
+      producto_sugerido_nombre: prod.nombre_producto,
+      producto_base_nombre: prod.nombre_producto,
       fecha: prod.fecha,
       date: prod.fecha,
       meta_diaria_unidades: prod.meta_diaria_unidades,
       meta: prod.meta_diaria_unidades,
+      meta_diaria: prod.meta_diaria_unidades,
       puntos_por_unidad: prod.puntos_por_unidad,
       points: prod.puntos_por_unidad,
+      puntos: prod.puntos_por_unidad,
+      descuento_promocional_pct: 0,
+      activa: true,
       updated_at: new Date().toISOString()
     };
 
-    let { success } = await updateWithResilientColumns(client, 'campaign_products', payload, prod.id);
+    let { success } = await updateWithResilientColumns(client, 'upsell_rules', payload, prod.id);
     if (!success) {
-      const { success: altSuccess } = await updateWithResilientColumns(client, 'productos_promocion', payload, prod.id);
+      const { success: altSuccess } = await updateWithResilientColumns(client, 'campaign_products', payload, prod.id);
+      if (!altSuccess) {
+        const { success: altSuccess2 } = await updateWithResilientColumns(client, 'productos_promocion', payload, prod.id);
+        return altSuccess2;
+      }
       return altSuccess;
     }
     return true;
@@ -1575,10 +1608,13 @@ export async function deleteCampaignProductFromSupabase(id: string): Promise<boo
   if (!client) return false;
 
   try {
-    const { error } = await client.from('campaign_products').delete().eq('id', String(id));
+    const { error } = await client.from('upsell_rules').delete().eq('id', String(id));
     if (error) {
-      const { error: altError } = await client.from('productos_promocion').delete().eq('id', String(id));
-      if (altError) return false;
+      const { error: altError } = await client.from('campaign_products').delete().eq('id', String(id));
+      if (altError) {
+        const { error: altError2 } = await client.from('productos_promocion').delete().eq('id', String(id));
+        if (altError2) return false;
+      }
     }
     return true;
   } catch (err) {

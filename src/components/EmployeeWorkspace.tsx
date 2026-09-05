@@ -9,6 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
@@ -76,6 +77,56 @@ export default function EmployeeWorkspace({
   onRegistrarCuadreCaja,
   onConfirmarLecturaAnuncio,
 }: EmployeeWorkspaceProps) {
+  const [localProductos, setLocalProductos] = useState<ProductoPromocion[]>(productos);
+
+  // Sincronizar localProductos si cambian las props
+  useEffect(() => {
+    setLocalProductos(productos);
+  }, [productos]);
+
+  // Suscripción en Tiempo Real para los productos de campaña (upsell_rules)
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    const fetchUpsellRules = async () => {
+      try {
+        const { data, error } = await client
+          .from('upsell_rules')
+          .select('*');
+
+        if (!error && data) {
+          const mapped: ProductoPromocion[] = data.map((d: any) => ({
+            id: d.id,
+            nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+            fecha: d.fecha || d.date || '2026-08-20',
+            meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+            puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
+          }));
+          setLocalProductos(mapped);
+        }
+      } catch (err) {
+        console.error('Error in EmployeeWorkspace fetchUpsellRules:', err);
+      }
+    };
+
+    const channel = client
+      .channel('upsell_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'upsell_rules' },
+        (payload) => {
+          console.log('Cambio detectado en upsell_rules:', payload);
+          fetchUpsellRules();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, []);
+
   // Filtrar tareas asignadas a este empleado hoy y ordenarlas secuencialmente
   const misTareas = tareas
     .filter(t => t.asignado_a === empleado.id && (t.fecha === '2026-08-20' || !t.fecha))
@@ -88,7 +139,7 @@ export default function EmployeeWorkspace({
   const miFichaje = fichajes.find(f => f.usuario_id === empleado.id && f.fecha === '2026-08-20');
 
   // Obtener ranking de este empleado en la vista "diario"
-  const leaderboardData = calculateLeaderboard(usuarios, tareas, ventas, fichajes, productos, 'diario', '2026-08-20', posVentas.length > 0 ? posVentas : ventasRegistradas, rankingWeights);
+  const leaderboardData = calculateLeaderboard(usuarios, tareas, ventas, fichajes, localProductos, 'diario', '2026-08-20', posVentas.length > 0 ? posVentas : ventasRegistradas, rankingWeights);
 
   const miPosicion = leaderboardData.findIndex(item => item.usuario.id === empleado.id) + 1;
   const misPuntos = leaderboardData.find(item => item.usuario.id === empleado.id)?.puntosTotales || 0;
@@ -632,46 +683,50 @@ export default function EmployeeWorkspace({
           </h4>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {productos.slice(0, 2).map(prod => {
-              const currentSold = getVentasProductoCount(prod.id);
-              const progressPct = Math.min((currentSold / prod.meta_diaria_unidades) * 100, 100);
-              return (
-                <div key={prod.id} className="bg-white border border-[#E2E8F0] p-3.5 rounded-xl shadow-3xs flex items-center justify-between gap-3 relative">
-                  <div className="flex-1">
-                    <p className="text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider">
-                      +{prod.puntos_por_unidad} PTS / UNIDAD
-                    </p>
-                    <h5 className="font-black text-xs text-[#2C3E50] mt-0.5">{prod.nombre_producto}</h5>
-                    
-                    {/* Barra de progreso de meta */}
-                    <div className="mt-2.5 flex items-center gap-2">
-                      <div className="flex-1 h-2 bg-[#FFFDF6] rounded-full overflow-hidden border border-[#E2E8F0]">
-                        <div className="h-full bg-[#4B9CD3]" style={{ width: `${progressPct}%` }}></div>
+            {(() => {
+              const hoyCampanas = localProductos.filter(p => p.fecha === '2026-08-20');
+              const displayCampanas = hoyCampanas.length > 0 ? hoyCampanas : localProductos;
+              return displayCampanas.slice(0, 2).map(prod => {
+                const currentSold = getVentasProductoCount(prod.id);
+                const progressPct = Math.min((currentSold / prod.meta_diaria_unidades) * 100, 100);
+                return (
+                  <div key={prod.id} className="bg-white border border-[#E2E8F0] p-3.5 rounded-xl shadow-3xs flex items-center justify-between gap-3 relative">
+                    <div className="flex-1">
+                      <p className="text-[10px] font-extrabold text-[#4B9CD3] uppercase tracking-wider">
+                        +{prod.puntos_por_unidad} PTS / UNIDAD
+                      </p>
+                      <h5 className="font-black text-xs text-[#2C3E50] mt-0.5">{prod.nombre_producto}</h5>
+                      
+                      {/* Barra de progreso de meta */}
+                      <div className="mt-2.5 flex items-center gap-2">
+                        <div className="flex-1 h-2 bg-[#FFFDF6] rounded-full overflow-hidden border border-[#E2E8F0]">
+                          <div className="h-full bg-[#4B9CD3]" style={{ width: `${progressPct}%` }}></div>
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-600">{currentSold}/{prod.meta_diaria_unidades}</span>
                       </div>
-                      <span className="text-[9px] font-bold text-slate-600">{currentSold}/{prod.meta_diaria_unidades}</span>
                     </div>
-                  </div>
 
-                  <button
-                    id={`increment-btn-${prod.id}`}
-                    onClick={() => {
-                      const prodCat = productosCatalogo?.find(pc => pc.nombre.toLowerCase().includes(prod.nombre_producto.toLowerCase()));
-                      const precio = prodCat?.precio || 45.00;
-                      setMandatoryPaymentModal({
-                        kind: 'sugerida',
-                        sugeridaProdId: prod.id,
-                        articulos: [{ nombre: prod.nombre_producto, cantidad: 1, subtotal: precio }],
-                        total: precio
-                      });
-                    }}
-                    className="h-10 w-10 bg-[#4B9CD3] hover:bg-[#3A82B4] active:scale-95 text-white rounded-lg flex items-center justify-center font-black text-lg transition-all shadow-2xs relative cursor-pointer"
-                    title="Vender 1 unidad"
-                  >
-                    +1
-                  </button>
-                </div>
-              );
-            })}
+                    <button
+                      id={`increment-btn-${prod.id}`}
+                      onClick={() => {
+                        const prodCat = productosCatalogo?.find(pc => pc.nombre.toLowerCase().includes(prod.nombre_producto.toLowerCase()));
+                        const precio = prodCat?.precio || 45.00;
+                        setMandatoryPaymentModal({
+                          kind: 'sugerida',
+                          sugeridaProdId: prod.id,
+                          articulos: [{ nombre: prod.nombre_producto, cantidad: 1, subtotal: precio }],
+                          total: precio
+                        });
+                      }}
+                      className="h-10 w-10 bg-[#4B9CD3] hover:bg-[#3A82B4] active:scale-95 text-white rounded-lg flex items-center justify-center font-black text-lg transition-all shadow-2xs relative cursor-pointer"
+                      title="Vender 1 unidad"
+                    >
+                      +1
+                    </button>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
 
