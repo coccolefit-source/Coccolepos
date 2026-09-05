@@ -76,8 +76,10 @@ export default function EmployeeWorkspace({
   onRegistrarCuadreCaja,
   onConfirmarLecturaAnuncio,
 }: EmployeeWorkspaceProps) {
-  // Filtrar tareas asignadas a este empleado hoy
-  const misTareas = tareas.filter(t => t.asignado_a === empleado.id && (t.fecha === '2026-08-20' || !t.fecha));
+  // Filtrar tareas asignadas a este empleado hoy y ordenarlas secuencialmente
+  const misTareas = tareas
+    .filter(t => t.asignado_a === empleado.id && (t.fecha === '2026-08-20' || !t.fecha))
+    .sort((a, b) => (a.orden || 0) - (b.orden || 0));
   const tareasCompletadasCount = misTareas.filter(t => t.estado === 'Completada').length;
   const totalTareasCount = misTareas.length;
   const porcentajeCumplimientoTareas = totalTareasCount > 0 ? Math.round((tareasCompletadasCount / totalTareasCount) * 100) : 100;

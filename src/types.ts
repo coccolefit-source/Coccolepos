@@ -24,6 +24,7 @@ export interface Tarea {
   tipo_tarea?: string;
   started_at?: string;
   completed_at?: string;
+  orden?: number;
 }
 
 export interface ProductoPromocion {

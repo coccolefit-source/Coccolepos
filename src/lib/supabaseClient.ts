@@ -1430,6 +1430,8 @@ export async function insertDailyTaskInSupabase(tarea: Tarea, staffName?: string
       requiere_foto: tarea.requiere_foto,
       date: tarea.fecha || new Date().toISOString().split('T')[0],
       fecha: tarea.fecha || new Date().toISOString().split('T')[0],
+      orden: tarea.orden,
+      order_index: tarea.orden,
       created_at: new Date().toISOString()
     };
 

@@ -773,7 +773,7 @@ export default function AdminDashboard({
         
         // Recorrer cada empleado y generar sus 24 tareas oficiales en orden estricto
         for (const emp of empleados) {
-          for (const template of defaultTasksTemplates) {
+          defaultTasksTemplates.forEach((template, index) => {
             tareasParaCrear.push({
               titulo: template.titulo,
               descripcion: template.descripcion,
@@ -783,9 +783,10 @@ export default function AdminDashboard({
               asignado_a: emp.id,
               tiempo_estimado_min: template.tiempo_estimado_min,
               requiere_foto: template.requiere_foto,
-              tipo_tarea: template.tipo_tarea
+              tipo_tarea: template.tipo_tarea,
+              orden: index + 1
             });
-          }
+          });
         }
 
         if (onAddTareasBulk) {
@@ -1509,7 +1510,12 @@ export default function AdminDashboard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E5EAE4] text-xs">
-                    {tareas.map(t => (
+                    {[...tareas].sort((a, b) => {
+                      const empA = getEmpleadoNombre(a.asignado_a);
+                      const empB = getEmpleadoNombre(b.asignado_a);
+                      if (empA !== empB) return empA.localeCompare(empB);
+                      return (a.orden || 0) - (b.orden || 0);
+                    }).map(t => (
                       <tr key={t.id} className="hover:bg-[#FFFDF6]/50">
                         <td className="py-3 px-3 max-w-[180px]">
                           <p className="font-bold text-[#2C3E50] truncate" title={t.titulo}>
