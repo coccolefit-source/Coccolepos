@@ -39,7 +39,11 @@ import {
   fetchPinResetRequestsFromSupabase,
   insertDailyTaskInSupabase,
   updateDailyTaskStatusInSupabase,
-  deleteDailyTaskFromSupabase
+  deleteDailyTaskFromSupabase,
+  fetchCampaignProductsFromSupabase,
+  insertCampaignProductInSupabase,
+  updateCampaignProductInSupabase,
+  deleteCampaignProductFromSupabase
 } from './lib/supabaseClient';
 
 
@@ -195,13 +199,14 @@ export default function App() {
 
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
-      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell] = await Promise.all([
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds] = await Promise.all([
         fetchDailyTasksFromSupabase('2026-08-20'),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
         fetchProfilesFromSupabase(),
         fetchRankingWeightsFromSupabase(),
-        fetchUpsellRulesFromSupabase()
+        fetchUpsellRulesFromSupabase(),
+        fetchCampaignProductsFromSupabase()
       ]);
 
       setState(prev => {
@@ -224,6 +229,7 @@ export default function App() {
           tareas: supaTasks && supaTasks.length > 0 ? supaTasks : prev.tareas,
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
           inventario: supaInventory && supaInventory.length > 0 ? supaInventory : prev.inventario,
+          productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
         };
       });
 
@@ -274,12 +280,13 @@ export default function App() {
 
     async function syncFromSupabase() {
       try {
-        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries] = await Promise.all([
+        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds] = await Promise.all([
           fetchProfilesFromSupabase(),
           fetchSalesFromSupabase(),
           fetchCustomersFromSupabase(),
           fetchInventoryFromSupabase(),
-          fetchTimeEntriesFromSupabase()
+          fetchTimeEntriesFromSupabase(),
+          fetchCampaignProductsFromSupabase()
         ]);
 
         setState(prev => ({
@@ -288,6 +295,7 @@ export default function App() {
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
           clientes: supaCustomers && supaCustomers.length > 0 ? supaCustomers : prev.clientes,
           inventario: supaInventory && supaInventory.length > 0 ? supaInventory : prev.inventario,
+          productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
             id: f.id,
             usuario_id: f.empleado_id,
@@ -317,6 +325,12 @@ export default function App() {
         const inv = await fetchInventoryFromSupabase();
         if (inv) {
           setState(prev => ({ ...prev, inventario: inv }));
+        }
+      },
+      async () => {
+        const campaignProds = await fetchCampaignProductsFromSupabase();
+        if (campaignProds && campaignProds.length > 0) {
+          setState(prev => ({ ...prev, productos: campaignProds }));
         }
       }
     );
@@ -719,16 +733,87 @@ export default function App() {
 
   // --- ACTIONS: PRODUCTOS A PROMOCIONAR ---
 
-  const handleAddProducto = (newProd: Omit<ProductoPromocion, 'id'>) => {
+  const handleAddProducto = async (newProd: Omit<ProductoPromocion, 'id'>) => {
     const prod: ProductoPromocion = {
       ...newProd,
       id: `prod-${Date.now()}`
     };
+
+    // Actualización local para velocidad inmediata de interfaz
     setState(prev => ({
       ...prev,
       productos: [prod, ...prev.productos]
     }));
-    pushNotification(`Se agregó "${newProd.nombre_producto}" a la campaña diaria. Meta: ${newProd.meta_diaria_unidades}.`, 'success');
+
+    if (!isSupabaseConfigured()) {
+      pushNotification(`Se agregó "${newProd.nombre_producto}" a la campaña diaria. Meta: ${newProd.meta_diaria_unidades}.`, 'success');
+      return;
+    }
+
+    try {
+      const ok = await insertCampaignProductInSupabase(prod);
+      if (ok) {
+        pushNotification(`¡Sincronizado! Se agregó "${newProd.nombre_producto}" a la nube.`, 'success');
+      } else {
+        pushNotification(`Se agregó "${newProd.nombre_producto}" localmente (Error al guardar en Supabase)`, 'info');
+      }
+      await cargarDatosSilencioso();
+    } catch (err) {
+      console.error('Error insertando producto de campaña en Supabase:', err);
+    }
+  };
+
+  const handleEditProducto = async (updatedProd: ProductoPromocion) => {
+    // Actualización local para velocidad inmediata de interfaz
+    setState(prev => ({
+      ...prev,
+      productos: prev.productos.map(p => p.id === updatedProd.id ? updatedProd : p)
+    }));
+
+    if (!isSupabaseConfigured()) {
+      pushNotification(`Se actualizó "${updatedProd.nombre_producto}" en la campaña diaria.`, 'success');
+      return;
+    }
+
+    try {
+      const ok = await updateCampaignProductInSupabase(updatedProd);
+      if (ok) {
+        pushNotification(`¡Sincronizado! Se actualizó "${updatedProd.nombre_producto}" en la nube.`, 'success');
+      } else {
+        pushNotification(`Se actualizó "${updatedProd.nombre_producto}" localmente (Error al sincronizar)`, 'info');
+      }
+      await cargarDatosSilencioso();
+    } catch (err) {
+      console.error('Error actualizando producto de campaña en Supabase:', err);
+    }
+  };
+
+  const handleDeleteProducto = async (id: string) => {
+    const prodToDelete = state.productos.find(p => p.id === id);
+    if (!prodToDelete) return;
+
+    // Actualización local para velocidad inmediata de interfaz
+    setState(prev => ({
+      ...prev,
+      productos: prev.productos.filter(p => p.id !== id)
+    }));
+
+    if (!isSupabaseConfigured()) {
+      pushNotification(`Se eliminó "${prodToDelete.nombre_producto}" de la campaña diaria.`, 'info');
+      return;
+    }
+
+    try {
+      const ok = await deleteCampaignProductFromSupabase(id);
+      if (ok) {
+        pushNotification(`¡Sincronizado! Se eliminó "${prodToDelete.nombre_producto}" de la nube.`, 'info');
+      } else {
+        pushNotification(`Se eliminó "${prodToDelete.nombre_producto}" localmente (Error al borrar de Supabase)`, 'info');
+      }
+      await cargarDatosSilencioso();
+    } catch (err) {
+      console.error('Error eliminando producto de campaña de Supabase:', err);
+    }
   };
 
   // --- ACTIONS: VENTAS SUGERIDAS (+1 CONTADOR EXPRESS) ---
@@ -2009,6 +2094,8 @@ export default function App() {
                 onEditTarea={handleEditTarea}
                 onDeleteTarea={handleDeleteTarea}
                 onAddProducto={handleAddProducto}
+                onEditProducto={handleEditProducto}
+                onDeleteProducto={handleDeleteProducto}
                 onAddAnuncio={handleAddAnuncio}
                 onResolveIncidencia={handleResolveIncidencia}
                 onAddFeedback={handleAddFeedback}

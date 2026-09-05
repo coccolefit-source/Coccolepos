@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus } from '../types';
+import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion } from '../types';
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
@@ -1054,7 +1054,8 @@ export async function insertTimeEntryInSupabase(fichaje: any): Promise<boolean> 
 // ------------------------------------------------------------------
 export function subscribeToRealtimeUpdates(
   onSalesUpdate?: () => void,
-  onInventoryUpdate?: () => void
+  onInventoryUpdate?: () => void,
+  onCampaignUpdate?: () => void
 ) {
   const client = getSupabaseClient();
   if (!client) return () => {};
@@ -1066,6 +1067,12 @@ export function subscribeToRealtimeUpdates(
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => {
       if (onInventoryUpdate) onInventoryUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_products' }, () => {
+      if (onCampaignUpdate) onCampaignUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'productos_promocion' }, () => {
+      if (onCampaignUpdate) onCampaignUpdate();
     })
     .subscribe();
 
@@ -1465,6 +1472,117 @@ export async function deleteDailyTaskFromSupabase(id: string): Promise<boolean> 
     return true;
   } catch (err) {
     console.error('Exception in deleteDailyTaskFromSupabase:', err);
+    return false;
+  }
+}
+
+export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromocion[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  try {
+    const { data, error } = await client
+      .from('campaign_products')
+      .select('*');
+
+    if (error || !data || data.length === 0) {
+      // fallback to alternative table
+      const { data: altData, error: altError } = await client.from('productos_promocion').select('*');
+      if (altError || !altData) return [];
+      return altData.map((d: any) => ({
+        id: d.id,
+        nombre_producto: d.nombre_producto || d.name || '',
+        fecha: d.fecha || d.date || '2026-08-20',
+        meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? 15),
+        puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? 10)
+      }));
+    }
+
+    return data.map((d: any) => ({
+      id: d.id,
+      nombre_producto: d.nombre_producto || d.name || '',
+      fecha: d.fecha || d.date || '2026-08-20',
+      meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? 15),
+      puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? 10)
+    }));
+  } catch (err) {
+    console.error('Error fetching campaign products from Supabase:', err);
+    return [];
+  }
+}
+
+export async function insertCampaignProductInSupabase(prod: ProductoPromocion): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const payload = {
+      id: prod.id,
+      nombre_producto: prod.nombre_producto,
+      name: prod.nombre_producto,
+      fecha: prod.fecha,
+      date: prod.fecha,
+      meta_diaria_unidades: prod.meta_diaria_unidades,
+      meta: prod.meta_diaria_unidades,
+      puntos_por_unidad: prod.puntos_por_unidad,
+      points: prod.puntos_por_unidad,
+      created_at: new Date().toISOString()
+    };
+
+    let { success } = await insertWithResilientColumns(client, 'campaign_products', payload);
+    if (!success) {
+      const { success: altSuccess } = await insertWithResilientColumns(client, 'productos_promocion', payload);
+      return altSuccess;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in insertCampaignProductInSupabase:', err);
+    return false;
+  }
+}
+
+export async function updateCampaignProductInSupabase(prod: ProductoPromocion): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const payload = {
+      nombre_producto: prod.nombre_producto,
+      name: prod.nombre_producto,
+      fecha: prod.fecha,
+      date: prod.fecha,
+      meta_diaria_unidades: prod.meta_diaria_unidades,
+      meta: prod.meta_diaria_unidades,
+      puntos_por_unidad: prod.puntos_por_unidad,
+      points: prod.puntos_por_unidad,
+      updated_at: new Date().toISOString()
+    };
+
+    let { success } = await updateWithResilientColumns(client, 'campaign_products', payload, prod.id);
+    if (!success) {
+      const { success: altSuccess } = await updateWithResilientColumns(client, 'productos_promocion', payload, prod.id);
+      return altSuccess;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in updateCampaignProductInSupabase:', err);
+    return false;
+  }
+}
+
+export async function deleteCampaignProductFromSupabase(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const { error } = await client.from('campaign_products').delete().eq('id', String(id));
+    if (error) {
+      const { error: altError } = await client.from('productos_promocion').delete().eq('id', String(id));
+      if (altError) return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in deleteCampaignProductFromSupabase:', err);
     return false;
   }
 }

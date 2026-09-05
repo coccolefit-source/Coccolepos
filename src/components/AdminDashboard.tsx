@@ -38,6 +38,8 @@ export interface AdminDashboardProps {
   onEditTarea: (tarea: Tarea) => void;
   onDeleteTarea: (id: string) => void;
   onAddProducto: (producto: Omit<ProductoPromocion, 'id'>) => void;
+  onEditProducto?: (producto: ProductoPromocion) => void;
+  onDeleteProducto?: (id: string) => void;
   onAddAnuncio: (anuncio: Omit<Anuncio, 'id'>) => void;
   onResolveIncidencia: (id: string) => void;
   onAddFeedback: (feedback: Omit<Feedback, 'id' | 'fecha'>) => void;
@@ -89,6 +91,8 @@ export default function AdminDashboard({
   onEditTarea,
   onDeleteTarea,
   onAddProducto,
+  onEditProducto,
+  onDeleteProducto,
   onAddAnuncio,
   onResolveIncidencia,
   onAddFeedback,
@@ -112,6 +116,11 @@ export default function AdminDashboard({
   const setActiveTab = propSetActiveTab || setLocalActiveTab;
 
   const [selectedPreviewPhoto, setSelectedPreviewPhoto] = useState<string | null>(null);
+
+  // Estado para edición y eliminación de productos de campaña
+  const [editingCampProd, setEditingCampProd] = useState<ProductoPromocion | null>(null);
+  const [showEditCampProdModal, setShowEditCampProdModal] = useState(false);
+  const [deleteCampProdId, setDeleteCampProdId] = useState<string | null>(null);
 
   // Ticker para actualizar la duración transcurrida de tareas en tiempo real
   const [ticker, setTicker] = useState(0);
@@ -1682,7 +1691,27 @@ export default function AdminDashboard({
                         <span className="text-xs font-extrabold text-[#4B9CD3] bg-[#EBF5FB] px-2 py-0.5 rounded-md">
                           +{p.puntos_por_unidad} PTS / VENTA
                         </span>
-                        <span className="text-[10px] text-slate-400">Hoy</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingCampProd({ ...p });
+                              setShowEditCampProdModal(true);
+                            }}
+                            className="p-1 hover:bg-[#D4E6F1] text-slate-500 hover:text-[#2E86C1] rounded transition-colors cursor-pointer"
+                            title="Editar"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setDeleteCampProdId(p.id);
+                            }}
+                            className="p-1 hover:bg-rose-100 text-slate-500 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       <h4 className="font-extrabold text-[#2C3E50] text-sm mt-2.5">{p.nombre_producto}</h4>
                     </div>
@@ -4948,6 +4977,158 @@ export default function AdminDashboard({
                 }`}
               >
                 Confirmar Anulación
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDICIÓN DE PRODUCTO DE CAMPAÑA */}
+      {showEditCampProdModal && editingCampProd && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (onEditProducto) {
+                onEditProducto(editingCampProd);
+              }
+              setShowEditCampProdModal(false);
+              setEditingCampProd(null);
+            }}
+            className="bg-[#FFFDF6] border-2 border-[#4B9CD3] rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 text-[#2C3E50] relative animate-in fade-in zoom-in-95 duration-150"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditCampProdModal(false);
+                setEditingCampProd(null);
+              }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-extrabold text-xs w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer"
+              title="Cerrar"
+            >
+              X
+            </button>
+
+            <div className="border-b border-[#E2E8F0] pb-3">
+              <h3 className="text-base font-extrabold text-[#2C3E50]">
+                Editar Producto de Campaña
+              </h3>
+              <p className="text-xs text-slate-500 font-medium">
+                Modifica los parámetros para sugerencias de venta.
+              </p>
+            </div>
+
+            <div className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nombre del Producto / Campaña
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingCampProd.nombre_producto}
+                  onChange={(e) => setEditingCampProd({ ...editingCampProd, nombre_producto: e.target.value })}
+                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] font-medium text-[#2C3E50] bg-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Meta Diaria (Unidades)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    value={editingCampProd.meta_diaria_unidades}
+                    onChange={(e) => setEditingCampProd({ ...editingCampProd, meta_diaria_unidades: Number(e.target.value) })}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] font-medium text-[#2C3E50] bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Puntos por Unidad
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    value={editingCampProd.puntos_por_unidad}
+                    onChange={(e) => setEditingCampProd({ ...editingCampProd, puntos_por_unidad: Number(e.target.value) })}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] font-medium text-[#2C3E50] bg-white"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-[#E2E8F0]">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditCampProdModal(false);
+                  setEditingCampProd(null);
+                }}
+                className="flex-1 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer text-center"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="flex-1 py-2 px-4 text-white bg-[#4B9CD3] hover:bg-[#357CA5] font-extrabold text-xs rounded-xl transition-colors cursor-pointer text-center shadow-sm"
+              >
+                Guardar Cambios
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* CONFIRMACIÓN DE ELIMINACIÓN DE PRODUCTO DE CAMPAÑA */}
+      {deleteCampProdId && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#FFFDF6] border-2 border-rose-500 rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4 text-[#2C3E50] relative animate-in fade-in zoom-in-95 duration-150">
+            <button
+              type="button"
+              onClick={() => setDeleteCampProdId(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-extrabold text-xs w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer"
+              title="Cerrar"
+            >
+              X
+            </button>
+
+            <div className="text-center space-y-2 pb-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-rose-600 block">
+                Advertencia
+              </span>
+              <h3 className="text-base font-extrabold text-[#2C3E50]">
+                ¿Eliminar Producto de Campaña?
+              </h3>
+              <p className="text-xs text-slate-600 font-medium">
+                Esta acción retirará el producto seleccionado de la campaña de ventas sugeridas.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-[#E2E8F0]">
+              <button
+                type="button"
+                onClick={() => setDeleteCampProdId(null)}
+                className="flex-1 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer text-center"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteProducto) {
+                    onDeleteProducto(deleteCampProdId);
+                  }
+                  setDeleteCampProdId(null);
+                }}
+                className="flex-1 py-2 px-4 text-white bg-rose-600 hover:bg-rose-700 font-extrabold text-xs rounded-xl transition-colors cursor-pointer text-center shadow-sm"
+              >
+                Eliminar
               </button>
             </div>
           </div>
