@@ -170,209 +170,254 @@ export const INITIAL_ANUNCIOS: Anuncio[] = [
   }
 ];
 
-export const INITIAL_TAREAS: Tarea[] = [
-  {
-    id: 'tsk-1',
-    titulo: 'Sanitizar barra de preparación y bowls de ensalada',
-    descripcion: 'Limpiar con solución desinfectante de grado alimenticio antes de iniciar el turno de la mañana.',
-    area: 'Cocina/Preparación',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-2',
-    tiempo_estimado_min: 20,
-    hora_inicio: '07:00',
-    hora_fin: '07:18',
-    requiere_foto: true,
-    foto_url: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&q=80&w=200',
-    nota_evidencia: 'Barra desinfectada con amonio cuaternario, bowls listos.'
-  },
-  {
-    id: 'tsk-2',
-    titulo: 'Preparar bases de yogurt griego y toppings fit',
-    descripcion: 'Picar fresas, kiwis, mango y rellenar dispensadores de granola sin azúcar y semillas de cáñamo (hemp).',
-    area: 'Cocina/Preparación',
-    fecha: '2026-08-20',
-    estado: 'En proceso',
-    asignado_a: 'usr-2',
-    tiempo_estimado_min: 40,
-    hora_inicio: '08:15',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-3',
-    titulo: 'Ofrecer la promoción del día en caja',
-    descripcion: 'A cada cliente que ordene un menú, ofrecer el Parfait Berry Chía Slim con 15% de descuento o adición proteica.',
-    area: 'Atención/Caja',
-    fecha: '2026-08-20',
-    estado: 'En proceso',
-    asignado_a: 'usr-1',
-    tiempo_estimado_min: 360,
-    hora_inicio: '08:00',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-4',
-    titulo: 'Verificar temperatura de neveras de ensaladas',
-    descripcion: 'Registrar en la bitácora que la nevera de exhibición se mantenga entre 2°C y 5°C.',
-    area: 'Atención/Caja',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-1',
-    tiempo_estimado_min: 10,
-    hora_inicio: '08:05',
-    hora_fin: '08:12',
-    requiere_foto: true,
-    foto_url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=200',
-    nota_evidencia: 'La temperatura marcó 3.8°C.'
-  },
-  {
-    id: 'tsk-5',
-    titulo: 'Revisión y etiquetado de envases eco-friendly',
-    descripcion: 'Armar cajas y colocar pegatinas con frases motivacionales para despachos a domicilio.',
-    area: 'Empaque/Despacho',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-3',
-    tiempo_estimado_min: 30,
-    hora_inicio: '09:00',
-    hora_fin: '09:25',
-    requiere_foto: false,
-    nota_evidencia: '100 cajas etiquetadas y listas.'
-  },
-  {
-    id: 'tsk-6',
-    titulo: 'Empaque rápido de pedidos Rappi / Uber Eats',
-    descripcion: 'Garantizar que las ensaladas calientes vayan separadas de los jugos fríos para mantener temperaturas.',
-    area: 'Empaque/Despacho',
-    fecha: '2026-08-20',
-    estado: 'Pendiente',
-    asignado_a: 'usr-3',
-    tiempo_estimado_min: 120,
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-7',
-    titulo: 'Limpieza profunda de la zona de licuadoras y extractores',
-    descripcion: 'Desmontar cuchillas, lavar y sanitizar para evitar contaminación cruzada de alérgenos.',
-    area: 'Limpieza',
-    fecha: '2026-08-20',
-    estado: 'Pendiente',
-    asignado_a: 'usr-4',
-    tiempo_estimado_min: 30,
-    requiere_foto: true,
-  },
-  {
-    id: 'tsk-8',
-    titulo: 'Retirar residuos orgánicos e inorgánicos',
-    descripcion: 'Clasificar la basura de cocina. Residuos vegetales al contenedor de compostaje.',
-    area: 'Limpieza',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-4',
-    tiempo_estimado_min: 15,
-    hora_inicio: '11:00',
-    hora_fin: '11:13',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-9',
-    titulo: 'Apertura de caja registradora y conteo de fondo inicial',
-    descripcion: 'Verificar fondo base de efectivo en caja antes de abrir la atención al público.',
-    area: 'Atención/Caja',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-1',
-    tiempo_estimado_min: 15,
-    hora_inicio: '07:30',
-    hora_fin: '07:42',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-10',
-    titulo: 'Conteo de stock inicial en exhibición de bebidas',
-    descripcion: 'Revisar disponibilidad de smoothies embotellados y jugos prensados en frío.',
-    area: 'Atención/Caja',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-1',
-    tiempo_estimado_min: 20,
-    hora_inicio: '07:45',
-    hora_fin: '08:00',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-11',
-    titulo: 'Limpieza de área de preparación de jugos',
-    descripcion: 'Desinfectar tablas de picar, cuchillos y mesada de ensaladas.',
-    area: 'Cocina/Preparación',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-2',
-    tiempo_estimado_min: 25,
-    hora_inicio: '07:30',
-    hora_fin: '07:52',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-12',
-    titulo: 'Verificación de temperatura de congeladores de frutas',
-    descripcion: 'Asegurar temperatura constante bajo -15°C en el congelador de pulpas.',
-    area: 'Cocina/Preparación',
-    fecha: '2026-08-20',
-    estado: 'Pendiente',
-    asignado_a: 'usr-2',
-    tiempo_estimado_min: 10,
-    requiere_foto: true
-  },
-  {
-    id: 'tsk-13',
-    titulo: 'Verificación de empaques biodegradables y servilletas',
-    descripcion: 'Reabastecer la estación de empaque con vasos, tapas y cubiertos ecofriendly.',
-    area: 'Empaque/Despacho',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-3',
-    tiempo_estimado_min: 20,
-    hora_inicio: '08:30',
-    hora_fin: '08:48',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-14',
-    titulo: 'Control de temperatura y rotulación FIFO en bodega',
-    descripcion: 'Verificar fechas de vencimiento y organizar según el principio de primero en entrar, primero en salir.',
-    area: 'Empaque/Despacho',
-    fecha: '2026-08-20',
-    estado: 'Pendiente',
-    asignado_a: 'usr-3',
-    tiempo_estimado_min: 30,
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-15',
-    titulo: 'Sanitización de mesas y sillas del salón principal',
-    descripcion: 'Desinfectar superficies del área de clientes antes del turno de almuerzo.',
-    area: 'Limpieza',
-    fecha: '2026-08-20',
-    estado: 'Completada',
-    asignado_a: 'usr-4',
-    tiempo_estimado_min: 25,
-    hora_inicio: '10:00',
-    hora_fin: '10:22',
-    requiere_foto: false
-  },
-  {
-    id: 'tsk-16',
-    titulo: 'Reabastecimiento de jabón y sanitizante de manos',
-    descripcion: 'Verificar dispensadores del baño de clientes y estación de cocina.',
-    area: 'Limpieza',
-    fecha: '2026-08-20',
-    estado: 'Pendiente',
-    asignado_a: 'usr-4',
-    tiempo_estimado_min: 15,
-    requiere_foto: false
+const generateDefaultTareas = (): Tarea[] => {
+  const tareasList: Tarea[] = [];
+  const employees = ['usr-1', 'usr-2', 'usr-3', 'usr-4'];
+  
+  const templates = [
+    {
+      titulo: 'Revisar caja y verificar la base predeterminada',
+      descripcion: 'Contar fondo inicial y asegurar la base de efectivo antes de la apertura.',
+      area: 'Atención/Caja',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Apertura'
+    },
+    {
+      titulo: 'Revisar neveras',
+      descripcion: 'Verificar temperaturas y correcto funcionamiento de todos los refrigeradores.',
+      area: 'Cocina/Preparación',
+      tiempo_estimado_min: 10,
+      requiere_foto: true,
+      tipo_tarea: 'Apertura'
+    },
+    {
+      titulo: 'Limpiar vitrinas',
+      descripcion: 'Limpiar vidrios y superficies de vitrinas de exhibición.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Limpiar la pantalla del televisor',
+      descripcion: 'Quitar polvo y huellas de la pantalla principal del salón.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 10,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Hacer inventario en la nevera',
+      descripcion: 'Contar ingredientes y materias primas refrigeradas.',
+      area: 'Cocina/Preparación',
+      tiempo_estimado_min: 20,
+      requiere_foto: false,
+      tipo_tarea: 'Apertura'
+    },
+    {
+      titulo: 'Hacer inventario de lo que está afuera',
+      descripcion: 'Revisar stock de toppings, servilletas y barras en mostrador.',
+      area: 'Atención/Caja',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Apertura'
+    },
+    {
+      titulo: 'Cambiar el papel de las fresas',
+      descripcion: 'Renovar el papel absorbente en recipientes de fresas para mantener frescura.',
+      area: 'Cocina/Preparación',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Apertura'
+    },
+    {
+      titulo: 'Hacer inventario de faltantes',
+      descripcion: 'Anotar productos con bajo stock para pedido del día.',
+      area: 'Atención/Caja',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Apertura'
+    },
+    {
+      titulo: 'Pegar stickers en empaques',
+      descripcion: 'Rotular bolsas y envases eco-friendly con etiquetas de la marca.',
+      area: 'Empaque/Despacho',
+      tiempo_estimado_min: 30,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Revisar y contar desechables.',
+      descripcion: 'Validar stock de cucharas, servilletas, pitillos y vasos.',
+      area: 'Empaque/Despacho',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Preparar y repartir degustaciones en la entrada (atraer clientes)',
+      descripcion: 'Ofrecer muestras de parfait y smoothies a los transeúntes.',
+      area: 'Atención/Caja',
+      tiempo_estimado_min: 30,
+      requiere_foto: true,
+      tipo_tarea: 'Venta Activa'
+    },
+    {
+      titulo: 'Ofrecer topping y botella de agua',
+      descripcion: 'Impulsar venta sugestiva ofreciendo adiciones y bebidas a cada orden.',
+      area: 'Atención/Caja',
+      tiempo_estimado_min: 120,
+      requiere_foto: false,
+      tipo_tarea: 'Venta Activa'
+    },
+    {
+      titulo: 'Invitar al cliente a su próxima visita o recordarle productos del mes',
+      descripcion: 'Fidelizar clientes comunicando promociones y lanzamientos.',
+      area: 'Atención/Caja',
+      tiempo_estimado_min: 120,
+      requiere_foto: false,
+      tipo_tarea: 'Venta Activa'
+    },
+    {
+      titulo: 'Limpiar cafetera',
+      descripcion: 'Realizar retrolavado y limpieza de lanceta de vapor.',
+      area: 'Cocina/Preparación',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Limpiar licuadora',
+      descripcion: 'Desarmar, lavar y desinfectar vaso y cuchillas de licuadoras.',
+      area: 'Cocina/Preparación',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Limpiar freidora (air fryer)',
+      descripcion: 'Retirar grasa y limpiar canastilla de la freidora de aire.',
+      area: 'Cocina/Preparación',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Limpiar nevera por dentro y por fuera',
+      descripcion: 'Desinfectar repisas y manijas exteriores de refrigeradores.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 30,
+      requiere_foto: true,
+      tipo_tarea: 'Cierre'
+    },
+    {
+      titulo: 'Rodar el enfriador y limpiar su espacio',
+      descripcion: 'Mover el enfriador vertical para barrer y trapar detrás/debajo del equipo.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 20,
+      requiere_foto: false,
+      tipo_tarea: 'Cierre'
+    },
+    {
+      titulo: 'Lavar zona de picado y preparación',
+      descripcion: 'Higienizar tablas de picar, cuchillos y mesada de acero inoxidable.',
+      area: 'Cocina/Preparación',
+      tiempo_estimado_min: 25,
+      requiere_foto: true,
+      tipo_tarea: 'Cierre'
+    },
+    {
+      titulo: 'Mantener la zona de trabajo limpia',
+      descripcion: 'Limpiar derrames inmediatamente y organizar utensilios continuamente.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 180,
+      requiere_foto: false,
+      tipo_tarea: 'Sanitización'
+    },
+    {
+      titulo: 'Barrer adentro',
+      descripcion: 'Eliminar suciedad y polvo del piso interior del local.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Cierre'
+    },
+    {
+      titulo: 'Trapear afuera',
+      descripcion: 'Limpiar piso de la entrada exterior con desinfectante.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 15,
+      requiere_foto: false,
+      tipo_tarea: 'Cierre'
+    },
+    {
+      titulo: 'Lavar el trapero',
+      descripcion: 'Lavar, desinfectar y colgar el trapero al final de la jornada.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 10,
+      requiere_foto: false,
+      tipo_tarea: 'Cierre'
+    },
+    {
+      titulo: 'Botar la basura',
+      descripcion: 'Retirar bolsas de residuos, amarrar y llevar al punto de recolección.',
+      area: 'Limpieza',
+      tiempo_estimado_min: 10,
+      requiere_foto: true,
+      tipo_tarea: 'Cierre'
+    }
+  ];
+
+  let taskIdCounter = 1;
+  for (const empId of employees) {
+    templates.forEach((t, index) => {
+      // Simular un estado de jornada inicial realista para cada trabajador
+      // - Las primeras 4 tareas completadas para simular progreso activo en el dashboard
+      // - Las siguientes 2 en proceso
+      // - Las restantes pendientes
+      let estado: 'Pendiente' | 'En proceso' | 'Completada' = 'Pendiente';
+      let hora_inicio: string | undefined;
+      let hora_fin: string | undefined;
+      let foto_url: string | undefined;
+      let nota_evidencia: string | undefined;
+
+      if (index < 4) {
+        estado = 'Completada';
+        hora_inicio = '07:00';
+        hora_fin = '07:30';
+        if (t.requiere_foto) {
+          foto_url = 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=200';
+          nota_evidencia = 'Apertura e inspección inicial completada con éxito.';
+        }
+      } else if (index >= 4 && index < 6) {
+        estado = 'En proceso';
+        hora_inicio = '08:00';
+      }
+
+      tareasList.push({
+        id: `tsk-${empId}-${taskIdCounter++}`,
+        titulo: t.titulo,
+        descripcion: t.descripcion,
+        area: t.area as any,
+        fecha: '2026-08-20',
+        estado,
+        asignado_a: empId,
+        tiempo_estimado_min: t.tiempo_estimado_min,
+        hora_inicio,
+        hora_fin,
+        requiere_foto: t.requiere_foto,
+        foto_url,
+        nota_evidencia,
+        tipo_tarea: t.tipo_tarea
+      });
+    });
   }
-];
+
+  return tareasList;
+};
+
+export const INITIAL_TAREAS: Tarea[] = generateDefaultTareas();
 
 // Registro de ventas de hoy y previos
 export const INITIAL_REGISTRO_VENTAS: RegistroVenta[] = [
@@ -805,9 +850,12 @@ export const loadAppState = () => {
     const cuadresCaja = localStorage.getItem('coccolefit_cuadres_caja');
     const clientes = localStorage.getItem('coccolefit_clientes');
 
+    const parsedTareas = tareas ? JSON.parse(tareas) : null;
+    const finalTareas = (parsedTareas && parsedTareas.length >= 96) ? parsedTareas : INITIAL_TAREAS;
+
     return {
       usuarios: INITIAL_USUARIOS,
-      tareas: tareas ? JSON.parse(tareas) : INITIAL_TAREAS,
+      tareas: finalTareas,
       productos: productos ? JSON.parse(productos) : INITIAL_PRODUCTOS,
       ventas: ventas ? JSON.parse(ventas) : INITIAL_REGISTRO_VENTAS,
       fichajes: fichajes ? JSON.parse(fichajes) : INITIAL_FICHAJES,
@@ -861,36 +909,80 @@ export const saveAppState = (state: {
   cuadresCaja?: CuadreCaja[];
   clientes?: Cliente[];
 }) => {
-  try {
-    localStorage.setItem('coccolefit_tareas', JSON.stringify(state.tareas));
-    localStorage.setItem('coccolefit_productos', JSON.stringify(state.productos));
-    localStorage.setItem('coccolefit_ventas', JSON.stringify(state.ventas));
-    localStorage.setItem('coccolefit_fichajes', JSON.stringify(state.fichajes));
-    localStorage.setItem('coccolefit_incidencias', JSON.stringify(state.incidencias));
-    localStorage.setItem('coccolefit_anuncios', JSON.stringify(state.anuncios));
-    localStorage.setItem('coccolefit_feedbacks', JSON.stringify(state.feedbacks));
-    if (state.inventario) {
-      localStorage.setItem('coccolefit_inventario', JSON.stringify(state.inventario));
+  const trySave = (targetState: typeof state): boolean => {
+    try {
+      localStorage.setItem('coccolefit_tareas', JSON.stringify(targetState.tareas));
+      localStorage.setItem('coccolefit_productos', JSON.stringify(targetState.productos));
+      localStorage.setItem('coccolefit_ventas', JSON.stringify(targetState.ventas));
+      localStorage.setItem('coccolefit_fichajes', JSON.stringify(targetState.fichajes));
+      localStorage.setItem('coccolefit_incidencias', JSON.stringify(targetState.incidencias));
+      localStorage.setItem('coccolefit_anuncios', JSON.stringify(targetState.anuncios));
+      localStorage.setItem('coccolefit_feedbacks', JSON.stringify(targetState.feedbacks));
+      if (targetState.inventario) {
+        localStorage.setItem('coccolefit_inventario', JSON.stringify(targetState.inventario));
+      }
+      if (targetState.horarios) {
+        localStorage.setItem('coccolefit_horarios', JSON.stringify(targetState.horarios));
+      }
+      if (targetState.productosCatalogo) {
+        localStorage.setItem('coccolefit_productos_catalogo', JSON.stringify(targetState.productosCatalogo));
+      }
+      if (targetState.ventasRegistradas) {
+        localStorage.setItem('coccolefit_ventas_registradas', JSON.stringify(targetState.ventasRegistradas));
+      }
+      if (targetState.alertasPanico) {
+        localStorage.setItem('coccolefit_alertas_panico', JSON.stringify(targetState.alertasPanico));
+      }
+      if (targetState.cuadresCaja) {
+        localStorage.setItem('coccolefit_cuadres_caja', JSON.stringify(targetState.cuadresCaja));
+      }
+      if (targetState.clientes) {
+        localStorage.setItem('coccolefit_clientes', JSON.stringify(targetState.clientes));
+      }
+      return true;
+    } catch (e) {
+      return false;
     }
-    if (state.horarios) {
-      localStorage.setItem('coccolefit_horarios', JSON.stringify(state.horarios));
-    }
-    if (state.productosCatalogo) {
-      localStorage.setItem('coccolefit_productos_catalogo', JSON.stringify(state.productosCatalogo));
-    }
-    if (state.ventasRegistradas) {
-      localStorage.setItem('coccolefit_ventas_registradas', JSON.stringify(state.ventasRegistradas));
-    }
-    if (state.alertasPanico) {
-      localStorage.setItem('coccolefit_alertas_panico', JSON.stringify(state.alertasPanico));
-    }
-    if (state.cuadresCaja) {
-      localStorage.setItem('coccolefit_cuadres_caja', JSON.stringify(state.cuadresCaja));
-    }
-    if (state.clientes) {
-      localStorage.setItem('coccolefit_clientes', JSON.stringify(state.clientes));
-    }
-  } catch (error) {
-    console.error('Error saving app state to localStorage:', error);
+  };
+
+  // Intentar guardar el estado original primero
+  if (trySave(state)) {
+    return;
   }
+
+  console.warn('Límite de cuota de localStorage excedido. Iniciando mitigación automática de peso de imágenes...');
+
+  // Mitigación 1: Eliminar o reemplazar imágenes pesadas base64 de tareas ya completadas antiguas
+  const cleanedTareas = state.tareas.map(t => {
+    if (t.estado === 'Completada' && t.foto_url && t.foto_url.startsWith('data:image/')) {
+      return {
+        ...t,
+        foto_url: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&q=80&w=200', // Placeholder liviano
+        nota_evidencia: (t.nota_evidencia || '') + ' (Imagen optimizada para liberar espacio local)'
+      };
+    }
+    return t;
+  });
+
+  if (trySave({ ...state, tareas: cleanedTareas })) {
+    console.log('¡Estado guardado exitosamente en localStorage tras limpiar imágenes pesadas!');
+    return;
+  }
+
+  // Mitigación 2: Si aún falla, truncar históricos de ventas antiguas para evitar bloqueos
+  console.warn('La cuota sigue excedida. Truncando históricos de ventas para asegurar persistencia...');
+  const truncatedVentas = state.ventasRegistradas ? state.ventasRegistradas.slice(-50) : state.ventasRegistradas;
+  const truncatedVentasViejas = state.ventas ? state.ventas.slice(-50) : state.ventas;
+
+  if (trySave({
+    ...state,
+    tareas: cleanedTareas,
+    ventasRegistradas: truncatedVentas,
+    ventas: truncatedVentasViejas
+  })) {
+    console.log('¡Estado guardado exitosamente tras optimizar imágenes e históricos!');
+    return;
+  }
+
+  console.error('No se pudo guardar el estado en localStorage incluso tras aplicar todas las estrategias de mitigación de espacio.');
 };

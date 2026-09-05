@@ -33,6 +33,7 @@ export interface AdminDashboardProps {
   upsellRules?: UpsellRule[];
   onUpdateUpsellRules?: (rules: UpsellRule[]) => void;
   onAddTarea: (tarea: Omit<Tarea, 'id'>) => void;
+  onAddTareasBulk?: (tareas: Omit<Tarea, 'id'>[]) => Promise<boolean>;
 
   onEditTarea: (tarea: Tarea) => void;
   onDeleteTarea: (id: string) => void;
@@ -83,6 +84,7 @@ export default function AdminDashboard({
   upsellRules,
   onUpdateUpsellRules,
   onAddTarea,
+  onAddTareasBulk,
 
   onEditTarea,
   onDeleteTarea,
@@ -227,6 +229,7 @@ export default function AdminDashboard({
   const [tareaAsignado, setTareaAsignado] = useState(usuarios.find(u => u.rol === 'empleado')?.id || '');
   const [tareaTiempo, setTareaTiempo] = useState(30);
   const [tareaRequiereFoto, setTareaRequiereFoto] = useState(false);
+  const [asignarATodos, setAsignarATodos] = useState(false);
   const [editingTareaId, setEditingTareaId] = useState<string | null>(null);
 
   // Formulario de Producto Promocion
@@ -563,6 +566,253 @@ export default function AdminDashboard({
   // Empleados únicamente
   const empleados = usuarios.filter(u => u.rol === 'empleado');
 
+  const handleGenerarAsignacionPredeterminada = async () => {
+    if (empleados.length === 0) {
+      alert("No hay colaboradores activos registrados en el sistema para asignarles tareas.");
+      return;
+    }
+
+    const defaultTasksTemplates = [
+      {
+        titulo: "Revisar caja y verificar la base predeterminada",
+        descripcion: "Contar fondo inicial y asegurar la base de efectivo antes de la apertura.",
+        area: "Atención/Caja",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Apertura"
+      },
+      {
+        titulo: "Revisar neveras",
+        descripcion: "Verificar temperaturas y correcto funcionamiento de todos los refrigeradores.",
+        area: "Cocina/Preparación",
+        tiempo_estimado_min: 10,
+        requiere_foto: true,
+        tipo_tarea: "Apertura"
+      },
+      {
+        titulo: "Limpiar vitrinas",
+        descripcion: "Limpiar vidrios y superficies de vitrinas de exhibición.",
+        area: "Limpieza",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Limpiar la pantalla del televisor",
+        descripcion: "Quitar polvo y huellas de la pantalla principal del salón.",
+        area: "Limpieza",
+        tiempo_estimado_min: 10,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Hacer inventario en la nevera",
+        descripcion: "Contar ingredientes y materias primas refrigeradas.",
+        area: "Cocina/Preparación",
+        tiempo_estimado_min: 20,
+        requiere_foto: false,
+        tipo_tarea: "Apertura"
+      },
+      {
+        titulo: "Hacer inventario de lo que está afuera",
+        descripcion: "Revisar stock de toppings, servilletas y barras en mostrador.",
+        area: "Atención/Caja",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Apertura"
+      },
+      {
+        titulo: "Cambiar el papel de las fresas",
+        descripcion: "Renovar el papel absorbente en recipientes de fresas para mantener frescura.",
+        area: "Cocina/Preparación",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Apertura"
+      },
+      {
+        titulo: "Hacer inventario de faltantes",
+        descripcion: "Anotar productos con bajo stock para pedido del día.",
+        area: "Atención/Caja",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Apertura"
+      },
+      {
+        titulo: "Pegar stickers en empaques",
+        descripcion: "Rotular bolsas y envases eco-friendly con etiquetas de la marca.",
+        area: "Empaque/Despacho",
+        tiempo_estimado_min: 30,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Revisar y contar desechables.",
+        descripcion: "Validar stock de cucharas, servilletas, pitillos y vasos.",
+        area: "Empaque/Despacho",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Preparar y repartir degustaciones en la entrada (atraer clientes)",
+        descripcion: "Ofrecer muestras de parfait y smoothies a los transeúntes.",
+        area: "Atención/Caja",
+        tiempo_estimado_min: 30,
+        requiere_foto: true,
+        tipo_tarea: "Venta Activa"
+      },
+      {
+        titulo: "Ofrecer topping y botella de agua",
+        descripcion: "Impulsar venta sugestiva ofreciendo adiciones y bebidas a cada orden.",
+        area: "Atención/Caja",
+        tiempo_estimado_min: 120,
+        requiere_foto: false,
+        tipo_tarea: "Venta Activa"
+      },
+      {
+        titulo: "Invitar al cliente a su próxima visita o recordarle productos del mes",
+        descripcion: "Fidelizar clientes comunicando promociones and lanzamientos.",
+        area: "Atención/Caja",
+        tiempo_estimado_min: 120,
+        requiere_foto: false,
+        tipo_tarea: "Venta Activa"
+      },
+      {
+        titulo: "Limpiar cafetera",
+        descripcion: "Realizar retrolavado y limpieza de lanceta de vapor.",
+        area: "Cocina/Preparación",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Limpiar licuadora",
+        descripcion: "Desarmar, lavar y desinfectar vaso y cuchillas de licuadoras.",
+        area: "Cocina/Preparación",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Limpiar freidora (air fryer)",
+        descripcion: "Retirar grasa y limpiar canastilla de la freidora de aire.",
+        area: "Cocina/Preparación",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Limpiar nevera por dentro y por fuera",
+        descripcion: "Desinfectar repisas y manijas exteriores de refrigeradores.",
+        area: "Limpieza",
+        tiempo_estimado_min: 30,
+        requiere_foto: true,
+        tipo_tarea: "Cierre"
+      },
+      {
+        titulo: "Rodar el enfriador y limpiar su espacio",
+        descripcion: "Mover el enfriador vertical para barrer y trapar detrás/debajo del equipo.",
+        area: "Limpieza",
+        tiempo_estimado_min: 20,
+        requiere_foto: false,
+        tipo_tarea: "Cierre"
+      },
+      {
+        titulo: "Lavar zona de picado y preparación",
+        descripcion: "Higienizar tablas de picar, cuchillos y mesada de acero inoxidable.",
+        area: "Cocina/Preparación",
+        tiempo_estimado_min: 25,
+        requiere_foto: true,
+        tipo_tarea: "Cierre"
+      },
+      {
+        titulo: "Mantener la zona de trabajo limpia",
+        descripcion: "Limpiar derrames inmediatamente y organizar utensilios continuamente.",
+        area: "Limpieza",
+        tiempo_estimado_min: 180,
+        requiere_foto: false,
+        tipo_tarea: "Sanitización"
+      },
+      {
+        titulo: "Barrer adentro",
+        descripcion: "Eliminar suciedad y polvo del piso interior del local.",
+        area: "Limpieza",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Cierre"
+      },
+      {
+        titulo: "Trapear afuera",
+        descripcion: "Limpiar piso de la entrada exterior con desinfectante.",
+        area: "Limpieza",
+        tiempo_estimado_min: 15,
+        requiere_foto: false,
+        tipo_tarea: "Cierre"
+      },
+      {
+        titulo: "Lavar el trapero",
+        descripcion: "Lavar, desinfectar y colgar el trapero al final de la jornada.",
+        area: "Limpieza",
+        tiempo_estimado_min: 10,
+        requiere_foto: false,
+        tipo_tarea: "Cierre"
+      },
+      {
+        titulo: "Botar la basura",
+        descripcion: "Retirar bolsas de residuos, amarrar y llevar al punto de recolección.",
+        area: "Limpieza",
+        tiempo_estimado_min: 10,
+        requiere_foto: true,
+        tipo_tarea: "Cierre"
+      }
+    ];
+
+    const cajeEmp = empleados.find(e => e.area_preferida === 'Atención/Caja') || empleados[0];
+    const cocinEmp = empleados.find(e => e.area_preferida === 'Cocina/Preparación') || empleados[1] || empleados[0];
+    const empaqEmp = empleados.find(e => e.area_preferida === 'Empaque/Despacho') || empleados[2] || empleados[0];
+    const limpEmp = empleados.find(e => e.area_preferida === 'Limpieza') || empleados[3] || empleados[0];
+
+    const getAssigneeId = (area: string) => {
+      if (area === "Atención/Caja") return cajeEmp.id;
+      if (area === "Cocina/Preparación") return cocinEmp.id;
+      if (area === "Empaque/Despacho") return empaqEmp.id;
+      if (area === "Limpieza") return limpEmp.id;
+      return empleados[0].id;
+    };
+
+    if (confirm(`¿Estás seguro que deseas generar la asignación diaria con las 24 tareas oficiales para hoy? Se asignarán inteligentemente según las áreas de los colaboradores.`)) {
+      try {
+        const tareasParaCrear = defaultTasksTemplates.map(template => ({
+          titulo: template.titulo,
+          descripcion: template.descripcion,
+          area: template.area as AreaType,
+          fecha: '2026-08-20',
+          estado: 'Pendiente' as const,
+          asignado_a: getAssigneeId(template.area),
+          tiempo_estimado_min: template.tiempo_estimado_min,
+          requiere_foto: template.requiere_foto,
+          tipo_tarea: template.tipo_tarea
+        }));
+
+        if (onAddTareasBulk) {
+          const ok = await onAddTareasBulk(tareasParaCrear);
+          if (ok) {
+            alert("¡Éxito! Las 24 tareas oficiales han sido generadas y asignadas correctamente.");
+          }
+        } else {
+          // Fallback sequential
+          for (const item of tareasParaCrear) {
+            await onAddTarea(item);
+          }
+          alert("¡Éxito! Las 24 tareas oficiales han sido generadas y asignadas correctamente.");
+        }
+      } catch (err: any) {
+        console.error("Error al autogenerar tareas:", err);
+        alert("Ocurrió un error al generar algunas de las tareas.");
+      }
+    }
+  };
+
   const handleTareaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!tareaTitulo.trim()) return;
@@ -582,6 +832,29 @@ export default function AdminDashboard({
         });
       }
       setEditingTareaId(null);
+    } else if (asignarATodos) {
+      const tasksToCreate = empleados.map(emp => ({
+        titulo: tareaTitulo,
+        descripcion: tareaDesc,
+        area: tareaArea,
+        fecha: '2026-08-20',
+        estado: 'Pendiente' as const,
+        asignado_a: emp.id,
+        tiempo_estimado_min: Number(tareaTiempo),
+        requiere_foto: tareaRequiereFoto,
+        tipo_tarea: tareaTipo,
+      }));
+
+      if (onAddTareasBulk) {
+        onAddTareasBulk(tasksToCreate).then((ok) => {
+          if (ok) {
+            alert("¡Tareas asignadas a todos los trabajadores correctamente!");
+          }
+        });
+      } else {
+        tasksToCreate.forEach(t => onAddTarea(t));
+        alert("¡Tareas asignadas a todos los trabajadores correctamente!");
+      }
     } else {
       onAddTarea({
         titulo: tareaTitulo,
@@ -603,6 +876,7 @@ export default function AdminDashboard({
     setTareaTipo(categorias.tareas[0] || 'Apertura');
     setTareaTiempo(30);
     setTareaRequiereFoto(false);
+    setAsignarATodos(false);
   };
 
   const handleEditClick = (t: Tarea) => {
@@ -1128,15 +1402,31 @@ export default function AdminDashboard({
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Asignado A</label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase">Asignado A</label>
+                    <label className="flex items-center gap-1 text-[10px] font-extrabold text-[#4B9CD3] cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={asignarATodos}
+                        onChange={(e) => setAsignarATodos(e.target.checked)}
+                        className="w-3.5 h-3.5 text-[#4B9CD3] border-[#E2E8F0] focus:ring-[#4B9CD3] rounded-sm cursor-pointer mr-1"
+                      />
+                      Asignar a todos
+                    </label>
+                  </div>
                   <select
                     value={tareaAsignado}
                     onChange={(e) => setTareaAsignado(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30"
+                    disabled={asignarATodos}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 disabled:opacity-50 disabled:bg-slate-50"
                   >
-                    {empleados.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                    ))}
+                    {asignarATodos ? (
+                      <option value="ALL">👥 Todos los empleados ({empleados.length})</option>
+                    ) : (
+                      empleados.map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -1190,10 +1480,20 @@ export default function AdminDashboard({
 
           {/* Tabla de tareas del día */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5">
-              <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
-              Bitácora de Tareas Diarias
-            </h3>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4 border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
+                <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
+                Bitácora de Tareas Diarias
+              </h3>
+              <button
+                type="button"
+                onClick={handleGenerarAsignacionPredeterminada}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Generar 24 Tareas Predeterminadas
+              </button>
+            </div>
 
             {tareas.length === 0 ? (
               <div className="text-center py-12 text-slate-400 text-xs">

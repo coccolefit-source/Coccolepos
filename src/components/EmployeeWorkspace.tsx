@@ -8,6 +8,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 
 import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
+import { compressImage } from '../utils/imageCompressor';
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
@@ -305,16 +306,23 @@ export default function EmployeeWorkspace({
     setShowPhotoModal(true);
   };
 
-  const handleModalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleModalFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setEvidencePhoto(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file);
+        setEvidencePhoto(compressed);
+      } catch (err) {
+        console.error("Error compressing image:", err);
+        // Fallback
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            setEvidencePhoto(reader.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
     }
   };
 
@@ -862,16 +870,22 @@ export default function EmployeeWorkspace({
                                     <input
                                       type="file"
                                       accept="image/*"
-                                      onChange={(e) => {
+                                      onChange={async (e) => {
                                         const file = e.target.files?.[0];
                                         if (file) {
-                                          const reader = new FileReader();
-                                          reader.onloadend = () => {
-                                            if (typeof reader.result === 'string') {
-                                              onUpdateTareaEstado(t.id, t.estado, reader.result, t.nota_evidencia || 'Cargado directo de galería');
-                                            }
-                                          };
-                                          reader.readAsDataURL(file);
+                                          try {
+                                            const compressed = await compressImage(file);
+                                            onUpdateTareaEstado(t.id, t.estado, compressed, t.nota_evidencia || 'Cargado directo de galería');
+                                          } catch (err) {
+                                            console.error("Error compressing direct upload:", err);
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => {
+                                              if (typeof reader.result === 'string') {
+                                                onUpdateTareaEstado(t.id, t.estado, reader.result, t.nota_evidencia || 'Cargado directo de galería');
+                                              }
+                                            };
+                                            reader.readAsDataURL(file);
+                                          }
                                         }
                                       }}
                                       className="absolute left-0 top-0 opacity-0 cursor-pointer w-full h-full"
@@ -882,7 +896,7 @@ export default function EmployeeWorkspace({
 
                               <div className="flex items-center gap-2.5">
                                 {t.started_at && (
-                                  <span className="text-slate-500 font-bold bg-slate-50 border border-slate-200 px-2 py-0.5 rounded shrink-0 flex items-center gap-1">
+                                  <span className="text-slate-500 font-bold bg-slate-50 border border-slate-200 px-2 py-0.5 rounded shrink-0 flex items-center gap-1 text-xs">
                                     <Clock className="w-2.5 h-2.5 text-[#4B9CD3]" />
                                     <span>Duración: {calcularTiempoTarea(t.started_at, t.completed_at)}</span>
                                   </span>

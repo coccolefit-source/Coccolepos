@@ -516,6 +516,56 @@ export default function App() {
     }
   };
 
+  const handleAddTareasBulk = async (newTareas: Omit<Tarea, 'id'>[]): Promise<boolean> => {
+    if (newTareas.length === 0) return true;
+
+    // Generar tareas con IDs completamente únicos usando timestamp, índice y sufijo aleatorio para evitar colisiones
+    const processedTareas: Tarea[] = newTareas.map((t, idx) => {
+      const uniqueSuffix = Math.random().toString(36).substring(2, 6);
+      const TareaId = `tsk-${Date.now()}-${idx}-${uniqueSuffix}`;
+      return {
+        ...t,
+        id: TareaId,
+        fecha: t.fecha || new Date().toISOString().split('T')[0]
+      };
+    });
+
+    if (!isSupabaseConfigured()) {
+      setState(prev => ({
+        ...prev,
+        tareas: [...processedTareas, ...prev.tareas]
+      }));
+      pushNotification(`${processedTareas.length} tareas oficiales generadas correctamente (Local).`, 'info');
+      return true;
+    }
+
+    try {
+      // Registrar tareas una por una de forma simultánea en Supabase para evitar roundtrips secuenciales de recarga
+      const promises = processedTareas.map(async (t) => {
+        const assignedUser = state.usuarios.find(u => u.id === t.asignado_a);
+        const assignedName = assignedUser?.nombre || 'empleado';
+        return insertDailyTaskInSupabase(t, assignedName);
+      });
+
+      const results = await Promise.all(promises);
+      const allOk = results.every(res => res === true);
+
+      if (!allOk) {
+        console.error('Error al insertar algunas tareas en Supabase');
+        alert('Algunas tareas no se pudieron guardar en la nube. Verifique la conexión.');
+      }
+
+      // Sincronizar en memoria una sola vez al terminar todo el lote
+      await cargarDatosSilencioso();
+      pushNotification(`${processedTareas.length} tareas oficiales guardadas en lote correctamente.`, 'info');
+      return allOk;
+    } catch (err: any) {
+      console.error('Error in handleAddTareasBulk:', err);
+      alert('Error al registrar tareas en lote en la nube: ' + (err?.message || err));
+      return false;
+    }
+  };
+
   const handleEditTarea = async (updatedTarea: Tarea) => {
     const originalTarea = state.tareas.find(t => t.id === updatedTarea.id);
     if (!originalTarea) return;
@@ -1955,6 +2005,7 @@ export default function App() {
                 alertasPanico={state.alertasPanico || []}
                 clientes={state.clientes || []}
                 onAddTarea={handleAddTarea}
+                onAddTareasBulk={handleAddTareasBulk}
                 onEditTarea={handleEditTarea}
                 onDeleteTarea={handleDeleteTarea}
                 onAddProducto={handleAddProducto}
