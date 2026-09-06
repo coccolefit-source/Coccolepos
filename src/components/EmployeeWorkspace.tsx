@@ -93,54 +93,78 @@ export default function EmployeeWorkspace({
       try {
         const fechaHoy = new Date().toISOString().split('T')[0];
 
-        const { data, error } = await client
+        // 1. Traer directamente cualquier registro vigente de la tabla upsell_rules para hoy
+        let { data, error } = await client
           .from('upsell_rules')
-          .select('*');
+          .select('*')
+          .eq('date', fechaHoy);
 
-        if (error) {
-          console.error("Error al cargar campañas para el trabajador:", error.message, error.details);
-        } else {
-          console.log("Campañas encontradas para el trabajador:", data);
-          if (data && data.length > 0) {
-            // 1. Filtrar solo las campañas del día actual (o sin fecha explícita)
-            const datosHoy = data.filter((d: any) => {
-              const regFecha = d.date || d.fecha;
-              if (!regFecha) return true;
-              return regFecha === fechaHoy;
-            });
+        if (error || !data || data.length === 0) {
+          // Intentar por el campo 'fecha' si 'date' no trajo nada o no existe
+          const { data: dataFecha, error: errFecha } = await client
+            .from('upsell_rules')
+            .select('*')
+            .eq('fecha', fechaHoy);
 
-            const datosAProcesar = datosHoy.length > 0 ? datosHoy : data;
-
-            // 2. Asegurar elementos únicos por nombre de producto para evitar duplicación
-            const nombresUnicos = Array.from(
-              new Set(datosAProcesar.map((a: any) => a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
-            ).filter(Boolean);
-
-            const campanasUnicas = nombresUnicos
-              .map(name => datosAProcesar.find((a: any) => (a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
-              .filter(Boolean);
-
-            const mapped: ProductoPromocion[] = campanasUnicas.map((d: any) => ({
-              id: d.id || `upsell-${Math.random()}`,
-              nombre_producto: d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-              fecha: d.fecha || d.date || fechaHoy,
-              meta_diaria_unidades: Number(d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-              puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
-              asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
-            }));
-            setLocalProductos(mapped);
+          if (!errFecha && dataFecha && dataFecha.length > 0) {
+            data = dataFecha;
+            error = null;
           } else {
-            console.log("No hay campañas activas en este momento.");
-            setLocalProductos([]);
+            // Intentar traer todo si no hay filtro de fecha estricto en la BD
+            const { data: allData, error: allErr } = await client
+              .from('upsell_rules')
+              .select('*');
+            if (!allErr && allData) {
+              data = allData;
+              error = null;
+            }
           }
         }
+
+        if (error) {
+          console.error("Error cargando campaña para empleado:", error.message || error);
+        } else if (data) {
+          console.log("Datos frescos para el trabajador:", data);
+          
+          // Filtrar por fecha de hoy si la respuesta contiene datos de múltiples fechas
+          const datosHoy = data.filter((d: any) => {
+            const regFecha = d.date || d.fecha;
+            if (!regFecha) return true;
+            return regFecha === fechaHoy;
+          });
+
+          const datosAProcesar = datosHoy.length > 0 ? datosHoy : data;
+
+          // Asegurar elementos únicos por nombre de producto
+          const nombresUnicos = Array.from(
+            new Set(datosAProcesar.map((a: any) => a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
+          ).filter(Boolean);
+
+          const campanasUnicas = nombresUnicos
+            .map(name => datosAProcesar.find((a: any) => (a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
+            .filter(Boolean);
+
+          const mapped: ProductoPromocion[] = campanasUnicas.map((d: any) => ({
+            id: d.id || `upsell-${Math.random()}`,
+            nombre_producto: d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+            fecha: d.fecha || d.date || fechaHoy,
+            meta_diaria_unidades: Number(d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+            puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
+            asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
+          }));
+
+          setLocalProductos(mapped);
+        }
       } catch (err) {
-        console.error('Error in EmployeeWorkspace fetchUpsellRules:', err);
+        console.error('Exception in EmployeeWorkspace fetchUpsellRules:', err);
       }
     };
 
-    // Ejecución automática inmediata al montar el componente
+    // Ejecutar inmediatamente al abrir la sección del trabajador
     fetchUpsellRules();
+
+    // Configurar intervalo de respaldo de 3 segundos
+    const pollInterval = setInterval(fetchUpsellRules, 3000);
 
     const channel = client
       .channel('upsell_changes')
@@ -148,13 +172,14 @@ export default function EmployeeWorkspace({
         'postgres_changes',
         { event: '*', schema: 'public', table: 'upsell_rules' },
         (payload) => {
-          console.log('Cambio detectado en upsell_rules:', payload);
+          console.log('Cambio detectado en tiempo real:', payload);
           fetchUpsellRules();
         }
       )
       .subscribe();
 
     return () => {
+      clearInterval(pollInterval);
       client.removeChannel(channel);
     };
   }, []);
