@@ -693,11 +693,12 @@ export default function EmployeeWorkspace({
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(() => {
-              const displayCampanas = localProductos.filter(prod => {
+              const filtered = localProductos.filter(prod => {
                 const belongsToMe = prod.asignado_a && prod.asignado_a.toLowerCase() === empleado.nombre.toLowerCase();
                 const isGeneral = !prod.asignado_a || prod.asignado_a.trim() === '';
                 return belongsToMe || isGeneral;
               });
+              const displayCampanas = filtered.length > 0 ? filtered : localProductos;
               return displayCampanas.slice(0, 2).map(prod => {
                 const currentSold = getVentasProductoCount(prod.id);
                 const progressPct = Math.min((currentSold / prod.meta_diaria_unidades) * 100, 100);

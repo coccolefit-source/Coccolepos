@@ -735,6 +735,11 @@ export default function App() {
   // --- ACTIONS: PRODUCTOS A PROMOCIONAR ---
 
   const handleAddProducto = async (newProd: Omit<ProductoPromocion, 'id'>) => {
+    const mainProd: ProductoPromocion = {
+      ...newProd,
+      id: `prod-${Date.now()}`
+    };
+
     let empleados: Usuario[] = [];
     const client = getSupabaseClient();
     
@@ -757,62 +762,49 @@ export default function App() {
       }
     }
 
-    // Fallback to local state if no profiles fetched from Supabase
     if (empleados.length === 0) {
       empleados = (state.usuarios || []).filter(u => u.rol === 'empleado');
     }
 
-    if (empleados.length === 0) {
-      // Si no hay empleados, insertar un único registro genérico
-      const prod: ProductoPromocion = {
-        ...newProd,
-        id: `prod-${Date.now()}`
-      };
-      setState(prev => ({
-        ...prev,
-        productos: [prod, ...prev.productos]
-      }));
+    // Actualización local para rendimiento inmediato
+    const prodsToInsert: ProductoPromocion[] = empleados.length > 0
+      ? empleados.map((emp, idx) => ({
+          id: `prod-${Date.now()}-${idx}`,
+          nombre_producto: newProd.nombre_producto,
+          fecha: newProd.fecha || '2026-08-20',
+          meta_diaria_unidades: newProd.meta_diaria_unidades,
+          puntos_por_unidad: newProd.puntos_por_unidad,
+          asignado_a: emp.nombre
+        }))
+      : [mainProd];
 
-      if (client) {
-        await insertCampaignProductInSupabase(prod);
-      }
+    setState(prev => ({
+      ...prev,
+      productos: [mainProd, ...prodsToInsert, ...prev.productos]
+    }));
+
+    if (!client) {
       pushNotification(`Se agregó "${newProd.nombre_producto}" a la campaña diaria.`, 'success');
       return;
     }
 
-    // Crear un registro para cada trabajador en la lista
-    const fechaHoy = newProd.fecha || '2026-08-20';
-    const baseId = Date.now();
-    const prodsToInsert: ProductoPromocion[] = empleados.map((emp, idx) => ({
-      id: `prod-${baseId}-${idx}`,
-      nombre_producto: newProd.nombre_producto,
-      fecha: fechaHoy,
-      meta_diaria_unidades: newProd.meta_diaria_unidades,
-      puntos_por_unidad: newProd.puntos_por_unidad,
-      asignado_a: emp.nombre
-    }));
-
-    // Actualización local inmediata
-    setState(prev => ({
-      ...prev,
-      productos: [...prodsToInsert, ...prev.productos]
-    }));
-
-    if (!client) {
-      pushNotification(`Se crearon ${prodsToInsert.length} campañas locales para los empleados.`, 'success');
-      return;
-    }
-
     try {
-      let successCount = 0;
-      for (const prod of prodsToInsert) {
-        const ok = await insertCampaignProductInSupabase(prod);
-        if (ok) successCount++;
+      // 1. Insertar siempre la regla general base (con product_name, target, points)
+      let okBase = await insertCampaignProductInSupabase(mainProd);
+
+      // 2. Si existen empleados y la tabla soporta asignación, intentar guardar por empleado
+      let successCount = okBase ? 1 : 0;
+      if (empleados.length > 0) {
+        for (const prod of prodsToInsert) {
+          const ok = await insertCampaignProductInSupabase(prod);
+          if (ok) successCount++;
+        }
       }
-      if (successCount > 0) {
-        pushNotification(`¡Impulso configurado y asignado a ${successCount} trabajadores exitosamente!`, 'success');
+
+      if (successCount > 0 || okBase) {
+        pushNotification(`¡Campaña de ventas "${newProd.nombre_producto}" configurada y sincronizada con éxito!`, 'success');
       } else {
-        pushNotification('Hubo un error al sincronizar la campaña masiva en la nube.', 'alert');
+        pushNotification('Hubo un error al sincronizar la campaña en la nube.', 'alert');
       }
       await cargarDatosSilencioso();
     } catch (err) {

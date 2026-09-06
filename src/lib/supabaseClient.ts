@@ -1315,11 +1315,21 @@ export async function insertWithResilientColumns(client: any, table: string, pay
   let currentPayload = { ...payload };
   const maxRetries = 15;
   for (let i = 0; i < maxRetries; i++) {
-    const { error } = await client.from(table).upsert(currentPayload);
-    if (!error) {
+    // Intento 1: upsert
+    const { error: upsertErr } = await client.from(table).upsert(currentPayload);
+    if (!upsertErr) {
       return { success: true };
     }
-    const msg = error.message || '';
+
+    // Intento 2: insert directo
+    const { error: insertErr } = await client.from(table).insert([currentPayload]);
+    if (!insertErr) {
+      return { success: true };
+    }
+
+    const error = insertErr || upsertErr;
+    const msg = error?.message || '';
+
     if (msg.includes("Could not find the '") && msg.includes("' column of '")) {
       const match = msg.match(/Could not find the '([^']+)' column/);
       if (match && match[1]) {
@@ -1329,6 +1339,17 @@ export async function insertWithResilientColumns(client: any, table: string, pay
         continue;
       }
     }
+
+    if (msg.toLowerCase().includes("column") && msg.toLowerCase().includes("does not exist")) {
+      const match = msg.match(/column ["']?([^"'\s]+)["']? does not exist/i);
+      if (match && match[1]) {
+        const missingCol = match[1];
+        console.warn(`[Supabase Resilience] Column '${missingCol}' does not exist in DB. Stripping it and retrying...`);
+        delete currentPayload[missingCol];
+        continue;
+      }
+    }
+
     return { success: false, error };
   }
   return { success: false, error: { message: "Exceeded max retries of resilient column stripping" } };
