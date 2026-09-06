@@ -12,15 +12,24 @@ async function startServer() {
 
   app.use(express.json());
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  const ai = new GoogleGenAI({
-    apiKey: apiKey || '',
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+  let aiClient: GoogleGenAI | null = null;
+  const getAi = () => {
+    if (!aiClient) {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('GEMINI_API_KEY environment variable is required');
       }
+      aiClient = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
     }
-  });
+    return aiClient;
+  };
 
   // API endpoint for worker performance analysis
   app.post('/api/worker-performance', async (req, res) => {
@@ -29,6 +38,8 @@ async function startServer() {
       if (!worker) {
         return res.status(400).json({ error: 'Worker data is required' });
       }
+
+      const ai = getAi();
 
       const responseSchema = {
         type: Type.OBJECT,
