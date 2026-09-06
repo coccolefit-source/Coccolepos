@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion } from '../types';
+import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal } from '../types';
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
@@ -1705,5 +1705,133 @@ export async function deleteCampaignProductFromSupabase(id: string): Promise<boo
     return false;
   }
 }
+
+// --- FUNCIONES PARA SCHEDULES / HORARIOS SEMANALES ---
+
+export async function insertScheduleInSupabase(dataTurno: {
+  id?: string;
+  usuario_id: string;
+  employee_name?: string;
+  dia_semana: 'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo';
+  hora_entrada: string;
+  hora_salida: string;
+  nota?: string;
+}): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  const idShift = dataTurno.id || ('shift_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
+
+  try {
+    const datosAEnviar = {
+      id: idShift,
+      employee_name: dataTurno.employee_name || dataTurno.usuario_id,
+      day_of_week: dataTurno.dia_semana,
+      start_time: dataTurno.hora_entrada,
+      end_time: dataTurno.hora_salida,
+      note: dataTurno.nota || ''
+    };
+
+    const { error: directError } = await client
+      .from('schedules')
+      .insert([datosAEnviar]);
+
+    if (!directError) {
+      console.log('¡Turno guardado con éxito en schedules!');
+      return true;
+    }
+
+    console.warn('Inserción directa en schedules falló, usando payload resiliente:', directError.message);
+
+    const payloadResiliente = {
+      ...datosAEnviar,
+      usuario_id: dataTurno.usuario_id,
+      employee_id: dataTurno.usuario_id,
+      dia_semana: dataTurno.dia_semana,
+      hora_entrada: dataTurno.hora_entrada,
+      hora_salida: dataTurno.hora_salida,
+      nota: dataTurno.nota || '',
+      created_at: new Date().toISOString()
+    };
+
+    let { success } = await insertWithResilientColumns(client, 'schedules', payloadResiliente);
+    if (!success) {
+      const { success: altSuccess } = await insertWithResilientColumns(client, 'horarios', payloadResiliente);
+      return altSuccess;
+    }
+    return true;
+  } catch (err) {
+    console.error('Error insertando turno en Supabase:', err);
+    return false;
+  }
+}
+
+export async function fetchSchedulesFromSupabase(): Promise<TurnoSemanal[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  try {
+    let { data, error } = await client
+      .from('schedules')
+      .select('*');
+
+    if (error || !data) {
+      const { data: altData } = await client.from('horarios').select('*');
+      data = altData || [];
+    }
+
+    if (!data || data.length === 0) return [];
+
+    return data.map((d: any) => ({
+      id: String(d.id || `shift-${Math.random()}`),
+      usuario_id: String(d.usuario_id || d.employee_id || d.employee_name || ''),
+      dia_semana: (d.day_of_week || d.dia_semana || 'Lunes') as TurnoSemanal['dia_semana'],
+      hora_entrada: String(d.start_time || d.hora_entrada || '08:00'),
+      hora_salida: String(d.end_time || d.hora_salida || '16:00'),
+      nota: d.note || d.nota || undefined
+    }));
+  } catch (err) {
+    console.error('Error cargando horarios de Supabase:', err);
+    return [];
+  }
+}
+
+export async function fetchSchedulesForEmployeeFromSupabase(nombreOIdEmpleado: string): Promise<TurnoSemanal[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  try {
+    let { data, error } = await client
+      .from('schedules')
+      .select('*')
+      .or(`employee_name.eq.${nombreOIdEmpleado},usuario_id.eq.${nombreOIdEmpleado},employee_id.eq.${nombreOIdEmpleado}`);
+
+    if (error || !data || data.length === 0) {
+      const { data: altData } = await client.from('schedules').select('*');
+      if (altData && altData.length > 0) {
+        data = altData.filter((d: any) => 
+          d.employee_name === nombreOIdEmpleado || 
+          d.usuario_id === nombreOIdEmpleado || 
+          d.employee_id === nombreOIdEmpleado
+        );
+      }
+    }
+
+    if (!data || data.length === 0) return [];
+
+    return data.map((d: any) => ({
+      id: String(d.id || `shift-${Math.random()}`),
+      usuario_id: String(d.usuario_id || d.employee_id || d.employee_name || nombreOIdEmpleado),
+      dia_semana: (d.day_of_week || d.dia_semana || 'Lunes') as TurnoSemanal['dia_semana'],
+      hora_entrada: String(d.start_time || d.hora_entrada || '08:00'),
+      hora_salida: String(d.end_time || d.hora_salida || '16:00'),
+      nota: d.note || d.nota || undefined
+    }));
+  } catch (err) {
+    console.error('Error cargando horarios del empleado desde Supabase:', err);
+    return [];
+  }
+}
+
 
 

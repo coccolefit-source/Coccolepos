@@ -2733,6 +2733,7 @@ export default function AdminDashboard({
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Colaborador</label>
                   <select
+                    id="selectColaborador"
                     value={schUsuarioId}
                     onChange={(e) => setSchUsuarioId(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
@@ -2749,6 +2750,7 @@ export default function AdminDashboard({
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Día del Turno</label>
                   <select
+                    id="selectDia"
                     value={schDia}
                     onChange={(e) => setSchDia(e.target.value as any)}
                     className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
@@ -2767,6 +2769,7 @@ export default function AdminDashboard({
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Hora de Entrada</label>
                   <input
+                    id="inputHoraEntrada"
                     type="time"
                     value={schHoraEntrada}
                     onChange={(e) => setSchHoraEntrada(e.target.value)}
@@ -2779,6 +2782,7 @@ export default function AdminDashboard({
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Hora de Salida</label>
                   <input
+                    id="inputHoraSalida"
                     type="time"
                     value={schHoraSalida}
                     onChange={(e) => setSchHoraSalida(e.target.value)}
@@ -2791,6 +2795,7 @@ export default function AdminDashboard({
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nota del Turno / Especialidad</label>
                   <input
+                    id="inputNotaTurno"
                     type="text"
                     placeholder="Ej. Apertura, Cierre, etc."
                     value={schNota}

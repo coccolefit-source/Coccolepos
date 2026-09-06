@@ -45,6 +45,9 @@ import {
   insertCampaignProductInSupabase,
   updateCampaignProductInSupabase,
   deleteCampaignProductFromSupabase,
+  insertScheduleInSupabase,
+  fetchSchedulesFromSupabase,
+  fetchSchedulesForEmployeeFromSupabase,
   getSupabaseClient
 } from './lib/supabaseClient';
 
@@ -1314,20 +1317,31 @@ export default function App() {
   // --- ACTIONS: GESTIÓN DE HORARIOS Y TURNOS ---
 
   const handleSaveTurno = (turno: Omit<TurnoSemanal, 'id'> & { id?: string }) => {
+    const emp = state.usuarios.find(u => u.id === turno.usuario_id);
+    const empNombre = emp?.nombre || turno.usuario_id;
+
+    insertScheduleInSupabase({
+      id: turno.id || ('shift_' + Date.now()),
+      usuario_id: turno.usuario_id,
+      employee_name: empNombre,
+      dia_semana: turno.dia_semana,
+      hora_entrada: turno.hora_entrada,
+      hora_salida: turno.hora_salida,
+      nota: turno.nota
+    });
+
     setState(prev => {
       const turnos = prev.horarios || [];
       if (turno.id) {
         const updated = turnos.map(t => t.id === turno.id ? { ...t, ...turno } as TurnoSemanal : t);
-        const emp = prev.usuarios.find(u => u.id === turno.usuario_id);
-        pushNotification(`Turno de ${emp?.nombre} actualizado para el ${turno.dia_semana}.`, 'success');
+        pushNotification(`Turno de ${empNombre} actualizado para el ${turno.dia_semana}.`, 'success');
         return { ...prev, horarios: updated };
       } else {
         const newTurno: TurnoSemanal = {
           ...turno,
           id: `t-${Date.now()}`
         };
-        const emp = prev.usuarios.find(u => u.id === turno.usuario_id);
-        pushNotification(`Turno programado para ${emp?.nombre} el ${turno.dia_semana}.`, 'success');
+        pushNotification(`Turno programado para ${empNombre} el ${turno.dia_semana}.`, 'success');
         return { ...prev, horarios: [...turnos, newTurno] };
       }
     });

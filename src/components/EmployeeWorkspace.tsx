@@ -9,7 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase } from '../lib/supabaseClient';
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
@@ -78,11 +78,55 @@ export default function EmployeeWorkspace({
   onConfirmarLecturaAnuncio,
 }: EmployeeWorkspaceProps) {
   const [localProductos, setLocalProductos] = useState<ProductoPromocion[]>(productos);
+  const [localHorarios, setLocalHorarios] = useState<TurnoSemanal[]>(horarios);
 
-  // Sincronizar localProductos si cambian las props
+  // Sincronizar localProductos y localHorarios si cambian las props
   useEffect(() => {
     setLocalProductos(productos);
   }, [productos]);
+
+  useEffect(() => {
+    setLocalHorarios(horarios);
+  }, [horarios]);
+
+  // Suscripción en Tiempo Real para los horarios de trabajo (schedules)
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    const cargarHorarioEmpleado = async () => {
+      try {
+        const turnos = await fetchSchedulesForEmployeeFromSupabase(empleado.nombre);
+        if (turnos && turnos.length > 0) {
+          setLocalHorarios(turnos);
+        } else {
+          const turnosById = await fetchSchedulesForEmployeeFromSupabase(empleado.id);
+          if (turnosById && turnosById.length > 0) {
+            setLocalHorarios(turnosById);
+          }
+        }
+      } catch (err) {
+        console.error("Error al cargar horarios del empleado:", err);
+      }
+    };
+
+    cargarHorarioEmpleado();
+
+    const subscriptionSchedules = client
+      .channel('sync_schedules_empleado')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'schedules' },
+        () => {
+          cargarHorarioEmpleado();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      client.removeChannel(subscriptionSchedules);
+    };
+  }, [empleado.nombre, empleado.id]);
 
   // Suscripción en Tiempo Real para los productos de campaña (upsell_rules)
   useEffect(() => {
@@ -1626,7 +1670,8 @@ export default function EmployeeWorkspace({
               </div>
 
               {(() => {
-                const misTurnos = horarios.filter(t => t.usuario_id === empleado.id);
+                const listaTurnos = localHorarios.length > 0 ? localHorarios : horarios;
+                const misTurnos = listaTurnos.filter(t => t.usuario_id === empleado.id || t.usuario_id === empleado.nombre);
                 const dias: Array<'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo'> = [
                   'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'
                 ];
