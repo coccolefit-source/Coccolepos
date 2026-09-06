@@ -245,6 +245,7 @@ export default function AdminDashboard({
   const [prodNombre, setProdNombre] = useState('');
   const [prodMeta, setProdMeta] = useState(15);
   const [prodPuntos, setProdPuntos] = useState(10);
+  const [isSubmittingUpsell, setIsSubmittingUpsell] = useState(false);
 
   // Formulario de Trabajador (Agregar / Editar)
   const [empNombre, setEmpNombre] = useState('');
@@ -905,22 +906,41 @@ export default function AdminDashboard({
     setTareaRequiereFoto(false);
   };
 
-  const handleProdSubmit = (e: React.FormEvent) => {
+  const handleProdSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prodNombre.trim()) return;
+    if (!prodNombre.trim()) {
+      alert('Por favor ingresa el nombre del producto sugerido.');
+      return;
+    }
 
-    const fechaHoy = new Date().toISOString().split('T')[0];
+    if (isSubmittingUpsell || (window as any).isSubmittingUpsell) return;
+    setIsSubmittingUpsell(true);
+    (window as any).isSubmittingUpsell = true;
 
-    onAddProducto({
-      nombre_producto: prodNombre,
-      fecha: fechaHoy,
-      meta_diaria_unidades: Number(prodMeta),
-      puntos_por_unidad: Number(prodPuntos),
-    });
+    try {
+      const fechaHoy = new Date().toISOString().split('T')[0];
 
-    setProdNombre('');
-    setProdMeta(15);
-    setProdPuntos(10);
+      await onAddProducto({
+        nombre_producto: prodNombre.trim(),
+        fecha: fechaHoy,
+        meta_diaria_unidades: Number(prodMeta) || 0,
+        puntos_por_unidad: Number(prodPuntos) || 10,
+      });
+
+      setProdNombre('');
+      setProdMeta(15);
+      setProdPuntos(10);
+      
+      const inputNombre = document.getElementById('inputNombreSugerido') as HTMLInputElement;
+      if (inputNombre) inputNombre.value = '';
+      const inputMeta = document.getElementById('inputPrecioMeta') as HTMLInputElement;
+      if (inputMeta) inputMeta.value = '15';
+    } catch (err) {
+      console.error('Error al guardar campaña:', err);
+    } finally {
+      setIsSubmittingUpsell(false);
+      (window as any).isSubmittingUpsell = false;
+    }
   };
 
   const handleAnuncioSubmit = (e: React.FormEvent) => {
@@ -1669,10 +1689,12 @@ export default function AdminDashboard({
               </div>
 
               <button
+                id="btnGuardarCampana"
                 type="submit"
-                className="w-full bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer"
+                disabled={isSubmittingUpsell}
+                className="w-full bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer disabled:opacity-50"
               >
-                Configurar Impulso
+                {isSubmittingUpsell ? 'Guardando...' : 'Configurar Impulso'}
               </button>
             </form>
           </div>
