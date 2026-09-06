@@ -95,20 +95,28 @@ export default function EmployeeWorkspace({
           .from('upsell_rules')
           .select('*');
 
-        if (!error && data) {
-          const mapped: ProductoPromocion[] = data.map((d: any) => ({
-            id: d.id,
-            nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-            fecha: d.fecha || d.date || '2026-08-20',
-            meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-            puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
-          }));
-          setLocalProductos(mapped);
+        if (error) {
+          console.error("Error detallado al cargar upsell_rules:", error.message, error.details);
+        } else {
+          console.log("Reglas de upsell cargadas con éxito:", data);
+          if (data) {
+            const mapped: ProductoPromocion[] = data.map((d: any) => ({
+              id: d.id,
+              nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+              fecha: d.fecha || d.date || '2026-08-20',
+              meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+              puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
+            }));
+            setLocalProductos(mapped);
+          }
         }
       } catch (err) {
         console.error('Error in EmployeeWorkspace fetchUpsellRules:', err);
       }
     };
+
+    // Ejecución automática inmediata al montar el componente
+    fetchUpsellRules();
 
     const channel = client
       .channel('upsell_changes')
@@ -684,8 +692,7 @@ export default function EmployeeWorkspace({
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(() => {
-              const hoyCampanas = localProductos.filter(p => p.fecha === '2026-08-20');
-              const displayCampanas = hoyCampanas.length > 0 ? hoyCampanas : localProductos;
+              const displayCampanas = localProductos;
               return displayCampanas.slice(0, 2).map(prod => {
                 const currentSold = getVentasProductoCount(prod.id);
                 const progressPct = Math.min((currentSold / prod.meta_diaria_unidades) * 100, 100);
