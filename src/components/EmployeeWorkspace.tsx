@@ -91,6 +91,8 @@ export default function EmployeeWorkspace({
 
     const fetchUpsellRules = async () => {
       try {
+        const fechaHoy = new Date().toISOString().split('T')[0];
+
         const { data, error } = await client
           .from('upsell_rules')
           .select('*');
@@ -100,10 +102,28 @@ export default function EmployeeWorkspace({
         } else {
           console.log("Campañas encontradas para el trabajador:", data);
           if (data && data.length > 0) {
-            const mapped: ProductoPromocion[] = data.map((d: any) => ({
+            // 1. Filtrar solo las campañas del día actual (o sin fecha explícita)
+            const datosHoy = data.filter((d: any) => {
+              const regFecha = d.date || d.fecha;
+              if (!regFecha) return true;
+              return regFecha === fechaHoy;
+            });
+
+            const datosAProcesar = datosHoy.length > 0 ? datosHoy : data;
+
+            // 2. Asegurar elementos únicos por nombre de producto para evitar duplicación
+            const nombresUnicos = Array.from(
+              new Set(datosAProcesar.map((a: any) => a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
+            ).filter(Boolean);
+
+            const campanasUnicas = nombresUnicos
+              .map(name => datosAProcesar.find((a: any) => (a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
+              .filter(Boolean);
+
+            const mapped: ProductoPromocion[] = campanasUnicas.map((d: any) => ({
               id: d.id || `upsell-${Math.random()}`,
               nombre_producto: d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-              fecha: d.fecha || d.date || new Date().toISOString().split('T')[0],
+              fecha: d.fecha || d.date || fechaHoy,
               meta_diaria_unidades: Number(d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
               puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
               asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
@@ -111,6 +131,7 @@ export default function EmployeeWorkspace({
             setLocalProductos(mapped);
           } else {
             console.log("No hay campañas activas en este momento.");
+            setLocalProductos([]);
           }
         }
       } catch (err) {

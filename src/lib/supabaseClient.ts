@@ -1500,46 +1500,70 @@ export async function deleteDailyTaskFromSupabase(id: string): Promise<boolean> 
   }
 }
 
+export async function clearOldCampaignProductsInSupabase(fechaHoy?: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  const targetDate = fechaHoy || new Date().toISOString().split('T')[0];
+  try {
+    const { error: err1 } = await client.from('upsell_rules').delete().eq('date', targetDate);
+    if (err1) {
+      await client.from('upsell_rules').delete().eq('fecha', targetDate);
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error limpiando campañas previas en Supabase:', err);
+    return false;
+  }
+}
+
 export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromocion[]> {
   const client = getSupabaseClient();
   if (!client) return [];
 
+  const fechaHoy = new Date().toISOString().split('T')[0];
+
   try {
-    const { data, error } = await client
+    let { data, error } = await client
       .from('upsell_rules')
       .select('*');
 
     if (error || !data || data.length === 0) {
-      // fallback to campaign_products and alternative table
       const { data: altData, error: altError } = await client.from('campaign_products').select('*');
       if (altError || !altData || altData.length === 0) {
         const { data: altData2 } = await client.from('productos_promocion').select('*');
-        if (!altData2) return [];
-        return altData2.map((d: any) => ({
-          id: d.id,
-          nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-          fecha: d.fecha || d.date || '2026-08-20',
-          meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-          puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
-          asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
-        }));
+        data = altData2 || [];
+      } else {
+        data = altData;
       }
-      return altData.map((d: any) => ({
-        id: d.id,
-        nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-        fecha: d.fecha || d.date || '2026-08-20',
-        meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-        puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
-        asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
-      }));
     }
 
-    return data.map((d: any) => ({
-      id: d.id,
-      nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || d.product_name || '',
-      fecha: d.fecha || d.date || '2026-08-20',
-      meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? d.target ?? 15),
-      puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
+    if (!data || data.length === 0) return [];
+
+    // 1. Filtrar por la fecha de hoy si existe campo fecha/date
+    const datosHoy = data.filter((d: any) => {
+      const regFecha = d.date || d.fecha;
+      if (!regFecha) return true;
+      return regFecha === fechaHoy;
+    });
+
+    const datosAProcesar = datosHoy.length > 0 ? datosHoy : data;
+
+    // 2. Deduplicar por nombre de producto para asegurar elementos únicos
+    const nombresUnicos = Array.from(
+      new Set(datosAProcesar.map((a: any) => a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
+    ).filter(Boolean);
+
+    const campanasUnicas = nombresUnicos
+      .map(name => datosAProcesar.find((a: any) => (a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
+      .filter(Boolean);
+
+    return campanasUnicas.map((d: any) => ({
+      id: d.id || `upsell-${Math.random()}`,
+      nombre_producto: d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+      fecha: d.fecha || d.date || fechaHoy,
+      meta_diaria_unidades: Number(d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+      puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
       asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
     }));
   } catch (err) {

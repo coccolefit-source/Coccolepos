@@ -41,6 +41,7 @@ import {
   updateDailyTaskStatusInSupabase,
   deleteDailyTaskFromSupabase,
   fetchCampaignProductsFromSupabase,
+  clearOldCampaignProductsInSupabase,
   insertCampaignProductInSupabase,
   updateCampaignProductInSupabase,
   deleteCampaignProductFromSupabase,
@@ -789,6 +790,10 @@ export default function App() {
     }
 
     try {
+      // 0. Limpiar campañas anteriores del día para evitar acumulación/duplicados
+      const fechaHoy = newProd.fecha || new Date().toISOString().split('T')[0];
+      await clearOldCampaignProductsInSupabase(fechaHoy);
+
       // 1. Insertar siempre la regla general base (con product_name, target, points)
       let okBase = await insertCampaignProductInSupabase(mainProd);
 
