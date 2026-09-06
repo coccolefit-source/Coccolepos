@@ -43,7 +43,8 @@ import {
   fetchCampaignProductsFromSupabase,
   insertCampaignProductInSupabase,
   updateCampaignProductInSupabase,
-  deleteCampaignProductFromSupabase
+  deleteCampaignProductFromSupabase,
+  getSupabaseClient
 } from './lib/supabaseClient';
 
 
@@ -734,32 +735,88 @@ export default function App() {
   // --- ACTIONS: PRODUCTOS A PROMOCIONAR ---
 
   const handleAddProducto = async (newProd: Omit<ProductoPromocion, 'id'>) => {
-    const prod: ProductoPromocion = {
-      ...newProd,
-      id: `prod-${Date.now()}`
-    };
+    let empleados: Usuario[] = [];
+    const client = getSupabaseClient();
+    
+    if (client) {
+      try {
+        const { data, error } = await client
+          .from('profiles')
+          .select('*');
+        if (!error && data) {
+          empleados = data
+            .map((p: any) => ({
+              id: p.id,
+              nombre: p.full_name || p.nombre || 'Usuario',
+              rol: (p.role === 'staff' ? 'empleado' : (p.role || p.rol || 'empleado')) as 'admin' | 'empleado'
+            }))
+            .filter((u: any) => u.rol === 'empleado');
+        }
+      } catch (err) {
+        console.error('Error fetching profiles in handleAddProducto:', err);
+      }
+    }
 
-    // Actualización local para velocidad inmediata de interfaz
-    setState(prev => ({
-      ...prev,
-      productos: [prod, ...prev.productos]
+    // Fallback to local state if no profiles fetched from Supabase
+    if (empleados.length === 0) {
+      empleados = (state.usuarios || []).filter(u => u.rol === 'empleado');
+    }
+
+    if (empleados.length === 0) {
+      // Si no hay empleados, insertar un único registro genérico
+      const prod: ProductoPromocion = {
+        ...newProd,
+        id: `prod-${Date.now()}`
+      };
+      setState(prev => ({
+        ...prev,
+        productos: [prod, ...prev.productos]
+      }));
+
+      if (client) {
+        await insertCampaignProductInSupabase(prod);
+      }
+      pushNotification(`Se agregó "${newProd.nombre_producto}" a la campaña diaria.`, 'success');
+      return;
+    }
+
+    // Crear un registro para cada trabajador en la lista
+    const fechaHoy = newProd.fecha || '2026-08-20';
+    const baseId = Date.now();
+    const prodsToInsert: ProductoPromocion[] = empleados.map((emp, idx) => ({
+      id: `prod-${baseId}-${idx}`,
+      nombre_producto: newProd.nombre_producto,
+      fecha: fechaHoy,
+      meta_diaria_unidades: newProd.meta_diaria_unidades,
+      puntos_por_unidad: newProd.puntos_por_unidad,
+      asignado_a: emp.nombre
     }));
 
-    if (!isSupabaseConfigured()) {
-      pushNotification(`Se agregó "${newProd.nombre_producto}" a la campaña diaria. Meta: ${newProd.meta_diaria_unidades}.`, 'success');
+    // Actualización local inmediata
+    setState(prev => ({
+      ...prev,
+      productos: [...prodsToInsert, ...prev.productos]
+    }));
+
+    if (!client) {
+      pushNotification(`Se crearon ${prodsToInsert.length} campañas locales para los empleados.`, 'success');
       return;
     }
 
     try {
-      const ok = await insertCampaignProductInSupabase(prod);
-      if (ok) {
-        pushNotification(`¡Sincronizado! Se agregó "${newProd.nombre_producto}" a la nube.`, 'success');
+      let successCount = 0;
+      for (const prod of prodsToInsert) {
+        const ok = await insertCampaignProductInSupabase(prod);
+        if (ok) successCount++;
+      }
+      if (successCount > 0) {
+        pushNotification(`¡Impulso configurado y asignado a ${successCount} trabajadores exitosamente!`, 'success');
       } else {
-        pushNotification(`Se agregó "${newProd.nombre_producto}" localmente (Error al guardar en Supabase)`, 'info');
+        pushNotification('Hubo un error al sincronizar la campaña masiva en la nube.', 'alert');
       }
       await cargarDatosSilencioso();
     } catch (err) {
-      console.error('Error insertando producto de campaña en Supabase:', err);
+      console.error('Error insertando producto de campaña masiva:', err);
     }
   };
 

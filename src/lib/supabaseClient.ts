@@ -1499,7 +1499,8 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
           nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
           fecha: d.fecha || d.date || '2026-08-20',
           meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-          puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
+          puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
+          asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
         }));
       }
       return altData.map((d: any) => ({
@@ -1507,16 +1508,18 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
         nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
         fecha: d.fecha || d.date || '2026-08-20',
         meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-        puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
+        puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
+        asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
       }));
     }
 
     return data.map((d: any) => ({
       id: d.id,
-      nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+      nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || d.product_name || '',
       fecha: d.fecha || d.date || '2026-08-20',
-      meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-      puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
+      meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? d.target ?? 15),
+      puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
+      asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
     }));
   } catch (err) {
     console.error('Error fetching campaign products from Supabase:', err);
@@ -1533,6 +1536,7 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       id: prod.id,
       nombre_producto: prod.nombre_producto,
       name: prod.nombre_producto,
+      product_name: prod.nombre_producto,
       producto_sugerido_nombre: prod.nombre_producto,
       producto_base_nombre: prod.nombre_producto,
       fecha: prod.fecha,
@@ -1540,9 +1544,13 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       meta_diaria_unidades: prod.meta_diaria_unidades,
       meta: prod.meta_diaria_unidades,
       meta_diaria: prod.meta_diaria_unidades,
+      target: prod.meta_diaria_unidades,
       puntos_por_unidad: prod.puntos_por_unidad,
       points: prod.puntos_por_unidad,
       puntos: prod.puntos_por_unidad,
+      asignado_a: prod.asignado_a || null,
+      assigned_to: prod.asignado_a || null,
+      asignado: prod.asignado_a || null,
       descuento_promocional_pct: 0,
       activa: true,
       created_at: new Date().toISOString()
@@ -1572,6 +1580,7 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
     const payload = {
       nombre_producto: prod.nombre_producto,
       name: prod.nombre_producto,
+      product_name: prod.nombre_producto,
       producto_sugerido_nombre: prod.nombre_producto,
       producto_base_nombre: prod.nombre_producto,
       fecha: prod.fecha,
@@ -1579,9 +1588,13 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
       meta_diaria_unidades: prod.meta_diaria_unidades,
       meta: prod.meta_diaria_unidades,
       meta_diaria: prod.meta_diaria_unidades,
+      target: prod.meta_diaria_unidades,
       puntos_por_unidad: prod.puntos_por_unidad,
       points: prod.puntos_por_unidad,
       puntos: prod.puntos_por_unidad,
+      asignado_a: prod.asignado_a || null,
+      assigned_to: prod.asignado_a || null,
+      asignado: prod.asignado_a || null,
       descuento_promocional_pct: 0,
       activa: true,
       updated_at: new Date().toISOString()

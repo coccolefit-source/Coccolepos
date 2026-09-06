@@ -105,7 +105,8 @@ export default function EmployeeWorkspace({
               nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
               fecha: d.fecha || d.date || '2026-08-20',
               meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-              puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10)
+              puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
+              asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
             }));
             setLocalProductos(mapped);
           }
@@ -692,7 +693,11 @@ export default function EmployeeWorkspace({
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(() => {
-              const displayCampanas = localProductos;
+              const displayCampanas = localProductos.filter(prod => {
+                const belongsToMe = prod.asignado_a && prod.asignado_a.toLowerCase() === empleado.nombre.toLowerCase();
+                const isGeneral = !prod.asignado_a || prod.asignado_a.trim() === '';
+                return belongsToMe || isGeneral;
+              });
               return displayCampanas.slice(0, 2).map(prod => {
                 const currentSold = getVentasProductoCount(prod.id);
                 const progressPct = Math.min((currentSold / prod.meta_diaria_unidades) * 100, 100);

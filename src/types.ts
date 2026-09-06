@@ -33,6 +33,7 @@ export interface ProductoPromocion {
   fecha: string; // YYYY-MM-DD
   meta_diaria_unidades: number;
   puntos_por_unidad: number;
+  asignado_a?: string;
 }
 
 export interface RegistroVenta {
