@@ -1526,15 +1526,21 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
   try {
     let { data, error } = await client
       .from('upsell_rules')
-      .select('*');
+      .select('*')
+      .eq('active', true);
 
     if (error || !data || data.length === 0) {
-      const { data: altData, error: altError } = await client.from('campaign_products').select('*');
-      if (altError || !altData || altData.length === 0) {
-        const { data: altData2 } = await client.from('productos_promocion').select('*');
-        data = altData2 || [];
+      const { data: dataAll, error: errAll } = await client.from('upsell_rules').select('*');
+      if (!errAll && dataAll && dataAll.length > 0) {
+        data = dataAll;
       } else {
-        data = altData;
+        const { data: altData, error: altError } = await client.from('campaign_products').select('*');
+        if (altError || !altData || altData.length === 0) {
+          const { data: altData2 } = await client.from('productos_promocion').select('*');
+          data = altData2 || [];
+        } else {
+          data = altData;
+        }
       }
     }
 
@@ -1551,18 +1557,18 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
 
     // 2. Deduplicar por nombre de producto para asegurar elementos únicos
     const nombresUnicos = Array.from(
-      new Set(datosAProcesar.map((a: any) => a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
+      new Set(datosAProcesar.map((a: any) => a.suggested_product_name || a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
     ).filter(Boolean);
 
     const campanasUnicas = nombresUnicos
-      .map(name => datosAProcesar.find((a: any) => (a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
+      .map(name => datosAProcesar.find((a: any) => (a.suggested_product_name || a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
       .filter(Boolean);
 
     return campanasUnicas.map((d: any) => ({
       id: d.id || `upsell-${Math.random()}`,
-      nombre_producto: d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+      nombre_producto: d.suggested_product_name || d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
       fecha: d.fecha || d.date || fechaHoy,
-      meta_diaria_unidades: Number(d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+      meta_diaria_unidades: Number(d.suggested_price ?? d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
       puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
       asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
     }));
@@ -1578,7 +1584,10 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
 
   try {
     const payload = {
-      id: prod.id,
+      id: prod.id || ('rule_' + Date.now()),
+      base_product_name: 'General',
+      suggested_product_name: prod.nombre_producto,
+      suggested_price: prod.meta_diaria_unidades,
       nombre_producto: prod.nombre_producto,
       name: prod.nombre_producto,
       product_name: prod.nombre_producto,
@@ -1598,6 +1607,7 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       asignado: prod.asignado_a || null,
       descuento_promocional_pct: 0,
       activa: true,
+      active: true,
       created_at: new Date().toISOString()
     };
 

@@ -97,20 +97,18 @@ export default function EmployeeWorkspace({
         let { data, error } = await client
           .from('upsell_rules')
           .select('*')
-          .eq('date', fechaHoy);
+          .eq('active', true);
 
         if (error || !data || data.length === 0) {
-          // Intentar por el campo 'fecha' si 'date' no trajo nada o no existe
-          const { data: dataFecha, error: errFecha } = await client
+          const { data: dataDate, error: errDate } = await client
             .from('upsell_rules')
             .select('*')
-            .eq('fecha', fechaHoy);
+            .eq('date', fechaHoy);
 
-          if (!errFecha && dataFecha && dataFecha.length > 0) {
-            data = dataFecha;
+          if (!errDate && dataDate && dataDate.length > 0) {
+            data = dataDate;
             error = null;
           } else {
-            // Intentar traer todo si no hay filtro de fecha estricto en la BD
             const { data: allData, error: allErr } = await client
               .from('upsell_rules')
               .select('*');
@@ -137,18 +135,18 @@ export default function EmployeeWorkspace({
 
           // Asegurar elementos únicos por nombre de producto
           const nombresUnicos = Array.from(
-            new Set(datosAProcesar.map((a: any) => a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
+            new Set(datosAProcesar.map((a: any) => a.suggested_product_name || a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
           ).filter(Boolean);
 
           const campanasUnicas = nombresUnicos
-            .map(name => datosAProcesar.find((a: any) => (a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
+            .map(name => datosAProcesar.find((a: any) => (a.suggested_product_name || a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
             .filter(Boolean);
 
           const mapped: ProductoPromocion[] = campanasUnicas.map((d: any) => ({
             id: d.id || `upsell-${Math.random()}`,
-            nombre_producto: d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+            nombre_producto: d.suggested_product_name || d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
             fecha: d.fecha || d.date || fechaHoy,
-            meta_diaria_unidades: Number(d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+            meta_diaria_unidades: Number(d.suggested_price ?? d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
             puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
             asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
           }));
