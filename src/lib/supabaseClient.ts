@@ -1583,11 +1583,27 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
   if (!client) return false;
 
   try {
-    const payload = {
+    const datosAEnviar = {
       id: prod.id || ('rule_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
-      base_product_name: prod.nombre_producto || 'General',
+      base_product_name: 'General',
       suggested_product_name: prod.nombre_producto,
-      suggested_price: parseFloat(String(prod.meta_diaria_unidades)) || 0,
+      suggested_price: Number(prod.meta_diaria_unidades) || 0,
+      active: true
+    };
+
+    const { error: directError } = await client
+      .from('upsell_rules')
+      .insert([datosAEnviar]);
+
+    if (!directError) {
+      console.log('¡Campaña guardada con éxito en upsell_rules!');
+      return true;
+    }
+
+    console.warn('Direct insert into upsell_rules failed, trying resilient payload:', directError.message);
+
+    const payload = {
+      ...datosAEnviar,
       nombre_producto: prod.nombre_producto,
       name: prod.nombre_producto,
       product_name: prod.nombre_producto,
@@ -1607,7 +1623,6 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       asignado: prod.asignado_a || null,
       descuento_promocional_pct: 0,
       activa: true,
-      active: true,
       created_at: new Date().toISOString()
     };
 
