@@ -1585,9 +1585,9 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
   try {
     const payload = {
       id: prod.id || ('rule_' + Date.now()),
-      base_product_name: 'General',
+      base_product_name: prod.nombre_producto || 'General',
       suggested_product_name: prod.nombre_producto,
-      suggested_price: prod.meta_diaria_unidades,
+      suggested_price: parseFloat(String(prod.meta_diaria_unidades)) || 0,
       nombre_producto: prod.nombre_producto,
       name: prod.nombre_producto,
       product_name: prod.nombre_producto,
