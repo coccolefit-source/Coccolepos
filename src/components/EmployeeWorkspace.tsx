@@ -89,39 +89,21 @@ export default function EmployeeWorkspace({
     const client = getSupabaseClient();
     if (!client) return;
 
-    const fetchUpsellRules = async () => {
+    const cargarVentasSugeridasEmpleado = async () => {
       try {
         const fechaHoy = new Date().toISOString().split('T')[0];
 
-        // 1. Traer directamente cualquier registro vigente de la tabla upsell_rules para hoy
-        let { data, error } = await client
+        const { data, error } = await client
           .from('upsell_rules')
           .select('*')
           .eq('active', true);
 
-        if (error || !data || data.length === 0) {
-          const { data: dataDate, error: errDate } = await client
-            .from('upsell_rules')
-            .select('*')
-            .eq('date', fechaHoy);
-
-          if (!errDate && dataDate && dataDate.length > 0) {
-            data = dataDate;
-            error = null;
-          } else {
-            const { data: allData, error: allErr } = await client
-              .from('upsell_rules')
-              .select('*');
-            if (!allErr && allData) {
-              data = allData;
-              error = null;
-            }
-          }
+        if (error) {
+          console.error('Error al cargar ventas sugeridas:', error.message);
+          return;
         }
 
-        if (error) {
-          console.error("Error cargando campaña para empleado:", error.message || error);
-        } else if (data) {
+        if (data && data.length > 0) {
           console.log("Datos frescos para el trabajador:", data);
           
           // Filtrar por fecha de hoy si la respuesta contiene datos de múltiples fechas
@@ -152,33 +134,32 @@ export default function EmployeeWorkspace({
           }));
 
           setLocalProductos(mapped);
+        } else {
+          setLocalProductos([]);
         }
       } catch (err) {
-        console.error('Exception in EmployeeWorkspace fetchUpsellRules:', err);
+        console.error('Exception al cargar ventas sugeridas:', err);
       }
     };
 
-    // Ejecutar inmediatamente al abrir la sección del trabajador
-    fetchUpsellRules();
+    // 1. Cargar una sola vez al montar la vista
+    cargarVentasSugeridasEmpleado();
 
-    // Configurar intervalo de respaldo de 3 segundos
-    const pollInterval = setInterval(fetchUpsellRules, 3000);
-
-    const channel = client
-      .channel('upsell_changes')
+    // 2. Escuchar cambios en tiempo real (Supabase Channel optimizado)
+    const subscriptionUpsell = client
+      .channel('public:upsell_rules')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'upsell_rules' },
         (payload) => {
-          console.log('Cambio detectado en tiempo real:', payload);
-          fetchUpsellRules();
+          console.log('Cambio detectado en upsell_rules, actualizando vista...', payload);
+          cargarVentasSugeridasEmpleado();
         }
       )
       .subscribe();
 
     return () => {
-      clearInterval(pollInterval);
-      client.removeChannel(channel);
+      client.removeChannel(subscriptionUpsell);
     };
   }, []);
 
