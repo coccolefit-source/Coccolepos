@@ -2807,6 +2807,7 @@ export default function AdminDashboard({
                 {/* Botón de Carga */}
                 <div className="flex gap-1.5">
                   <button
+                    id="btnCargarTurno"
                     type="submit"
                     className="flex-1 bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer whitespace-nowrap"
                   >
