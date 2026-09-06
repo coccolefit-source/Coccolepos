@@ -96,19 +96,21 @@ export default function EmployeeWorkspace({
           .select('*');
 
         if (error) {
-          console.error("Error detallado al cargar upsell_rules:", error.message, error.details);
+          console.error("Error al cargar campañas para el trabajador:", error.message, error.details);
         } else {
-          console.log("Reglas de upsell cargadas con éxito:", data);
-          if (data) {
+          console.log("Campañas encontradas para el trabajador:", data);
+          if (data && data.length > 0) {
             const mapped: ProductoPromocion[] = data.map((d: any) => ({
-              id: d.id,
-              nombre_producto: d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-              fecha: d.fecha || d.date || '2026-08-20',
-              meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-              puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
+              id: d.id || `upsell-${Math.random()}`,
+              nombre_producto: d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
+              fecha: d.fecha || d.date || new Date().toISOString().split('T')[0],
+              meta_diaria_unidades: Number(d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
+              puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
               asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
             }));
             setLocalProductos(mapped);
+          } else {
+            console.log("No hay campañas activas en este momento.");
           }
         }
       } catch (err) {
@@ -693,13 +695,8 @@ export default function EmployeeWorkspace({
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(() => {
-              const filtered = localProductos.filter(prod => {
-                const belongsToMe = prod.asignado_a && prod.asignado_a.toLowerCase() === empleado.nombre.toLowerCase();
-                const isGeneral = !prod.asignado_a || prod.asignado_a.trim() === '';
-                return belongsToMe || isGeneral;
-              });
-              const displayCampanas = filtered.length > 0 ? filtered : localProductos;
-              return displayCampanas.slice(0, 2).map(prod => {
+              const displayCampanas = localProductos;
+              return displayCampanas.slice(0, 4).map(prod => {
                 const currentSold = getVentasProductoCount(prod.id);
                 const progressPct = Math.min((currentSold / prod.meta_diaria_unidades) * 100, 100);
                 return (
