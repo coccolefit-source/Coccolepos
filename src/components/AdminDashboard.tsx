@@ -909,9 +909,11 @@ export default function AdminDashboard({
     e.preventDefault();
     if (!prodNombre.trim()) return;
 
+    const fechaHoy = new Date().toISOString().split('T')[0];
+
     onAddProducto({
       nombre_producto: prodNombre,
-      fecha: '2026-08-20',
+      fecha: fechaHoy,
       meta_diaria_unidades: Number(prodMeta),
       puntos_por_unidad: Number(prodPuntos),
     });
@@ -1629,6 +1631,7 @@ export default function AdminDashboard({
               <div>
                 <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nombre del Producto</label>
                 <input
+                  id="inputNombreSugerido"
                   type="text"
                   placeholder="Ej. Parfait Berry Slim"
                   value={prodNombre}
@@ -1641,6 +1644,7 @@ export default function AdminDashboard({
               <div>
                 <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Meta Diaria (u.)</label>
                 <input
+                  id="inputPrecioMeta"
                   type="number"
                   min="1"
                   max="100"
