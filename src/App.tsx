@@ -48,6 +48,7 @@ import {
   insertScheduleInSupabase,
   fetchSchedulesFromSupabase,
   fetchSchedulesForEmployeeFromSupabase,
+  guardarProgresoEnSupabase,
   getSupabaseClient
 } from './lib/supabaseClient';
 
@@ -721,6 +722,14 @@ export default function App() {
 
       // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
       await cargarDatosSilencioso();
+
+      const assignedUser = state.usuarios.find(u => u.id === originalTask.asignado_a);
+      const empName = assignedUser?.nombre || currentUser.nombre;
+      if (empName) {
+        const userTasks = state.tareas.filter(t => t.asignado_a === (assignedUser?.id || currentUser.id));
+        const completedCount = userTasks.filter(t => t.id === id ? estado === 'Completada' : t.estado === 'Completada').length;
+        guardarProgresoEnSupabase(empName, completedCount, userTasks.length);
+      }
 
       const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
       pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');

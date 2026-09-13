@@ -8,7 +8,7 @@ import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaTy
 
 import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured } from '../lib/supabaseClient';
+import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';

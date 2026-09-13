@@ -9,7 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase } from '../lib/supabaseClient';
+import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual } from '../lib/supabaseClient';
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
@@ -88,6 +88,19 @@ export default function EmployeeWorkspace({
   useEffect(() => {
     setLocalHorarios(horarios);
   }, [horarios]);
+
+  // Cargar progreso del día desde Supabase para el empleado
+  const [progresoHoySupabase, setProgresoHoySupabase] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (empleado?.nombre) {
+      mostrarProgresoEmpleadoActual(empleado.nombre).then(res => {
+        if (res && typeof res.porcentajeHoy === 'number') {
+          setProgresoHoySupabase(res.porcentajeHoy);
+        }
+      });
+    }
+  }, [empleado?.nombre]);
 
   // Suscripción en Tiempo Real para los horarios de trabajo (schedules)
   useEffect(() => {
@@ -214,6 +227,13 @@ export default function EmployeeWorkspace({
   const tareasCompletadasCount = misTareas.filter(t => t.estado === 'Completada').length;
   const totalTareasCount = misTareas.length;
   const porcentajeCumplimientoTareas = totalTareasCount > 0 ? Math.round((tareasCompletadasCount / totalTareasCount) * 100) : 100;
+
+  // Sincronizar progreso de tareas a Supabase
+  useEffect(() => {
+    if (empleado?.nombre) {
+      guardarProgresoEnSupabase(empleado.nombre, tareasCompletadasCount, totalTareasCount);
+    }
+  }, [empleado?.nombre, tareasCompletadasCount, totalTareasCount]);
 
   // Buscar fichaje de hoy
   const miFichaje = fichajes.find(f => f.usuario_id === empleado.id && f.fecha === '2026-08-20');

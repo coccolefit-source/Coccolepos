@@ -1833,5 +1833,89 @@ export async function fetchSchedulesForEmployeeFromSupabase(nombreOIdEmpleado: s
   }
 }
 
+// Envía el progreso directamente a Supabase (Cero localStorage)
+export const guardarProgresoEnSupabase = async (employeeName: string, completadas: number, totales: number) => {
+  const client = getSupabaseClient();
+  if (!client) return;
+
+  const fechaHoy = new Date().toISOString().split('T')[0]; // Obtiene la fecha actual 'YYYY-MM-DD'
+  const porcentaje = totales > 0 ? Math.round((completadas / totales) * 100) : 0;
+  
+  // ID único por empleado y por día para actualizar la misma fila sin duplicar basura
+  const recordId = `${employeeName}_${fechaHoy}`.replace(/\s+/g, '_');
+
+  try {
+    const { error } = await client
+      .from('task_progress')
+      .upsert([
+        {
+          id: recordId,
+          employee_name: employeeName,
+          fecha: fechaHoy,
+          completadas: completadas,
+          totales: totales,
+          porcentaje: porcentaje,
+          updated_at: new Date().toISOString()
+        }
+      ], { onConflict: 'id' });
+
+    if (error) {
+      console.error('Error al guardar el progreso en Supabase:', error.message);
+    } else {
+      console.log('Progreso sincronizado en Supabase con éxito:', { completadas, totales, porcentaje });
+    }
+  } catch (err) {
+    console.error('Error inesperado al guardar progreso en Supabase:', err);
+  }
+};
+
+// Consulta el progreso directamente desde Supabase en tiempo real
+export const cargarProgresoSupabase = async (employeeName: string | null = null) => {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  try {
+    let query = client.from('task_progress').select('*');
+    
+    // Si se pasa un nombre, filtra por ese empleado específico (vista empleado)
+    // Si es null, trae el de todos (vista administrador)
+    if (employeeName) {
+      query = query.eq('employee_name', employeeName);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error al obtener el progreso de Supabase:', error.message);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Error inesperado al cargar progreso de Supabase:', err);
+    return [];
+  }
+};
+
+// Ejemplo para el Administrador (ve el consolidado de todos)
+export const mostrarProductividadAdmin = async () => {
+  const registros = await cargarProgresoSupabase(); // Todos los empleados
+  registros.forEach(reg => {
+    console.log(`Trabajador: ${reg.employee_name} - Progreso: ${reg.porcentaje}% (${reg.completadas}/${reg.totales})`);
+  });
+  return registros;
+};
+
+// Ejemplo para el Empleado (ve únicamente su rendimiento del día)
+export const mostrarProgresoEmpleadoActual = async (nombreEmpleado: string) => {
+  const fechaHoy = new Date().toISOString().split('T')[0];
+  const registros = await cargarProgresoSupabase(nombreEmpleado);
+  const hoyReg = registros.find((r: any) => r.fecha === fechaHoy);
+
+  const porcentajeHoy = hoyReg ? hoyReg.porcentaje : 0;
+  console.log(`Tu progreso de hoy: ${porcentajeHoy}%`);
+  return { hoyReg, porcentajeHoy, registros };
+};
+
 
 
