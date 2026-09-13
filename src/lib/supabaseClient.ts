@@ -1917,5 +1917,42 @@ export const mostrarProgresoEmpleadoActual = async (nombreEmpleado: string) => {
   return { hoyReg, porcentajeHoy, registros };
 };
 
+// Función para pintar el progreso del empleado en pantalla consultando Supabase
+export const actualizarVistaProductividadEmpleado = async (nombreEmpleado: string) => {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const fechaHoy = new Date().toISOString().split('T')[0]; // Fecha actual 'YYYY-MM-DD'
+    
+    // Consultamos directamente la tabla task_progress de Supabase
+    const { data, error } = await client
+      .from('task_progress')
+      .select('*')
+      .eq('employee_name', nombreEmpleado)
+      .eq('fecha', fechaHoy)
+      .maybeSingle();
+
+    const completadas = data ? data.completadas : 0;
+    const totales = data ? data.totales : 0;
+    const porcentaje = data ? data.porcentaje : 0;
+
+    // Actualizar los elementos visuales en el HTML del empleado
+    const barra = document.getElementById('barra-progreso-prod');
+    const labelPorcentaje = document.getElementById('label-porcentaje-prod');
+    const labelDetalle = document.getElementById('label-detalle-prod');
+
+    if (barra) barra.style.width = `${porcentaje}%`;
+    if (labelPorcentaje) labelPorcentaje.textContent = `${porcentaje}%`;
+    if (labelDetalle) labelDetalle.textContent = `${completadas} de ${totales} tareas completadas hoy`;
+
+    console.log('Productividad del empleado actualizada desde Supabase:', { completadas, totales, porcentaje });
+    return { completadas, totales, porcentaje, data };
+  } catch (err) {
+    console.error('Error al actualizar la vista de productividad:', err);
+    return null;
+  }
+};
+
 
 

@@ -9,7 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual } from '../lib/supabaseClient';
+import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado } from '../lib/supabaseClient';
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
@@ -99,6 +99,7 @@ export default function EmployeeWorkspace({
           setProgresoHoySupabase(res.porcentajeHoy);
         }
       });
+      actualizarVistaProductividadEmpleado(empleado.nombre);
     }
   }, [empleado?.nombre]);
 
@@ -892,30 +893,30 @@ export default function EmployeeWorkspace({
           {/* TAB 1: MI CHECKLIST DE TAREAS OPERATIVAS Y BARRA DE PROGRESO */}
           {employeeTab === 'tareas' && (
             <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-sm animate-in fade-in duration-150">
-              {/* 1. Tarjeta de Resumen y Barra de Progreso Visual */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4 mb-4">
-                <div>
-                  <h3 className="text-sm font-black text-[#2C3E50] tracking-tight">Progreso de Tareas del Día</h3>
-                  <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                    Monitoreo en tiempo real del porcentaje de avance de tus asignaciones diarias
-                  </p>
-                </div>
-                <div className="flex items-center gap-2.5 self-start sm:self-center">
-                  <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-lg">
-                    {tareasCompletadasCount} de {totalTareasCount} tareas completadas
-                  </span>
-                  <span className="text-sm font-black text-[#4B9CD3] bg-[#EBF5FB] px-3 py-1 rounded-lg">
+              
+              {/* Tarjeta de Productividad Diaria del Empleado */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                    📊 Mi Productividad Diaria
+                  </h3>
+                  <span id="label-porcentaje-prod" className="text-sm font-extrabold text-blue-600">
                     {porcentajeCumplimientoTareas}%
                   </span>
                 </div>
-              </div>
-
-              {/* Barra de Progreso Dinámica */}
-              <div className="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden mb-6 border border-slate-100">
-                <div
-                  className="bg-[#4B9CD3] h-full transition-all duration-300 ease-out rounded-full"
-                  style={{ width: `${porcentajeCumplimientoTareas}%` }}
-                />
+                
+                {/* Barra de progreso visual */}
+                <div className="w-full bg-gray-100 rounded-full h-3 mb-2 overflow-hidden">
+                  <div
+                    id="barra-progreso-prod"
+                    className="bg-blue-600 h-3 rounded-full transition-all duration-500"
+                    style={{ width: `${porcentajeCumplimientoTareas}%` }}
+                  ></div>
+                </div>
+                
+                <p id="label-detalle-prod" className="text-xs text-gray-400 text-right">
+                  {tareasCompletadasCount} de {totalTareasCount} tareas completadas hoy
+                </p>
               </div>
 
               {/* 2. Lista Interactiva de Tareas del Día */}
