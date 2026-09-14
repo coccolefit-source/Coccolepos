@@ -55,7 +55,7 @@ import {
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
 
 export default function App() {
-  // Cargar estados desde localStorage o iniciar con mockData
+ 
   const [state, setState] = useState({ usuarios: [], tareas: [], productos: [], ventas: [], fichajes: [], incidencias: [], anuncios: [], feedbacks: [], inventario: [], horarios: [], productosCatalogo: [], ventasRegistradas: [], alertasPanico: [], cuadresCaja: [], clientes: [] });
   
   // Ponderación del Ranking de Colaboradores
@@ -1298,7 +1298,7 @@ export default function App() {
         savedItem = {
           ...item,
           id: `inv-${Date.now()}`,
-          ultima_actualizacion_fecha: '2026-08-20 00:00',
+          ultima_actualizacion_fecha: new Date().toISOString().substring(0, 16).replace('T', ' '),
           ultima_actualizacion_por: 'Administrador'
         } as InventarioItem;
         pushNotification(`Nuevo item "${item.nombre}" ingresado al inventario.`, 'success');

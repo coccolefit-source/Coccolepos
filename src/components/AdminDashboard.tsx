@@ -319,8 +319,12 @@ export default function AdminDashboard({
   const [catProdCategoria, setCatProdCategoria] = useState('Parfaits');
   const [editingCatProdId, setEditingCatProdId] = useState<string | null>(null);
 
-  const [salesStartDate, setSalesStartDate] = useState('2026-08-01');
-  const [salesEndDate, setSalesEndDate] = useState('2026-08-21');
+  const [salesStartDate, setSalesStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().split('T')[0];
+  });
+  const [salesEndDate, setSalesEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [salesSeller, setSalesSeller] = useState('');
   const [salesSearch, setSalesSearch] = useState('');
   const [salesPaymentMethod, setSalesPaymentMethod] = useState("");
@@ -2988,8 +2992,8 @@ export default function AdminDashboard({
           {(() => {
         // --- CÁLCULOS PARA LA PESTAÑA DE FIDELIZACIÓN ---
         const allClientes = clientes || [];
-        const todayStr = '2026-08-22';
-        const monthStartStr = '2026-08';
+        const todayStr = new Date().toISOString().split('T')[0];
+        const monthStartStr = todayStr.substring(0, 7);
 
         const filteredClientes = allClientes.filter(c => {
           if (clienteSearch.trim()) {
@@ -3087,7 +3091,12 @@ export default function AdminDashboard({
         let chartData: Array<{ label: string; value: number }> = [];
         
         if (chartView === '7days') {
-          const days = ['2026-08-15', '2026-08-16', '2026-08-17', '2026-08-18', '2026-08-19', new Date().toISOString().split('T')[0], '2026-08-21'];
+          const days = [];
+          for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days.push(d.toISOString().split('T')[0]);
+          }
           chartData = days.map(d => {
             const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
             const total = daySales.reduce((sum, s) => sum + s.total, 0);
@@ -3096,11 +3105,12 @@ export default function AdminDashboard({
             return { label, value: total };
           });
         } else if (chartView === '15days') {
-          const days = [
-            '2026-08-07', '2026-08-08', '2026-08-09', '2026-08-10', '2026-08-11', 
-            '2026-08-12', '2026-08-13', '2026-08-14', '2026-08-15', '2026-08-16', 
-            '2026-08-17', '2026-08-18', '2026-08-19', new Date().toISOString().split('T')[0], '2026-08-21'
-          ];
+          const days = [];
+          for (let i = 14; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days.push(d.toISOString().split('T')[0]);
+          }
           chartData = days.map(d => {
             const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
             const total = daySales.reduce((sum, s) => sum + s.total, 0);
@@ -3818,8 +3828,12 @@ export default function AdminDashboard({
                     <button
                       type="button"
                       onClick={() => {
-                        setSalesStartDate('2026-08-01');
-                        setSalesEndDate('2026-08-21');
+                        const d = new Date();
+                        const endStr = d.toISOString().split('T')[0];
+                        d.setDate(d.getDate() - 7);
+                        const startStr = d.toISOString().split('T')[0];
+                        setSalesStartDate(startStr);
+                        setSalesEndDate(endStr);
                         setSalesSeller('');
                         setSalesSearch('');
                         setSalesPaymentMethod('');
