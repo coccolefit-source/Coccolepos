@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS public.daily_tasks (
   fecha TEXT DEFAULT CURRENT_DATE::text,
   photo_url TEXT,
   evidence_note TEXT,
+  orden INT DEFAULT 0,
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -1285,7 +1286,8 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
         foto_url: t.photo_url || t.foto_url,
         nota_evidencia: t.evidence_note || t.nota_evidencia,
         started_at: t.started_at || undefined,
-        completed_at: t.completed_at || undefined
+        completed_at: t.completed_at || undefined,
+        orden: Number(t.orden) || 0
       };
     });
   } catch (err) {
@@ -2513,3 +2515,18 @@ export async function fetchWorkerCompleteMetricsFromSupabase(workerId: string, w
 
 
 
+
+export async function updateTaskOrdersInSupabase(orders: {id: string; orden: number}[]): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    for (const item of orders) {
+      await updateWithResilientColumns(client, 'daily_tasks', { orden: item.orden }, item.id);
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in updateTaskOrdersInSupabase:', err);
+    return false;
+  }
+}

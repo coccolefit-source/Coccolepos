@@ -10,7 +10,7 @@ import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
 import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase } from '../lib/supabaseClient';
-import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera } from 'lucide-react';
+import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera, GripVertical } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
   empleado: Usuario;
@@ -32,6 +32,7 @@ interface EmployeeWorkspaceProps {
   rankingWeights?: RankingWeights;
   upsellRules?: UpsellRule[];
   onUpdateTareaEstado: (id: string, estado: 'Pendiente' | 'En proceso' | 'Completada', foto_url?: string, nota_evidencia?: string) => void;
+  onUpdateTaskOrders: (orders: {id: string, orden: number}[]) => void;
 
   onAddVentaSugerida: (producto_id: string, usuario_id: string, metodo_pago: string) => void;
   onRegistrarFichaje: (usuario_id: string, tipo: 'entrada' | 'salida', horaPersonalizada?: string) => void;
@@ -69,6 +70,7 @@ export default function EmployeeWorkspace({
   rankingWeights,
   upsellRules = DEFAULT_UPSELL_RULES,
   onUpdateTareaEstado,
+  onUpdateTaskOrders,
   onAddVentaSugerida,
   onRegistrarFichaje,
   onAddIncidencia,
@@ -288,6 +290,53 @@ export default function EmployeeWorkspace({
   const misTareas = tareasFuente
     .filter(t => (t.asignado_a === empleado.id || t.asignado_a === empleado.nombre || !t.asignado_a) && (!t.fecha || t.fecha === fechaFiltroTareas || t.fecha === new Date().toISOString().split('T')[0]))
     .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedTaskId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData('text/plain');
+    if (sourceId === targetId || !sourceId) return;
+
+    setDraggedTaskId(null);
+
+    const sourceIndex = misTareas.findIndex(t => t.id === sourceId);
+    const targetIndex = misTareas.findIndex(t => t.id === targetId);
+    
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const newOrder = [...misTareas];
+    const [removed] = newOrder.splice(sourceIndex, 1);
+    newOrder.splice(targetIndex, 0, removed);
+
+    const updates = newOrder.map((task, index) => ({
+      id: task.id,
+      orden: index
+    }));
+
+    if (tareasFechaSupabase) {
+      setTareasFechaSupabase(prev => {
+        if (!prev) return null;
+        return prev.map(t => {
+          const u = updates.find(update => update.id === t.id);
+          return u ? { ...t, orden: u.orden } : t;
+        });
+      });
+    }
+
+    onUpdateTaskOrders(updates);
+  };
 
   const tareasCompletadasCount = misTareas.filter(t => t.estado === 'Completada').length;
   const totalTareasCount = misTareas.length;
@@ -1077,14 +1126,21 @@ export default function EmployeeWorkspace({
                         <div
                           key={t.id}
                           id={`employee-task-${t.id}`}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, t.id)}
+                          onDragOver={handleDragOver}
+                          onDrop={(e) => handleDrop(e, t.id)}
                           className={`p-3.5 rounded-xl border transition-all flex items-start gap-3.5 ${
                             isCompleted
                               ? 'bg-slate-50/90 border-slate-200'
                               : t.estado === 'En proceso'
                               ? 'bg-amber-50/30 border-amber-200'
                               : 'bg-white border-[#E2E8F0] hover:border-[#4B9CD3]/50'
-                          }`}
+                          } ${draggedTaskId === t.id ? 'opacity-50' : ''}`}
                         >
+                          <div className="cursor-grab hover:text-slate-600 text-slate-300 mt-0.5">
+                            <GripVertical className="w-5 h-5" />
+                          </div>
                           {/* Casilla de verificación (checkbox) táctil para móviles/tablets */}
                           <input
                             type="checkbox"

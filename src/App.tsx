@@ -48,7 +48,8 @@ import {
   fetchSchedulesFromSupabase,
   fetchSchedulesForEmployeeFromSupabase,
   guardarProgresoEnSupabase,
-  getSupabaseClient
+  getSupabaseClient,
+  updateTaskOrdersInSupabase
 } from './lib/supabaseClient';
 
 
@@ -657,6 +658,21 @@ export default function App() {
       console.error('Error in handleDeleteTarea:', err);
       alert('Error inesperado al borrar la tarea en la nube: ' + (err?.message || err));
     }
+  };
+
+  const handleUpdateTaskOrders = async (orders: {id: string, orden: number}[]) => {
+    setState(prev => ({
+      ...prev,
+      tareas: prev.tareas.map(t => {
+        const orderMatch = orders.find(o => o.id === t.id);
+        if (orderMatch) {
+          return { ...t, orden: orderMatch.orden };
+        }
+        return t;
+      })
+    }));
+    await updateTaskOrdersInSupabase(orders);
+    await cargarDatosSilencioso();
   };
 
   const handleUpdateTareaEstado = async (
@@ -2143,6 +2159,7 @@ export default function App() {
                 onAddTareasBulk={handleAddTareasBulk}
                 onEditTarea={handleEditTarea}
                 onDeleteTarea={handleDeleteTarea}
+                onUpdateTaskOrders={handleUpdateTaskOrders}
                 onAddProducto={handleAddProducto}
                 onEditProducto={handleEditProducto}
                 onDeleteProducto={handleDeleteProducto}
@@ -2191,6 +2208,7 @@ export default function App() {
               rankingWeights={rankingWeights}
               upsellRules={upsellRules}
               onUpdateTareaEstado={handleUpdateTareaEstado}
+              onUpdateTaskOrders={handleUpdateTaskOrders}
 
               onAddVentaSugerida={handleAddVentaSugerida}
               onRegistrarFichaje={handleRegistrarFichaje}

@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule } from '../types';
 
-import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders } from 'lucide-react';
+import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
@@ -34,6 +34,7 @@ export interface AdminDashboardProps {
   onUpdateUpsellRules?: (rules: UpsellRule[]) => void;
   onAddTarea: (tarea: Omit<Tarea, 'id'>) => void;
   onAddTareasBulk?: (tareas: Omit<Tarea, 'id'>[]) => Promise<boolean>;
+  onUpdateTaskOrders?: (orders: {id: string, orden: number}[]) => void;
 
   onEditTarea: (tarea: Tarea) => void;
   onDeleteTarea: (id: string) => void;
@@ -87,7 +88,7 @@ export default function AdminDashboard({
   onUpdateUpsellRules,
   onAddTarea,
   onAddTareasBulk,
-
+  onUpdateTaskOrders,
   onEditTarea,
   onDeleteTarea,
   onAddProducto,
@@ -367,6 +368,51 @@ export default function AdminDashboard({
 
   // Sub-pestaña de Ventas, Fidelización y Auditoría DB
   const [ventasSubTab, setVentasSubTab] = useState<'reportes' | 'fidelizacion' | 'auditoria_db'>('reportes');
+
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+
+  const handleDragStartTask = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedTaskId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOverTask = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDropTask = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData('text/plain');
+    if (sourceId === targetId || !sourceId) return;
+
+    setDraggedTaskId(null);
+
+    const orderedTasks = [...tareas].sort((a, b) => {
+      const empA = getEmpleadoNombre(a.asignado_a);
+      const empB = getEmpleadoNombre(b.asignado_a);
+      if (empA !== empB) return empA.localeCompare(empB);
+      return (a.orden || 0) - (b.orden || 0);
+    });
+
+    const sourceIndex = orderedTasks.findIndex(t => t.id === sourceId);
+    const targetIndex = orderedTasks.findIndex(t => t.id === targetId);
+    
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const [removed] = orderedTasks.splice(sourceIndex, 1);
+    orderedTasks.splice(targetIndex, 0, removed);
+
+    const updates = orderedTasks.map((task, index) => ({
+      id: task.id,
+      orden: index
+    }));
+
+    if (onUpdateTaskOrders) {
+      onUpdateTaskOrders(updates);
+    }
+  };
   const [clienteSegmentoFilter, setClienteSegmentoFilter] = useState<'todos' | 'frecuentes' | 'inactivos' | 'nuevos'>('todos');
   const [clienteSearch, setClienteSearch] = useState('');
 
@@ -1586,6 +1632,7 @@ export default function AdminDashboard({
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[#E2E8F0] text-[10px] uppercase text-slate-400 font-bold tracking-wider">
+                      <th className="w-8"></th>
                       <th className="py-2 px-3">Tarea</th>
                       <th className="py-2 px-3 text-center">Área</th>
                       <th className="py-2 px-3">Asignado</th>
@@ -1603,7 +1650,17 @@ export default function AdminDashboard({
                       if (empA !== empB) return empA.localeCompare(empB);
                       return (a.orden || 0) - (b.orden || 0);
                     }).map(t => (
-                      <tr key={t.id} className="hover:bg-[#FFFDF6]/50">
+                      <tr 
+                        key={t.id} 
+                        className={`hover:bg-[#FFFDF6]/50 ${draggedTaskId === t.id ? 'opacity-50' : ''}`}
+                        draggable
+                        onDragStart={(e) => handleDragStartTask(e, t.id)}
+                        onDragOver={handleDragOverTask}
+                        onDrop={(e) => handleDropTask(e, t.id)}
+                      >
+                        <td className="py-3 px-1 text-center cursor-grab text-slate-300 hover:text-slate-600">
+                          <GripVertical className="w-4 h-4 mx-auto" />
+                        </td>
                         <td className="py-3 px-3 max-w-[180px]">
                           <p className="font-bold text-[#2C3E50] truncate" title={t.titulo}>
                             {t.titulo}
