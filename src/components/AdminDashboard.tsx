@@ -8,7 +8,7 @@ import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaTy
 
 import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase } from '../lib/supabaseClient';
+import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
@@ -389,11 +389,13 @@ export default function AdminDashboard({
     }
   }, [ventasSubTab]);
 
-  // --- NUEVOS ESTADOS PARA RENDIMIENTO DEL TRABAJADOR CON GEMINI ---
+  // --- NUEVOS ESTADOS PARA RENDIMIENTO DEL TRABAJADOR CON GEMINI Y SUPABASE ---
   const [selectedPerformanceWorker, setSelectedPerformanceWorker] = useState<Usuario | null>(null);
   const [performanceData, setPerformanceData] = useState<any | null>(null);
   const [loadingPerformance, setLoadingPerformance] = useState(false);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
+  const [performanceDateFilter, setPerformanceDateFilter] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [performanceDateEndFilter, setPerformanceDateEndFilter] = useState<string>(new Date().toISOString().split('T')[0]);
 
   // Simulador local seguro de Supabase que retorna vacio para probar el fallback
   const supabase: any = {
@@ -547,26 +549,76 @@ export default function AdminDashboard({
     setDeleteConfirmation(null);
   };
 
-  const handleObtenerRendimiento = async (trabajador: Usuario) => {
+  const handleObtenerRendimiento = async (trabajador: Usuario, fechaOverrideStart?: string, fechaOverrideEnd?: string) => {
     setSelectedPerformanceWorker(trabajador);
     setPerformanceData(null);
     setPerformanceError(null);
     setLoadingPerformance(true);
 
+    const fechaUsarStart = fechaOverrideStart || performanceDateFilter;
+    const fechaUsarEnd = fechaOverrideEnd || performanceDateEndFilter || fechaUsarStart;
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const metricsSupabase = await fetchWorkerCompleteMetricsFromSupabase(trabajador.id, trabajador.nombre, fechaUsarStart, fechaUsarEnd);
 
-      let { data, error } = await supabase
-        .from('rendimiento_trabajadores')
-        .select('*')
-        .eq('usuario_id', trabajador.id);
+      const cumplimientoPct = metricsSupabase.cumplimientoPct;
+      const tardias = metricsSupabase.llegadasTardias;
+      const puntualidadPct = tardias === 0 ? '100%' : tardias === 1 ? '96%' : '92%';
+      const totalMontoVendido = metricsSupabase.totalMontoVendido;
+      const volumenTotalStr = `${metricsSupabase.ventasTotalesCount} ventas ($${totalMontoVendido.toLocaleString('es-CO')})`;
 
-      if (error || !data || (Array.isArray(data) && data.length === 0)) {
-        data = obtenerDatosLocalesDeRespaldo(trabajador);
-      }
+      const dataObj = {
+        fechaConsulta: metricsSupabase.fechaConsulta,
+        fechaInicio: metricsSupabase.fechaInicio,
+        fechaFin: metricsSupabase.fechaFin,
+        eficienciaPuntualidad: {
+          cumplimientoPct: cumplimientoPct,
+          tareasCompletadas: metricsSupabase.tareasCompletadas,
+          tareasTotales: metricsSupabase.tareasTotales,
+          puntualidadPct: puntualidadPct,
+          llegadasTardias: tardias,
+          comentario: `${cumplimientoPct} de cumplimiento en Supabase (${metricsSupabase.tareasCompletadas} de ${metricsSupabase.tareasTotales} tareas completadas). Tasa de puntualidad del ${puntualidadPct}.`
+        },
+        patronesVenta: {
+          volumenTotal: volumenTotalStr,
+          ventasCount: metricsSupabase.ventasTotalesCount,
+          montoTotal: totalMontoVendido,
+          picoHorario: 'Picos comerciales registrados en ventas POS',
+          comentario: `Se registran ${metricsSupabase.ventasTotalesCount} transacciones en Supabase acumulando $${totalMontoVendido.toLocaleString('es-CO')} en facturación.`
+        },
+        rendimientoProductos: {
+          productosAltaRotacion: metricsSupabase.productosAltaRotacion,
+          productosBajaRotacion: metricsSupabase.productosBajaRotacion,
+          comentario: 'Filtro por ventas de productos de inventario en Supabase para este trabajador.'
+        },
+        desgloseRanking: {
+          puntosTotales: Math.max(50, Math.round(metricsSupabase.tareasCompletadas * 25 + metricsSupabase.ventasTotalesCount * 20)),
+          posicionRanking: 1,
+          areasGanancia: `+${metricsSupabase.tareasCompletadas * 25} pts por tareas diarias en Supabase y +${metricsSupabase.ventasTotalesCount * 20} pts por ventas registradas`,
+          areasPerdida: tardias > 0 ? `-${tardias * 15} pts por retrasos registrados` : 'Sin pérdidas',
+          accionRecuperacion: 'Completar racha de tareas diarias en Supabase para maximizar la bonificación'
+        },
+        historialFeedback: {
+          felicitaciones: [
+            'Registro continuo de tareas diarias en Supabase',
+            'Excelente manejo de caja e inventario'
+          ],
+          feedbackRegistrado: 'Asegurar el registro completo en Supabase al cerrar la jornada.'
+        },
+        diagnosticoPlanAccion: {
+          resumenEjecutivo: `Medición en tiempo real desde Supabase para ${trabajador.nombre}. Tareas al ${cumplimientoPct} y $${totalMontoVendido.toLocaleString('es-CO')} en ventas de inventario.`,
+          recomendaciones: [
+            'Mantener actualizada la lista de tareas en Supabase.',
+            'Promover la venta cruzada de productos Fit de alta rotación.',
+            'Cerrar la jornada a tiempo para guardar el reporte en la nube.'
+          ]
+        },
+        rawSupabaseData: metricsSupabase
+      };
 
-      setPerformanceData(data);
+      setPerformanceData(dataObj);
     } catch (err: any) {
+      console.error('Error fetching worker performance from Supabase:', err);
       setPerformanceData(obtenerDatosLocalesDeRespaldo(trabajador));
     } finally {
       setLoadingPerformance(false);
@@ -788,7 +840,7 @@ export default function AdminDashboard({
               titulo: template.titulo,
               descripcion: template.descripcion,
               area: template.area as AreaType,
-              fecha: '2026-08-20',
+              fecha: new Date().toISOString().split('T')[0],
               estado: 'Pendiente' as const,
               asignado_a: emp.id,
               tiempo_estimado_min: template.tiempo_estimado_min,
@@ -842,7 +894,7 @@ export default function AdminDashboard({
         titulo: tareaTitulo,
         descripcion: tareaDesc,
         area: tareaArea,
-        fecha: '2026-08-20',
+        fecha: new Date().toISOString().split('T')[0],
         estado: 'Pendiente' as const,
         asignado_a: emp.id,
         tiempo_estimado_min: Number(tareaTiempo),
@@ -865,7 +917,7 @@ export default function AdminDashboard({
         titulo: tareaTitulo,
         descripcion: tareaDesc,
         area: tareaArea,
-        fecha: '2026-08-20',
+        fecha: new Date().toISOString().split('T')[0],
         estado: 'Pendiente',
         asignado_a: tareaAsignado,
         tiempo_estimado_min: Number(tareaTiempo),
@@ -950,7 +1002,7 @@ export default function AdminDashboard({
     onAddAnuncio({
       titulo: anuncioTitulo,
       contenido: anuncioContenido,
-      fecha: '2026-08-20',
+      fecha: new Date().toISOString().split('T')[0],
       creador_nombre: 'Mariana Silva (Admin)',
     });
 
@@ -1766,7 +1818,7 @@ export default function AdminDashboard({
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {empleados.map(emp => {
-                const fichaje = fichajes.find(f => f.usuario_id === emp.id && f.fecha === '2026-08-20');
+                const fichaje = fichajes.find(f => f.usuario_id === emp.id && f.fecha === new Date().toISOString().split('T')[0]);
                 return (
                   <div key={emp.id} className="border border-[#E2E8F0] p-3.5 rounded-xl flex items-center gap-3 bg-[#FFFDF6]/40">
                     <img
@@ -3035,7 +3087,7 @@ export default function AdminDashboard({
         let chartData: Array<{ label: string; value: number }> = [];
         
         if (chartView === '7days') {
-          const days = ['2026-08-15', '2026-08-16', '2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21'];
+          const days = ['2026-08-15', '2026-08-16', '2026-08-17', '2026-08-18', '2026-08-19', new Date().toISOString().split('T')[0], '2026-08-21'];
           chartData = days.map(d => {
             const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
             const total = daySales.reduce((sum, s) => sum + s.total, 0);
@@ -3047,7 +3099,7 @@ export default function AdminDashboard({
           const days = [
             '2026-08-07', '2026-08-08', '2026-08-09', '2026-08-10', '2026-08-11', 
             '2026-08-12', '2026-08-13', '2026-08-14', '2026-08-15', '2026-08-16', 
-            '2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21'
+            '2026-08-17', '2026-08-18', '2026-08-19', new Date().toISOString().split('T')[0], '2026-08-21'
           ];
           chartData = days.map(d => {
             const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
@@ -4208,24 +4260,109 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* MODAL DE RENDIMIENTO DEL TRABAJADOR POWERED BY GEMINI */}
+      {/* MODAL DE RENDIMIENTO DEL TRABAJADOR */}
       {selectedPerformanceWorker && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-7xl border border-[#E2E8F0] overflow-hidden flex flex-col max-h-[90vh]">
             {/* Header */}
-            <div className="bg-[#FFFDF6] border-b border-[#E2E8F0] px-6 py-4 flex justify-between items-center shrink-0">
+            <div className="bg-[#FFFDF6] border-b border-[#E2E8F0] px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shrink-0">
               <div>
-                <h3 className="text-sm font-bold text-[#2C3E50] uppercase tracking-wide">
-                  Analisis de Rendimiento - {selectedPerformanceWorker.nombre}
+                <h3 className="text-sm font-bold text-[#2C3E50] uppercase tracking-wide flex items-center gap-2">
+                  <span>Análisis de Rendimiento - {selectedPerformanceWorker.nombre}</span>
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Metricas de productividad y sugerencias operativas
+                  Medición en tiempo real de tareas diarias, ventas de inventarios y fichajes guardados en la base de datos
                 </p>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-extrabold text-[#4B9CD3] bg-[#EBF5FB] px-2.5 py-1 rounded-full uppercase tracking-wider">
-                  POWERED BY GEMINI AI
-                </span>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-lg text-xs">
+                  <Calendar className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                  <span className="text-[10px] font-bold text-slate-500">Desde:</span>
+                  <input
+                    type="date"
+                    value={performanceDateFilter}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setPerformanceDateFilter(newDate);
+                      if (selectedPerformanceWorker) {
+                        handleObtenerRendimiento(selectedPerformanceWorker, newDate, performanceDateEndFilter);
+                      }
+                    }}
+                    className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                  />
+                  <span className="text-[10px] font-bold text-slate-500 ml-1">Hasta:</span>
+                  <input
+                    type="date"
+                    value={performanceDateEndFilter}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setPerformanceDateEndFilter(newDate);
+                      if (selectedPerformanceWorker) {
+                        handleObtenerRendimiento(selectedPerformanceWorker, performanceDateFilter, newDate);
+                      }
+                    }}
+                    className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                  />
+                </div>
+                
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                  <button
+                    onClick={() => {
+                      const today = new Date();
+                      const todayStr = today.toISOString().split('T')[0];
+                      const sevenDaysAgo = new Date(today);
+                      sevenDaysAgo.setDate(today.getDate() - 7);
+                      const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
+                      
+                      setPerformanceDateFilter(sevenDaysAgoStr);
+                      setPerformanceDateEndFilter(todayStr);
+                      if (selectedPerformanceWorker) {
+                        handleObtenerRendimiento(selectedPerformanceWorker, sevenDaysAgoStr, todayStr);
+                      }
+                    }}
+                    className="text-[10px] font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 px-2 py-1 rounded shadow-sm transition-colors cursor-pointer"
+                  >
+                    7 Días
+                  </button>
+                  <button
+                    onClick={() => {
+                      const today = new Date();
+                      const todayStr = today.toISOString().split('T')[0];
+                      const fifteenDaysAgo = new Date(today);
+                      fifteenDaysAgo.setDate(today.getDate() - 15);
+                      const fifteenDaysAgoStr = fifteenDaysAgo.toISOString().split('T')[0];
+                      
+                      setPerformanceDateFilter(fifteenDaysAgoStr);
+                      setPerformanceDateEndFilter(todayStr);
+                      if (selectedPerformanceWorker) {
+                        handleObtenerRendimiento(selectedPerformanceWorker, fifteenDaysAgoStr, todayStr);
+                      }
+                    }}
+                    className="text-[10px] font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 px-2 py-1 rounded shadow-sm transition-colors cursor-pointer"
+                  >
+                    15 Días
+                  </button>
+                  <button
+                    onClick={() => {
+                      const today = new Date();
+                      const todayStr = today.toISOString().split('T')[0];
+                      const oneMonthAgo = new Date(today);
+                      oneMonthAgo.setMonth(today.getMonth() - 1);
+                      const oneMonthAgoStr = oneMonthAgo.toISOString().split('T')[0];
+                      
+                      setPerformanceDateFilter(oneMonthAgoStr);
+                      setPerformanceDateEndFilter(todayStr);
+                      if (selectedPerformanceWorker) {
+                        handleObtenerRendimiento(selectedPerformanceWorker, oneMonthAgoStr, todayStr);
+                      }
+                    }}
+                    className="text-[10px] font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 px-2 py-1 rounded shadow-sm transition-colors cursor-pointer"
+                  >
+                    1 Mes
+                  </button>
+                </div>
+
                 <button
                   onClick={() => {
                     setSelectedPerformanceWorker(null);
@@ -4454,6 +4591,72 @@ export default function AdminDashboard({
                         </div>
                       </div>
                     </div>
+
+                    {/* Bloque 7: Registros en Directo desde Supabase */}
+                    {performanceData.rawSupabaseData && (
+                      <div className="border border-emerald-200 bg-emerald-50/30 rounded-lg p-5 mt-4 space-y-4">
+                        <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
+                          <h5 className="text-xs font-black text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Registros Individuales Guardados en Supabase ({performanceData.fechaConsulta})
+                          </h5>
+                          <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                            Nube Sincronizada
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                          {/* Sub-bloque A: Tareas Diarias en Supabase */}
+                          <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
+                            <h6 className="font-extrabold text-[#2C3E50] text-[11px] uppercase tracking-wide flex justify-between">
+                              <span>Tareas Diarias Medidas ({performanceData.rawSupabaseData.tareasCompletadas}/{performanceData.rawSupabaseData.tareasTotales})</span>
+                              <span className="text-emerald-600">{performanceData.rawSupabaseData.cumplimientoPct}</span>
+                            </h6>
+
+                            {performanceData.rawSupabaseData.listaTareas && performanceData.rawSupabaseData.listaTareas.length > 0 ? (
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                {performanceData.rawSupabaseData.listaTareas.map((t: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between items-center bg-slate-50 p-2 rounded text-[11px] border border-slate-100">
+                                    <span className="font-medium text-slate-700 truncate max-w-[200px]">{t.title || t.titulo || 'Tarea'}</span>
+                                    <span className={`px-2 py-0.5 text-[9px] font-extrabold rounded ${t.completed || t.completada ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                      {t.completed || t.completada ? 'COMPLETADA' : 'PENDIENTE'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-slate-400 italic py-2 text-center">Sin tareas individuales registradas en Supabase para este día</p>
+                            )}
+                          </div>
+
+                          {/* Sub-bloque B: Ventas en Inventario en Supabase */}
+                          <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
+                            <h6 className="font-extrabold text-[#2C3E50] text-[11px] uppercase tracking-wide flex justify-between">
+                              <span>Ventas & Inventario Medidos</span>
+                              <span className="text-[#4B9CD3] font-bold">{performanceData.rawSupabaseData.ventasTotalesCount} ventas ($${performanceData.rawSupabaseData.totalMontoVendido.toLocaleString('es-CO')})</span>
+                            </h6>
+
+                            {performanceData.rawSupabaseData.listaVentas && performanceData.rawSupabaseData.listaVentas.length > 0 ? (
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                {performanceData.rawSupabaseData.listaVentas.map((v: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between items-center bg-slate-50 p-2 rounded text-[11px] border border-slate-100">
+                                    <div>
+                                      <p className="font-bold text-slate-800">Recibo #{v.receipt_number || v.id?.slice(0, 6) || idx + 1}</p>
+                                      <p className="text-[9px] text-slate-400">{v.created_at ? new Date(v.created_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : 'Hora N/A'}</p>
+                                    </div>
+                                    <span className="font-black text-emerald-700">
+                                      $${Number(v.total_amount || v.total || 0).toLocaleString('es-CO')}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-slate-400 italic py-2 text-center">No hay registros de ventas en Supabase para este trabajador en la fecha seleccionada</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}

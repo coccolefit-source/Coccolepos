@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES } from './types';
-import { loadAppState, saveAppState, INITIAL_USUARIOS } from './mockData';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import Leaderboard from './components/Leaderboard';
 import AdminDashboard from './components/AdminDashboard';
@@ -57,7 +56,7 @@ export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'emplea
 
 export default function App() {
   // Cargar estados desde localStorage o iniciar con mockData
-  const [state, setState] = useState(() => loadAppState());
+  const [state, setState] = useState({ usuarios: [], tareas: [], productos: [], ventas: [], fichajes: [], incidencias: [], anuncios: [], feedbacks: [], inventario: [], horarios: [], productosCatalogo: [], ventasRegistradas: [], alertasPanico: [], cuadresCaja: [], clientes: [] });
   
   // Ponderación del Ranking de Colaboradores
   const [rankingWeights, setRankingWeights] = useState<RankingWeights>(DEFAULT_RANKING_WEIGHTS);
@@ -67,7 +66,7 @@ export default function App() {
 
   // Rol activo (Admin o ID de un Empleado específico)
   const [activeUserRole, setActiveUserRole] = useState<string | null>(() => {
-    return localStorage.getItem('coccolefit_active_role') || null;
+    return null;
   });
   
   // Filtro de tiempo compartido ('diario', 'semanal', 'mensual')
@@ -206,7 +205,7 @@ export default function App() {
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
       const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds] = await Promise.all([
-        fetchDailyTasksFromSupabase('2026-08-20'),
+        fetchDailyTasksFromSupabase(new Date().toISOString().split('T')[0]),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
         fetchProfilesFromSupabase(),
@@ -406,15 +405,14 @@ export default function App() {
 
   // Sincronizar cambios del estado general con localStorage
   useEffect(() => {
-    saveAppState(state);
   }, [state]);
 
   // Sincronizar activeUserRole con localStorage
   useEffect(() => {
     if (activeUserRole) {
-      localStorage.setItem('coccolefit_active_role', activeUserRole);
+      // localStorage eliminado
     } else {
-      localStorage.removeItem('coccolefit_active_role');
+      // localStorage eliminado
     }
   }, [activeUserRole]);
 
@@ -424,7 +422,7 @@ export default function App() {
     
     async function loadFreshTasks() {
       try {
-        const supaTasks = await fetchDailyTasksFromSupabase('2026-08-20');
+        const supaTasks = await fetchDailyTasksFromSupabase(new Date().toISOString().split('T')[0]);
         if (supaTasks) {
           setState(prev => ({
             ...prev,
@@ -784,7 +782,7 @@ export default function App() {
       ? empleados.map((emp, idx) => ({
           id: `prod-${Date.now()}-${idx}`,
           nombre_producto: newProd.nombre_producto,
-          fecha: newProd.fecha || '2026-08-20',
+          fecha: newProd.fecha || new Date().toISOString().split('T')[0],
           meta_diaria_unidades: newProd.meta_diaria_unidades,
           puntos_por_unidad: newProd.puntos_por_unidad,
           asignado_a: emp.nombre
@@ -885,7 +883,7 @@ export default function App() {
   // --- ACTIONS: VENTAS SUGERIDAS (+1 CONTADOR EXPRESS) ---
 
   const handleAddVentaSugerida = (producto_id: string, usuario_id: string, metodo_pago: string) => {
-    const todayStr = '2026-08-20'; // Usamos fecha fija del mock de hoy
+    const todayStr = new Date().toISOString().split('T')[0];
     
     setState(prev => {
       // Buscar si ya hay un registro de este producto y usuario hoy para acumularlo, o crear uno nuevo
@@ -937,7 +935,7 @@ export default function App() {
   // --- ACTIONS: FICHAJE / ASISTENCIA ---
 
   const handleRegistrarFichaje = (usuario_id: string, tipo: 'entrada' | 'salida', horaPersonalizada?: string) => {
-    const todayStr = '2026-08-20';
+    const todayStr = new Date().toISOString().split('T')[0];
     const now = new Date();
     const timeStr = horaPersonalizada || `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
@@ -1143,7 +1141,7 @@ export default function App() {
               extraIncidencia = {
                 id: `inc-auto-${Date.now()}`,
                 usuario_id: 'usr-admin',
-                fecha: '2026-08-20',
+                fecha: new Date().toISOString().split('T')[0],
                 titulo: `Alerta: Stock bajo en ${item.nombre}`,
                 descripcion: `El nivel bajó a ${updated.stock_actual} ${item.unidad} (mínimo de seguridad: ${item.stock_minimo_alerta} ${item.unidad}).`,
                 tipo: 'insumo',
@@ -1566,9 +1564,9 @@ export default function App() {
   // --- REINICIAR DATOS DEL SIMULADOR ---
   const handleResetData = () => {
     if (window.confirm('¿Seguro que deseas reiniciar los datos de simulación? Se borrará todo el historial creado.')) {
-      localStorage.clear();
+      // localStorage eliminado
       setActiveUserRole(null);
-      setState(loadAppState());
+      setState({ usuarios: [], tareas: [], productos: [], ventas: [], fichajes: [], incidencias: [], anuncios: [], feedbacks: [], inventario: [], horarios: [], productosCatalogo: [], ventasRegistradas: [], alertasPanico: [], cuadresCaja: [], clientes: [] });
       triggerPushToast({
         kind: 'standard',
         type: 'success',
@@ -1646,11 +1644,11 @@ export default function App() {
               <span>{soundEnabled ? 'Alarma Activa' : 'Alarma Inactiva'}</span>
             </button>
 
-            {/* Reset simulator */}
+            {/* Actualizar página */}
             <button
-              onClick={handleResetData}
-              className="p-1.5 text-slate-400 hover:text-red-600 bg-white hover:bg-red-50 border border-[#E2E8F0] hover:border-red-100 rounded-lg transition-all"
-              title="Reiniciar datos del simulador"
+              onClick={() => window.location.reload()}
+              className="p-1.5 text-slate-500 hover:text-blue-600 bg-white hover:bg-blue-50 border border-[#E2E8F0] hover:border-blue-200 rounded-lg transition-all"
+              title="Actualizar página"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
@@ -1867,31 +1865,6 @@ export default function App() {
           </div>
         )}
         
-        {/* BANNER INFORMATIVO DEL SIMULADOR MULTI-ROL */}
-        <div className="bg-[#EBF5FB] text-[#2C3E50] border border-[#AED6F1] rounded-2xl p-5 shadow-xs relative overflow-hidden">
-          {/* Decoraciones de fondo */}
-          <div className="absolute right-0 bottom-0 top-0 w-1/3 bg-radial from-white/10 to-transparent pointer-events-none"></div>
-          
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative z-10">
-            <div className="space-y-1">
-              <span className="bg-[#4B9CD3] text-[10px] text-white font-black px-2.5 py-1 rounded-md uppercase tracking-wider">
-                Simulador Interactivo de Alta Fidelidad
-              </span>
-              <h2 className="text-lg font-extrabold tracking-tight mt-1">Prueba el flujo de trabajo en tiempo real</h2>
-              <p className="text-xs text-[#2C3E50]/80 leading-relaxed max-w-2xl">
-                ¿Cómo funciona? Selecciona un rol de <strong>Empleado (Staff)</strong> arriba para marcar asistencia, completar checklists con fotos o sumar ventas sugeridas (+1). Luego regresa al rol de <strong>Dueño (Admin)</strong> para ver cómo se actualizan instantáneamente los gráficos, evidencias y el ranking de estrellas.
-              </p>
-            </div>
-            <div className="text-xs bg-white border border-[#AED6F1] p-2.5 rounded-lg flex items-center gap-2 self-stretch sm:self-auto justify-center shadow-2xs">
-              <Sparkles className="w-4 h-4 text-orange-500" />
-              <div>
-                <p className="font-bold text-[#2C3E50]">Prueba completa</p>
-                <p className="text-[10px] text-[#4B9CD3] font-semibold">100% de persistencia en local</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {currentUser.rol === 'admin' ? (
           /* ========================================================= */
           /* VISTA ADMINISTRADOR (VISTA DEL DUEÑO / MARIANA SILVA) */
@@ -2198,23 +2171,6 @@ export default function App() {
           /* VISTA EMPLEADO (ESTACIÓN DE TRABAJO PC DE NUTRIFIT)       */
           /* ========================================================= */
           <div className="space-y-6 max-w-7xl mx-auto py-4">
-            
-            {/* Banner elegante de instrucciones para la terminal de PC */}
-            <div className="bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-2xs flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-              <div className="space-y-1">
-                <p className="font-extrabold text-xs text-[#4B9CD3] uppercase tracking-wider flex items-center gap-1.5">
-                  <Smartphone className="w-3.5 h-3.5" /> Modo Terminal de Empleado (PC del Negocio)
-                </p>
-                <p className="text-xs text-slate-600">
-                  Estás simulando la terminal de trabajo activa para <strong>{currentUser.nombre}</strong>. Registra asistencia, completa checklists operativos y suma puntos de venta fit.
-                </p>
-              </div>
-              <div className="text-[11px] bg-[#FFFDF6] border border-[#E2E8F0] px-3 py-1.5 rounded-lg text-slate-500 font-bold flex items-center gap-2 shrink-0">
-                <span>Tip administrativo:</span>
-                <span>Cambia a Mariana (Admin) en la cabecera para ver las métricas de este empleado.</span>
-              </div>
-            </div>
-
             <EmployeeWorkspace
               empleado={currentUser}
               usuarios={state.usuarios}

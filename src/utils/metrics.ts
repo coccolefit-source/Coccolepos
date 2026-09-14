@@ -55,7 +55,7 @@ export const calculateLeaderboard = (
   fichajes: Fichaje[],
   productos: ProductoPromocion[],
   filtro: 'diario' | 'semanal' | 'mensual',
-  fechaReferencia: string = '2026-08-20',
+  fechaReferencia: string = new Date().toISOString().split('T')[0],
   posVentas: Venta[] = [],
   rankingWeights: RankingWeights = DEFAULT_RANKING_WEIGHTS
 ): EmployeeScore[] => {
@@ -237,7 +237,7 @@ export const getGlobalMetrics = (
   ventas: RegistroVenta[],
   productos: ProductoPromocion[],
   filtro: 'diario' | 'semanal' | 'mensual',
-  fechaReferencia: string = '2026-08-20'
+  fechaReferencia: string = new Date().toISOString().split('T')[0]
 ) => {
   const refDate = new Date(fechaReferencia);
   

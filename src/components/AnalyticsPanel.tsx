@@ -47,7 +47,7 @@ export default function AnalyticsPanel({
   const salesByProduct = productos.map(prod => {
     const totalSold = ventas
       .filter(v => v.producto_id === prod.id && (
-        filtro === 'diario' ? v.fecha === '2026-08-20' : true // Filtrado simplificado para mockup
+        filtro === 'diario' ? v.fecha === new Date().toISOString().split('T')[0] : true // Filtrado simplificado para mockup
       ))
       .reduce((sum, v) => sum + v.unidades_contadas, 0);
     return {

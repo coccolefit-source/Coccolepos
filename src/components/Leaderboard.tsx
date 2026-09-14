@@ -37,7 +37,7 @@ export default function Leaderboard({
     fichajes,
     productos,
     filtro,
-    '2026-08-20',
+    new Date().toISOString().split('T')[0],
     posVentas,
     rankingWeights
   );

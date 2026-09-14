@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, UpsellRule, DEFAULT_UPSELL_RULES } from '../types';
 
 import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado } from '../lib/supabaseClient';
-import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check } from 'lucide-react';
+import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase } from '../lib/supabaseClient';
+import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
   empleado: Usuario;
@@ -79,6 +79,61 @@ export default function EmployeeWorkspace({
 }: EmployeeWorkspaceProps) {
   const [localProductos, setLocalProductos] = useState<ProductoPromocion[]>(productos);
   const [localHorarios, setLocalHorarios] = useState<TurnoSemanal[]>(horarios);
+  const [currentAvatar, setCurrentAvatar] = useState<string>(empleado.foto_avatar);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState<boolean>(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setCurrentAvatar(empleado.foto_avatar);
+  }, [empleado.foto_avatar]);
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingAvatar(true);
+      const compressedBase64 = await compressImage(file, 400, 400, 0.8);
+      const res = await updateEmployeeAvatarInSupabase(empleado.id || empleado.nombre, compressedBase64);
+      if (res.success) {
+        setCurrentAvatar(compressedBase64);
+        empleado.foto_avatar = compressedBase64;
+      } else {
+        alert('Error al guardar foto en Supabase: ' + (res.error || 'Error de conexión'));
+      }
+    } catch (err) {
+      console.error('Error al procesar la foto:', err);
+      alert('No se pudo procesar la foto seleccionada.');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const hoyFormatted = new Date().toISOString().split('T')[0];
+  const [fechaFiltroTareas, setFechaFiltroTareas] = useState<string>(hoyFormatted);
+  const [tareasFechaSupabase, setTareasFechaSupabase] = useState<Tarea[] | null>(null);
+  const [cargandoTareasFecha, setCargandoTareasFecha] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const cargarTareasPorFecha = async () => {
+      try {
+        setCargandoTareasFecha(true);
+        const data = await fetchDailyTasksFromSupabase(fechaFiltroTareas);
+        if (isMounted) {
+          setTareasFechaSupabase(data);
+        }
+        await actualizarVistaProductividadEmpleado(empleado.nombre, fechaFiltroTareas);
+      } catch (err) {
+        console.error('Error al cargar tareas de fecha:', err);
+      } finally {
+        if (isMounted) setCargandoTareasFecha(false);
+      }
+    };
+
+    cargarTareasPorFecha();
+    return () => { isMounted = false; };
+  }, [fechaFiltroTareas, empleado.nombre]);
 
   // Sincronizar localProductos y localHorarios si cambian las props
   useEffect(() => {
@@ -100,6 +155,10 @@ export default function EmployeeWorkspace({
         }
       });
       actualizarVistaProductividadEmpleado(empleado.nombre);
+      renderizarSeccionProductividadEmpleado(empleado.nombre);
+      setTimeout(() => {
+        inicializarSesionProgresoEmpleado(empleado.nombre);
+      }, 300);
     }
   }, [empleado?.nombre]);
 
@@ -221,10 +280,15 @@ export default function EmployeeWorkspace({
     };
   }, []);
 
-  // Filtrar tareas asignadas a este empleado hoy y ordenarlas secuencialmente
-  const misTareas = tareas
-    .filter(t => t.asignado_a === empleado.id && (t.fecha === '2026-08-20' || !t.fecha))
+  // Filtrar tareas asignadas a este empleado para la fecha seleccionada
+  const tareasFuente = (tareasFechaSupabase && (fechaFiltroTareas !== hoyFormatted || tareasFechaSupabase.length > 0))
+    ? tareasFechaSupabase
+    : tareas;
+
+  const misTareas = tareasFuente
+    .filter(t => (t.asignado_a === empleado.id || t.asignado_a === empleado.nombre || !t.asignado_a) && (!t.fecha || t.fecha === fechaFiltroTareas || t.fecha === new Date().toISOString().split('T')[0]))
     .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
   const tareasCompletadasCount = misTareas.filter(t => t.estado === 'Completada').length;
   const totalTareasCount = misTareas.length;
   const porcentajeCumplimientoTareas = totalTareasCount > 0 ? Math.round((tareasCompletadasCount / totalTareasCount) * 100) : 100;
@@ -232,15 +296,15 @@ export default function EmployeeWorkspace({
   // Sincronizar progreso de tareas a Supabase
   useEffect(() => {
     if (empleado?.nombre) {
-      guardarProgresoEnSupabase(empleado.nombre, tareasCompletadasCount, totalTareasCount);
+      guardarProgresoEnSupabase(empleado.nombre, tareasCompletadasCount, totalTareasCount, fechaFiltroTareas);
     }
-  }, [empleado?.nombre, tareasCompletadasCount, totalTareasCount]);
+  }, [empleado?.nombre, tareasCompletadasCount, totalTareasCount, fechaFiltroTareas]);
 
   // Buscar fichaje de hoy
-  const miFichaje = fichajes.find(f => f.usuario_id === empleado.id && f.fecha === '2026-08-20');
+  const miFichaje = fichajes.find(f => f.usuario_id === empleado.id && f.fecha === new Date().toISOString().split('T')[0]);
 
   // Obtener ranking de este empleado en la vista "diario"
-  const leaderboardData = calculateLeaderboard(usuarios, tareas, ventas, fichajes, localProductos, 'diario', '2026-08-20', posVentas.length > 0 ? posVentas : ventasRegistradas, rankingWeights);
+  const leaderboardData = calculateLeaderboard(usuarios, tareas, ventas, fichajes, localProductos, 'diario', new Date().toISOString().split('T')[0], posVentas.length > 0 ? posVentas : ventasRegistradas, rankingWeights);
 
   const miPosicion = leaderboardData.findIndex(item => item.usuario.id === empleado.id) + 1;
   const misPuntos = leaderboardData.find(item => item.usuario.id === empleado.id)?.puntosTotales || 0;
@@ -425,7 +489,7 @@ export default function EmployeeWorkspace({
   const [cuadreObs, setCuadreObs] = useState('');
 
   const yaCuadrado = (cuadresCaja || []).some(
-    c => c.usuario_id === empleado.id && c.fecha === '2026-08-20'
+    c => c.usuario_id === empleado.id && c.fecha === new Date().toISOString().split('T')[0]
   );
 
   const handleCuadreCajaSubmit = (e: React.FormEvent) => {
@@ -435,7 +499,7 @@ export default function EmployeeWorkspace({
     onRegistrarCuadreCaja({
       usuario_id: empleado.id,
       usuario_nombre: empleado.nombre,
-      fecha: '2026-08-20',
+      fecha: new Date().toISOString().split('T')[0],
       hora: `${new Date().getHours().toString().padStart(2, '0')}:${new Date().getMinutes().toString().padStart(2, '0')}`,
       efectivo_contado: Number(cuadreEfectivo),
       tarjeta_esperado: Number(cuadreTarjeta),
@@ -495,7 +559,7 @@ export default function EmployeeWorkspace({
 
     onAddIncidencia({
       usuario_id: empleado.id,
-      fecha: '2026-08-20',
+      fecha: new Date().toISOString().split('T')[0],
       titulo: incidenciaTitulo,
       descripcion: incidenciaDesc,
       tipo: incidenciaTipo,
@@ -510,7 +574,7 @@ export default function EmployeeWorkspace({
 
   const getVentasProductoCount = (productId: string) => {
     return ventas
-      .filter(v => v.producto_id === productId && v.usuario_id === empleado.id && v.fecha === '2026-08-20')
+      .filter(v => v.producto_id === productId && v.usuario_id === empleado.id && v.fecha === new Date().toISOString().split('T')[0])
       .reduce((sum, v) => sum + v.unidades_contadas, 0);
   };
 
@@ -520,23 +584,37 @@ export default function EmployeeWorkspace({
       {/* HEADER PRINCIPAL DE LA ESTACIÓN DE TRABAJO (PC VIEW) */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white border border-[#E2E8F0] p-5 rounded-2xl shadow-xs gap-4">
         <div className="flex items-center gap-4">
-          <img
-            src={empleado.foto_avatar}
-            alt={empleado.nombre}
-            className="w-16 h-16 rounded-full object-cover border-2 border-[#4B9CD3] shadow-xs"
-            referrerPolicy="no-referrer"
-          />
+          <div
+            className="relative group cursor-pointer"
+            onClick={() => avatarInputRef.current?.click()}
+            title="Haz clic para actualizar tu foto de perfil en Supabase"
+          >
+            <img
+              src={currentAvatar || empleado.foto_avatar}
+              alt={empleado.nombre}
+              className="w-16 h-16 rounded-full object-cover border-2 border-[#4B9CD3] shadow-xs group-hover:opacity-80 transition-opacity"
+              referrerPolicy="no-referrer"
+            />
+            <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity text-white text-[9px] font-bold">
+              <Camera className="w-4 h-4 mb-0.5" />
+              <span>Cambiar</span>
+            </div>
+            {isUploadingAvatar && (
+              <div className="absolute inset-0 bg-white/80 rounded-full flex items-center justify-center">
+                <div className="w-5 h-5 border-2 border-[#4B9CD3] border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            )}
+            <input
+              type="file"
+              ref={avatarInputRef}
+              accept="image/*"
+              className="hidden"
+              onChange={handleAvatarChange}
+            />
+          </div>
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Estación de Trabajo Activa</p>
             <h3 className="font-black text-2xl text-[#2C3E50] tracking-tight">{empleado.nombre}</h3>
-            <div className="flex gap-2 mt-1">
-              <span className="text-[10px] bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] px-2 py-0.5 rounded-sm font-bold uppercase tracking-wide flex items-center gap-1">
-                <Award className="w-3.5 h-3.5" /> {empleado.insignia_actual || 'Colaborador Fit'}
-              </span>
-              <span className="text-[10px] bg-[#FFFDF6] text-slate-600 border border-[#E2E8F0] px-2 py-0.5 rounded-sm font-bold uppercase">
-                {empleado.area_preferida}
-              </span>
-            </div>
           </div>
         </div>
 
@@ -847,7 +925,7 @@ export default function EmployeeWorkspace({
               }`}
             >
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Mi Checklist ({misTareas.filter(t => t.estado === 'Completada').length}/{misTareas.length})</span>
+              <span>Mis Tareas ({misTareas.filter(t => t.estado === 'Completada').length}/{misTareas.length})</span>
             </button>
 
             <button
@@ -894,11 +972,42 @@ export default function EmployeeWorkspace({
           {employeeTab === 'tareas' && (
             <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-sm animate-in fade-in duration-150">
               
+              {/* Selector de Fecha de Jornada (Conectado a Supabase) */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50 border border-slate-200 p-3.5 rounded-2xl mb-4 gap-3 shadow-2xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Calendar className="w-4 h-4 text-[#4B9CD3]" />
+                  <span className="text-xs font-bold text-slate-700">Fecha de jornada:</span>
+                  <input
+                    type="date"
+                    value={fechaFiltroTareas}
+                    onChange={(e) => setFechaFiltroTareas(e.target.value)}
+                    className="bg-white border border-slate-300 text-slate-800 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#4B9CD3] shadow-2xs cursor-pointer"
+                  />
+                  {fechaFiltroTareas !== hoyFormatted && (
+                    <button
+                      type="button"
+                      onClick={() => setFechaFiltroTareas(hoyFormatted)}
+                      className="text-xs bg-[#EBF5FB] hover:bg-[#D4E6F1] text-[#4B9CD3] font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+                    >
+                      Ir a Hoy ({hoyFormatted})
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-slate-500 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
+                    {fechaFiltroTareas === hoyFormatted ? 'Jornada de Hoy' : `Historial de Supabase: ${fechaFiltroTareas}`}
+                  </span>
+                  {cargandoTareasFecha && (
+                    <span className="text-[10px] text-blue-600 font-bold animate-pulse">Cargando datos...</span>
+                  )}
+                </div>
+              </div>
+
               {/* Tarjeta de Productividad Diaria del Empleado */}
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
+              <div id="seccion-productividad-empleado" className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
                 <div className="flex justify-between items-center mb-2">
                   <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                    📊 Mi Productividad Diaria
+                    Progreso Diario
                   </h3>
                   <span id="label-porcentaje-prod" className="text-sm font-extrabold text-blue-600">
                     {porcentajeCumplimientoTareas}%
@@ -915,17 +1024,45 @@ export default function EmployeeWorkspace({
                 </div>
                 
                 <p id="label-detalle-prod" className="text-xs text-gray-400 text-right">
-                  {tareasCompletadasCount} de {totalTareasCount} tareas completadas hoy
+                  {tareasCompletadasCount} de {totalTareasCount} tareas completadas {fechaFiltroTareas === hoyFormatted ? 'hoy' : `el ${fechaFiltroTareas}`}
                 </p>
               </div>
 
               {/* 2. Lista Interactiva de Tareas del Día */}
               <div className="space-y-3">
-                <div className="flex justify-between items-center mb-1">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-1">
                   <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Lista Operativa de Tareas de la Jornada</h4>
-                  <span className="text-[10px] text-[#4B9CD3] font-bold bg-[#EBF5FB] px-2.5 py-0.5 rounded-full">
-                    {empleado.area_preferida || 'Operaciones'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-[#4B9CD3] font-bold bg-[#EBF5FB] px-2.5 py-0.5 rounded-full">
+                      {empleado.area_preferida || 'Operaciones'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const completadas = misTareas.filter(t => t.estado === 'Completada').length;
+                        const totales = misTareas.length;
+                        await guardarProgresoEnSupabase(empleado.nombre, completadas, totales, fechaFiltroTareas);
+                        await actualizarVistaProductividadEmpleado(empleado.nombre, fechaFiltroTareas);
+                        await renderizarSeccionProductividadEmpleado(empleado.nombre, fechaFiltroTareas);
+
+                        // Redirigir a la vista de progreso
+                        const btnProgreso = document.getElementById('btn-tab-progreso');
+                        if (btnProgreso) {
+                          btnProgreso.click();
+                        } else {
+                          inicializarSesionProgresoEmpleado(empleado.nombre);
+                          setTimeout(() => {
+                            const btn = document.getElementById('btn-tab-progreso');
+                            if (btn) btn.click();
+                          }, 150);
+                        }
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] px-3 py-1 rounded-lg shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Cerrar día de tareas</span>
+                    </button>
+                  </div>
                 </div>
 
                 {misTareas.length === 0 ? (
@@ -1092,6 +1229,38 @@ export default function EmployeeWorkspace({
                     })}
                   </div>
                 )}
+
+                {/* Botón destacado al final para cerrar el día de tareas */}
+                <div className="pt-4 border-t border-slate-100 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const completadas = misTareas.filter(t => t.estado === 'Completada').length;
+                      const totales = misTareas.length;
+
+                      // Guardar progreso en Supabase
+                      await guardarProgresoEnSupabase(empleado.nombre, completadas, totales, fechaFiltroTareas);
+                      await actualizarVistaProductividadEmpleado(empleado.nombre, fechaFiltroTareas);
+                      await renderizarSeccionProductividadEmpleado(empleado.nombre, fechaFiltroTareas);
+
+                      // Redirigir a la vista de progreso
+                      const btnProgreso = document.getElementById('btn-tab-progreso');
+                      if (btnProgreso) {
+                        btnProgreso.click();
+                      } else {
+                        inicializarSesionProgresoEmpleado(empleado.nombre);
+                        setTimeout(() => {
+                          const btn = document.getElementById('btn-tab-progreso');
+                          if (btn) btn.click();
+                        }, 150);
+                      }
+                    }}
+                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Cerrar día de tareas</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
