@@ -330,11 +330,17 @@ export const iniciarModuloProductividadTiempoReal = () => {
 // Exponer en window para compatibilidad total con scripts y llamadas directas
 if (typeof window !== 'undefined') {
   (window as any).inicializarSesionProgresoEmpleadoSeguro = inicializarSesionProgresoEmpleadoSeguro;
+  (window as any).inicializarSesionProgresoEmpleado = inicializarSesionProgresoEmpleadoSeguro;
   (window as any).cargarProgresoEmpleadoDesdeSupabase = cargarProgresoEmpleadoDesdeSupabase;
+  (window as any).cargarProgresoEmpleado = cargarProgresoEmpleadoDesdeSupabase;
   (window as any).renderizarSeccionProductividadAdminSeguro = renderizarSeccionProductividadAdminSeguro;
+  (window as any).renderizarAdminProductividad = renderizarSeccionProductividadAdminSeguro;
   (window as any).cargarProductividadAdminPorFecha = cargarProductividadAdminPorFecha;
+  (window as any).cargarAdminProductividad = cargarProductividadAdminPorFecha;
   (window as any).activarSuscripcionTiempoRealSegura = activarSuscripcionTiempoRealSegura;
+  (window as any).activarTiempoReal = activarSuscripcionTiempoRealSegura;
   (window as any).iniciarModuloProductividadTiempoReal = iniciarModuloProductividadTiempoReal;
+  (window as any).ejecutarModulo = iniciarModuloProductividadTiempoReal;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', iniciarModuloProductividadTiempoReal);

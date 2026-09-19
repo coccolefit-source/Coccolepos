@@ -563,6 +563,19 @@ export default function App() {
     return newAdminId;
   };
 
+  // Si no hay usuario activo, mostramos el login
+  if (!activeUserRole) {
+    return (
+      <Login
+        usuarios={state.usuarios}
+        onLogin={setActiveUserRole}
+        onCreateAdmin={handleCreateAdmin}
+        onRequestPinResetNotification={handleRequestPinResetNotification}
+        onUpdateUserPin={handleUpdateUserPin}
+      />
+    );
+  }
+
   // Obtener usuario activo actual
   const defaultAdminUser: Usuario = {
     id: 'usr-admin',
@@ -577,20 +590,10 @@ export default function App() {
     rol: 'empleado',
     pin: '1234'
   };
-  const currentUser = state.usuarios.find(u => u.id === activeUserRole || u.nombre?.toLowerCase() === activeUserRole.toLowerCase()) || (activeUserRole === 'usr-admin' ? defaultAdminUser : defaultEmployeeUser);
-
-  // Si no hay usuario activo, mostramos el login
-  if (!activeUserRole) {
-    return (
-      <Login
-        usuarios={state.usuarios}
-        onLogin={setActiveUserRole}
-        onCreateAdmin={handleCreateAdmin}
-        onRequestPinResetNotification={handleRequestPinResetNotification}
-        onUpdateUserPin={handleUpdateUserPin}
-      />
-    );
-  }
+  const currentUser = state.usuarios.find(u => 
+    u.id === activeUserRole || 
+    (Boolean(activeUserRole) && u.nombre?.toLowerCase() === activeUserRole.toLowerCase())
+  ) || (activeUserRole === 'usr-admin' ? defaultAdminUser : defaultEmployeeUser);
 
   // Obtener métricas globales del negocio
   const metrics = getGlobalMetrics(state.tareas, state.ventas, state.productos, filtroGeneral);
