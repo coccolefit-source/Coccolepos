@@ -57,6 +57,9 @@ export function getSupabaseClient(): SupabaseClient | null {
       return null;
     }
   }
+  if (typeof window !== 'undefined' && supabaseInstance) {
+    (window as any).supabase = supabaseInstance;
+  }
   return supabaseInstance;
 }
 

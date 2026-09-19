@@ -51,6 +51,11 @@ import {
   getSupabaseClient,
   updateTaskOrdersInSupabase
 } from './lib/supabaseClient';
+import {
+  inicializarSesionProgresoEmpleadoSeguro,
+  renderizarSeccionProductividadAdminSeguro,
+  activarSuscripcionTiempoRealSegura
+} from './lib/realtimeProductivityModule';
 
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
@@ -67,6 +72,22 @@ export default function App() {
 
   // Rol activo (Admin o ID de un Empleado específico)
   const [activeUserRole, setActiveUserRole] = useState<string | null>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const sesionActual = (window as any).sesionActual;
+        if (sesionActual?.rol === 'admin') return 'usr-admin';
+        if (sesionActual?.rol === 'empleado') return sesionActual.id || sesionActual.nombre || 'usr-shelsy';
+        if (sesionActual?.id) return sesionActual.id;
+
+        const sesionStr = localStorage.getItem('coccole_sesion');
+        if (sesionStr) {
+          const parsed = JSON.parse(sesionStr);
+          if (parsed?.rol === 'admin') return 'usr-admin';
+          if (parsed?.rol === 'empleado') return parsed.id || parsed.nombre || 'usr-shelsy';
+          if (parsed?.id) return parsed.id;
+        }
+      }
+    } catch (e) {}
     return null;
   });
   
@@ -438,6 +459,77 @@ export default function App() {
     loadFreshTasks();
   }, [activeUserRole]);
 
+  // Sincronizar window.sesionActual y activar el Módulo Aditivo de Productividad y Tiempo Real
+  useEffect(() => {
+    const handleCheckSession = () => {
+      try {
+        const sesionActual = (window as any).sesionActual;
+        if (sesionActual?.rol === 'admin' && activeUserRole !== 'usr-admin') {
+          setActiveUserRole('usr-admin');
+          return;
+        } else if (sesionActual?.rol === 'empleado') {
+          const empNombre = sesionActual.nombre;
+          const match = state.usuarios.find(u => 
+            u.id === empNombre ||
+            u.nombre?.toLowerCase() === empNombre?.toLowerCase() ||
+            u.pin === empNombre
+          ) || state.usuarios.find(u => u.rol === 'empleado');
+          const targetId = match?.id || empNombre || 'usr-shelsy';
+          if (activeUserRole !== targetId) {
+            setActiveUserRole(targetId);
+            return;
+          }
+        }
+
+        const sesionStr = localStorage.getItem('coccole_sesion');
+        if (sesionStr) {
+          const parsed = JSON.parse(sesionStr);
+          if (parsed?.rol === 'admin' && activeUserRole !== 'usr-admin') {
+            setActiveUserRole('usr-admin');
+          } else if (parsed?.rol === 'empleado') {
+            const empNombre = parsed.nombre;
+            const match = state.usuarios.find(u => 
+              u.id === empNombre ||
+              u.nombre?.toLowerCase() === empNombre?.toLowerCase() ||
+              u.pin === empNombre
+            ) || state.usuarios.find(u => u.rol === 'empleado');
+            const targetId = match?.id || empNombre || 'usr-shelsy';
+            if (activeUserRole !== targetId) {
+              setActiveUserRole(targetId);
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
+    window.addEventListener('storage', handleCheckSession);
+    const interval = setInterval(handleCheckSession, 1000);
+    return () => {
+      window.removeEventListener('storage', handleCheckSession);
+      clearInterval(interval);
+    };
+  }, [activeUserRole]);
+
+  useEffect(() => {
+    if (!activeUserRole) return;
+    const user = state.usuarios.find(u => u.id === activeUserRole);
+    const rol = (user && user.rol === 'admin') || activeUserRole === 'usr-admin' ? 'admin' : 'empleado';
+    const nombre = user?.nombre || (window as any).sesionActual?.nombre || (rol === 'admin' ? 'Administrador' : 'Shelsy');
+    
+    (window as any).sesionActual = { rol, nombre };
+
+    const timer = setTimeout(() => {
+      if (rol === 'admin') {
+        renderizarSeccionProductividadAdminSeguro();
+      } else {
+        inicializarSesionProgresoEmpleadoSeguro(nombre);
+      }
+      activarSuscripcionTiempoRealSegura();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [activeUserRole, state.usuarios]);
+
   // Agregar una notificación al feed
   const pushNotification = (text: string, type: 'success' | 'alert' | 'info' = 'info') => {
     const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -472,7 +564,20 @@ export default function App() {
   };
 
   // Obtener usuario activo actual
-  const currentUser = state.usuarios.find(u => u.id === activeUserRole) || state.usuarios[0];
+  const defaultAdminUser: Usuario = {
+    id: 'usr-admin',
+    nombre: (window as any).sesionActual?.nombre || 'Administrador',
+    email: 'admin@coccolefit.com',
+    rol: 'admin',
+    pin: '1234'
+  };
+  const defaultEmployeeUser: Usuario = {
+    id: activeUserRole || 'usr-shelsy',
+    nombre: (window as any).sesionActual?.nombre || 'Shelsy',
+    rol: 'empleado',
+    pin: '1234'
+  };
+  const currentUser = state.usuarios.find(u => u.id === activeUserRole || u.nombre?.toLowerCase() === activeUserRole.toLowerCase()) || (activeUserRole === 'usr-admin' ? defaultAdminUser : defaultEmployeeUser);
 
   // Si no hay usuario activo, mostramos el login
   if (!activeUserRole) {

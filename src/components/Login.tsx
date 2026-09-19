@@ -233,6 +233,17 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
 
         if (result.success && result.user) {
           setIsLoggingIn(false);
+          const empNombre = result.user.nombre || pinLimpio;
+          (window as any).sesionActual = { rol: 'empleado', nombre: empNombre, id: result.user.id };
+          try {
+            localStorage.setItem('coccole_sesion', JSON.stringify((window as any).sesionActual));
+          } catch (e) {}
+          if (typeof (window as any).inicializarSesionProgresoEmpleadoSeguro === 'function') {
+            (window as any).inicializarSesionProgresoEmpleadoSeguro(empNombre);
+          }
+          if (typeof (window as any).activarSuscripcionTiempoRealSegura === 'function') {
+            (window as any).activarSuscripcionTiempoRealSegura();
+          }
           onLogin(result.user.id);
           return;
         }
