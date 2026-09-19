@@ -1739,11 +1739,22 @@ export default function App() {
                 {isSyncing ? 'Sincronizando...' : 'Actualizar Datos'}
               </button>
               <button
-                onClick={() => {
-                  setActiveUserRole(null);
-                  pushNotification('Sesión cerrada.', 'info');
+                id="btn-cerrar-sesion"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (typeof (window as any).cerrarSesion === 'function') {
+                    (window as any).cerrarSesion();
+                  } else {
+                    if ((window as any).sesionActual) {
+                      (window as any).sesionActual = { rol: null, nombre: null };
+                    }
+                    localStorage.removeItem('coccole_sesion');
+                    localStorage.clear();
+                    setActiveUserRole(null);
+                    window.location.reload();
+                  }
                 }}
-                className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-[#2C3E50] border border-[#E2E8F0] hover:bg-slate-50 rounded-lg transition-all"
+                className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-[#2C3E50] border border-[#E2E8F0] hover:bg-slate-50 rounded-lg transition-all cursor-pointer"
               >
                 Cerrar Sesión
               </button>

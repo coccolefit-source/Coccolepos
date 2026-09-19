@@ -327,8 +327,38 @@ export const iniciarModuloProductividadTiempoReal = () => {
   }, 1000);
 };
 
+// ==========================================
+// SOLUCION PARA EL BOTON CERRAR SESION
+// ==========================================
+
+export const cerrarSesion = () => {
+  try {
+    // Resetear la variable de sesión en memoria
+    if (typeof window !== 'undefined' && (window as any).sesionActual) {
+      (window as any).sesionActual = { rol: null, nombre: null };
+    }
+
+    // Borrar la sesión guardada en localStorage
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('coccole_sesion');
+      localStorage.clear();
+    }
+
+    // Recargar la página para volver a la pantalla de inicio de sesión / login
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  } catch (err) {
+    console.error('Error al cerrar sesión:', err);
+    if (typeof window !== 'undefined') {
+      window.location.href = window.location.pathname;
+    }
+  }
+};
+
 // Exponer en window para compatibilidad total con scripts y llamadas directas
 if (typeof window !== 'undefined') {
+  (window as any).cerrarSesion = cerrarSesion;
   (window as any).inicializarSesionProgresoEmpleadoSeguro = inicializarSesionProgresoEmpleadoSeguro;
   (window as any).inicializarSesionProgresoEmpleado = inicializarSesionProgresoEmpleadoSeguro;
   (window as any).cargarProgresoEmpleadoDesdeSupabase = cargarProgresoEmpleadoDesdeSupabase;
@@ -341,6 +371,27 @@ if (typeof window !== 'undefined') {
   (window as any).activarTiempoReal = activarSuscripcionTiempoRealSegura;
   (window as any).iniciarModuloProductividadTiempoReal = iniciarModuloProductividadTiempoReal;
   (window as any).ejecutarModulo = iniciarModuloProductividadTiempoReal;
+
+  // Conectar de forma automática cualquier botón que diga "Cerrar Sesión" en pantalla
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', function (evento: any) {
+      const target = evento.target;
+      const elemento = target?.closest ? (target.closest('button, a, div') || target) : target;
+
+      if (
+        elemento &&
+        (
+          elemento.textContent?.trim().toLowerCase().includes('cerrar sesión') ||
+          elemento.textContent?.trim().toLowerCase().includes('cerrar sesion') ||
+          elemento.id === 'btn-cerrar-sesion' ||
+          elemento.id === 'logout-btn'
+        )
+      ) {
+        evento.preventDefault();
+        cerrarSesion();
+      }
+    });
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', iniciarModuloProductividadTiempoReal);
