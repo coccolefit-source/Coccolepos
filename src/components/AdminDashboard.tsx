@@ -8,7 +8,7 @@ import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaTy
 
 import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase } from '../lib/supabaseClient';
+import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
@@ -122,6 +122,46 @@ export default function AdminDashboard({
   const [editingCampProd, setEditingCampProd] = useState<ProductoPromocion | null>(null);
   const [showEditCampProdModal, setShowEditCampProdModal] = useState(false);
   const [deleteCampProdId, setDeleteCampProdId] = useState<string | null>(null);
+
+  // Estado y sincronización de auditoría de productividad
+  const [adminFechaProd, setAdminFechaProd] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [adminProductividadData, setAdminProductividadData] = useState<Array<{ id: string; employee_name: string; completadas: number; totales: number; porcentaje: number; updated_at: string }>>([]);
+  const [loadingAdminProd, setLoadingAdminProd] = useState<boolean>(false);
+
+  const cargarProductividadAdmin = async (fechaConsulta: string) => {
+    setLoadingAdminProd(true);
+    try {
+      const client = getSupabaseClient();
+      if (!client) {
+        setLoadingAdminProd(false);
+        return;
+      }
+      const { data, error } = await client.from('task_progress').select('*').eq('fecha', fechaConsulta);
+      if (error) {
+        console.warn('Advertencia al consultar task_progress en admin:', error.message);
+      }
+      if (data && data.length > 0) {
+        setAdminProductividadData(data.map((d: any) => ({
+          id: String(d.id || d.employee_name),
+          employee_name: d.employee_name || 'Colaborador',
+          completadas: Number(d.completadas) || 0,
+          totales: Number(d.totales) || 0,
+          porcentaje: Number(d.porcentaje) || 0,
+          updated_at: d.updated_at || new Date().toISOString()
+        })));
+      } else {
+        setAdminProductividadData([]);
+      }
+    } catch (err) {
+      console.warn('Excepción al cargar productividad admin:', err);
+    } finally {
+      setLoadingAdminProd(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarProductividadAdmin(adminFechaProd);
+  }, [adminFechaProd]);
 
   // Ticker para actualizar la duración transcurrida de tareas en tiempo real
   const [ticker, setTicker] = useState(0);
@@ -1453,6 +1493,72 @@ export default function AdminDashboard({
       {/* 1. GESTOR DE TAREAS */}
       {isTabOpen('tareas') && (
         <div className={activeTab === 'tareas' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
+          {/* Panel de Monitoreo de Productividad y Cumplimiento de Tareas */}
+          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b border-slate-100 gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-[#2C3E50] flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[#4B9CD3]" />
+                  Monitoreo de Productividad del Personal
+                </h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">Control de avance diario de tareas de colaboradores registrado en Supabase.</p>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <input
+                  type="date"
+                  value={adminFechaProd}
+                  onChange={(e) => {
+                    setAdminFechaProd(e.target.value);
+                    cargarProductividadAdmin(e.target.value);
+                  }}
+                  className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]"
+                />
+                <button
+                  type="button"
+                  onClick={() => cargarProductividadAdmin(adminFechaProd)}
+                  className="bg-[#4B9CD3] hover:bg-[#3A88BE] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
+                >
+                  Consultar
+                </button>
+              </div>
+            </div>
+
+            {loadingAdminProd ? (
+              <p className="text-xs text-slate-400 text-center py-4">Consultando datos de productividad...</p>
+            ) : adminProductividadData.length === 0 ? (
+              <div className="text-center py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
+                <p className="text-xs font-bold text-slate-600">Sin registros de productividad para la fecha seleccionada ({adminFechaProd})</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {adminProductividadData.map(item => (
+                  <div key={item.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-800">{item.employee_name}</span>
+                      <span className="text-xs font-extrabold text-[#4B9CD3]">{item.porcentaje}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner">
+                      <div
+                        className={`h-2.5 rounded-full transition-all duration-500 ${
+                          item.porcentaje >= 100
+                            ? 'bg-emerald-500'
+                            : item.porcentaje >= 50
+                            ? 'bg-[#4B9CD3]'
+                            : 'bg-amber-500'
+                        }`}
+                        style={{ width: `${item.porcentaje}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-[11px] text-slate-500 pt-1">
+                      <span>{item.completadas} de {item.totales} completadas</span>
+                      <span>{new Date(item.updated_at).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Formulario de Tarea */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">

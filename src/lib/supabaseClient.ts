@@ -1252,20 +1252,287 @@ export async function saveUpsellRulesToSupabase(rules: UpsellRule[]): Promise<bo
   }
 }
 
+export const DEFAULT_TASKS_24_TEMPLATES = [
+  {
+    titulo: "Revisar caja y verificar la base predeterminada",
+    descripcion: "Contar fondo inicial y asegurar la base de efectivo antes de la apertura.",
+    area: "Atención/Caja",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Apertura"
+  },
+  {
+    titulo: "Revisar neveras",
+    descripcion: "Verificar temperaturas y correcto funcionamiento de todos los refrigeradores.",
+    area: "Cocina/Preparación",
+    tiempo_estimado_min: 10,
+    requiere_foto: true,
+    tipo_tarea: "Apertura"
+  },
+  {
+    titulo: "Limpiar vitrinas",
+    descripcion: "Limpiar vidrios y superficies de vitrinas de exhibición.",
+    area: "Limpieza",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Limpiar la pantalla del televisor",
+    descripcion: "Quitar polvo y huellas de la pantalla principal del salón.",
+    area: "Limpieza",
+    tiempo_estimado_min: 10,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Hacer inventario en la nevera",
+    descripcion: "Contar ingredientes y materias primas refrigeradas.",
+    area: "Cocina/Preparación",
+    tiempo_estimado_min: 20,
+    requiere_foto: false,
+    tipo_tarea: "Apertura"
+  },
+  {
+    titulo: "Hacer inventario de lo que está afuera",
+    descripcion: "Revisar stock de toppings, servilletas y barras en mostrador.",
+    area: "Atención/Caja",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Apertura"
+  },
+  {
+    titulo: "Cambiar el papel de las fresas",
+    descripcion: "Renovar el papel absorbente en recipientes de fresas para mantener frescura.",
+    area: "Cocina/Preparación",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Apertura"
+  },
+  {
+    titulo: "Hacer inventario de faltantes",
+    descripcion: "Anotar productos con bajo stock para pedido del día.",
+    area: "Atención/Caja",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Apertura"
+  },
+  {
+    titulo: "Pegar stickers en empaques",
+    descripcion: "Rotular bolsas y envases eco-friendly con etiquetas de la marca.",
+    area: "Empaque/Despacho",
+    tiempo_estimado_min: 30,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Revisar y contar desechables",
+    descripcion: "Validar stock de cucharas, servilletas, pitillos y vasos.",
+    area: "Empaque/Despacho",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Preparar y repartir degustaciones en la entrada (atraer clientes)",
+    descripcion: "Ofrecer muestras de parfait y smoothies a los transeúntes.",
+    area: "Atención/Caja",
+    tiempo_estimado_min: 30,
+    requiere_foto: true,
+    tipo_tarea: "Venta Activa"
+  },
+  {
+    titulo: "Ofrecer topping y botella de agua",
+    descripcion: "Impulsar venta sugestiva ofreciendo adiciones y bebidas a cada orden.",
+    area: "Atención/Caja",
+    tiempo_estimado_min: 120,
+    requiere_foto: false,
+    tipo_tarea: "Venta Activa"
+  },
+  {
+    titulo: "Invitar al cliente a su próxima visita o recordarle productos del mes",
+    descripcion: "Fidelizar clientes comunicando promociones y lanzamientos.",
+    area: "Atención/Caja",
+    tiempo_estimado_min: 120,
+    requiere_foto: false,
+    tipo_tarea: "Venta Activa"
+  },
+  {
+    titulo: "Limpiar cafetera",
+    descripcion: "Realizar retrolavado y limpieza de lanceta de vapor.",
+    area: "Cocina/Preparación",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Limpiar licuadora",
+    descripcion: "Desarmar, lavar y desinfectar vaso y cuchillas de licuadoras.",
+    area: "Cocina/Preparación",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Limpiar freidora (air fryer)",
+    descripcion: "Retirar grasa y limpiar canastilla de la freidora de aire.",
+    area: "Cocina/Preparación",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Limpiar nevera por dentro y por fuera",
+    descripcion: "Desinfectar repisas y manijas exteriores de refrigeradores.",
+    area: "Limpieza",
+    tiempo_estimado_min: 30,
+    requiere_foto: true,
+    tipo_tarea: "Cierre"
+  },
+  {
+    titulo: "Rodar el enfriador y limpiar su espacio",
+    descripcion: "Mover el enfriador vertical para barrer y trapar detrás/debajo del equipo.",
+    area: "Limpieza",
+    tiempo_estimado_min: 20,
+    requiere_foto: false,
+    tipo_tarea: "Cierre"
+  },
+  {
+    titulo: "Lavar zona de picado y preparación",
+    descripcion: "Higienizar tablas de picar, cuchillos y mesada de acero inoxidable.",
+    area: "Cocina/Preparación",
+    tiempo_estimado_min: 25,
+    requiere_foto: true,
+    tipo_tarea: "Cierre"
+  },
+  {
+    titulo: "Mantener la zona de trabajo limpia",
+    descripcion: "Limpiar derrames inmediatamente y organizar utensilios continuamente.",
+    area: "Limpieza",
+    tiempo_estimado_min: 180,
+    requiere_foto: false,
+    tipo_tarea: "Sanitización"
+  },
+  {
+    titulo: "Barrer adentro",
+    descripcion: "Eliminar suciedad y polvo del piso interior del local.",
+    area: "Limpieza",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Cierre"
+  },
+  {
+    titulo: "Trapear afuera",
+    descripcion: "Limpiar piso de la entrada exterior con desinfectante.",
+    area: "Limpieza",
+    tiempo_estimado_min: 15,
+    requiere_foto: false,
+    tipo_tarea: "Cierre"
+  },
+  {
+    titulo: "Lavar el trapero",
+    descripcion: "Lavar, desinfectar y colgar el trapero al final de la jornada.",
+    area: "Limpieza",
+    tiempo_estimado_min: 10,
+    requiere_foto: false,
+    tipo_tarea: "Cierre"
+  },
+  {
+    titulo: "Botar la basura",
+    descripcion: "Retirar bolsas de residuos, amarrar y llevar al punto de recolección.",
+    area: "Limpieza",
+    tiempo_estimado_min: 10,
+    requiere_foto: true,
+    tipo_tarea: "Cierre"
+  }
+];
+
+export async function generarLoteTareasPredeterminadasAutonomas(client: any, fechaTarget: string): Promise<Tarea[]> {
+  try {
+    let asignadoPorDefecto = 'usr-shelsy';
+    const { data: usersData } = await client.from('profiles').select('id, role').eq('role', 'empleado').limit(1);
+    if (usersData && usersData.length > 0 && usersData[0].id) {
+      asignadoPorDefecto = usersData[0].id;
+    }
+
+    const tareasGeneradas: Tarea[] = [];
+
+    for (let i = 0; i < DEFAULT_TASKS_24_TEMPLATES.length; i++) {
+      const template = DEFAULT_TASKS_24_TEMPLATES[i];
+      const payload = {
+        title: template.titulo,
+        titulo: template.titulo,
+        description: template.descripcion,
+        descripcion: template.descripcion,
+        area: template.area,
+        date: fechaTarget,
+        fecha: fechaTarget,
+        status: 'Pendiente',
+        estado: 'Pendiente',
+        assigned_to: asignadoPorDefecto,
+        asignado_a: asignadoPorDefecto,
+        requires_photo: template.requiere_foto,
+        requiere_foto: template.requiere_foto,
+        tiempo_estimado_min: template.tiempo_estimado_min,
+        type: template.tipo_tarea,
+        tipo_tarea: template.tipo_tarea,
+        orden: i + 1
+      };
+
+      const { success } = await insertWithResilientColumns(client, 'daily_tasks', payload);
+      if (success) {
+        tareasGeneradas.push({
+          id: `task-auto-${Date.now()}-${i}`,
+          titulo: template.titulo,
+          descripcion: template.descripcion,
+          tipo_tarea: template.tipo_tarea as any,
+          area: template.area as any,
+          asignado_a: asignadoPorDefecto,
+          estado: 'Pendiente',
+          tiempo_estimado_min: template.tiempo_estimado_min,
+          hora_inicio: '',
+          hora_fin: '',
+          requiere_foto: template.requiere_foto,
+          fecha: fechaTarget,
+          orden: i + 1
+        });
+      }
+    }
+
+    return tareasGeneradas;
+  } catch (err) {
+    console.warn('Error en generación autónoma de tareas:', err);
+    return [];
+  }
+}
+
 export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
 
   try {
+    const hoyStr = new Date().toISOString().split('T')[0];
+    const targetFecha = fecha || hoyStr;
+
     let query = client.from('daily_tasks').select('*');
-    if (fecha) {
-      query = query.or(`date.eq.${fecha},fecha.eq.${fecha}`);
+    if (targetFecha) {
+      query = query.or(`date.eq.${targetFecha},fecha.eq.${targetFecha}`);
     }
     const { data, error } = await query;
     if (error) {
       console.warn('Supabase fetchDailyTasks error:', error.message);
       return null;
     }
+    
+    // Si no hay tareas para la fecha actual, generar autónomamente el lote de 24 tareas
+    if ((!data || data.length === 0) && targetFecha === hoyStr) {
+      console.log('Generando lote autónomo de 24 tareas para la fecha actual:', targetFecha);
+      const tareasNuevas = await generarLoteTareasPredeterminadasAutonomas(client, targetFecha);
+      if (tareasNuevas.length > 0) {
+        return tareasNuevas;
+      }
+    }
+
     if (!data) return null;
 
     return data.map((t: any) => {

@@ -359,7 +359,47 @@ export default function EmployeeWorkspace({
   const misPuntos = leaderboardData.find(item => item.usuario.id === empleado.id)?.puntosTotales || 0;
 
   // Modales
-  const [employeeTab, setEmployeeTab] = useState<'tareas' | 'inventario' | 'horarios' | 'ventas'>('tareas');
+  const [employeeTab, setEmployeeTab] = useState<'tareas' | 'inventario' | 'horarios' | 'ventas' | 'progreso'>('tareas');
+  const [fechaProgresoHistorial, setFechaProgresoHistorial] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [historialProgresoData, setHistorialProgresoData] = useState<{ completadas: number; totales: number; porcentaje: number; updated_at: string } | null>(null);
+  const [isLoadingProgresoHistorial, setIsLoadingProgresoHistorial] = useState<boolean>(false);
+
+  const cargarProgresoHistorial = async (fechaConsulta: string) => {
+    setIsLoadingProgresoHistorial(true);
+    try {
+      const client = getSupabaseClient();
+      if (!client) {
+        setIsLoadingProgresoHistorial(false);
+        return;
+      }
+      const { data, error } = await client
+        .from('task_progress')
+        .select('*')
+        .eq('employee_name', empleado.nombre)
+        .eq('fecha', fechaConsulta)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') {
+        console.warn('Error al consultar task_progress:', error.message);
+      }
+
+      if (data) {
+        setHistorialProgresoData({
+          completadas: Number(data.completadas) || 0,
+          totales: Number(data.totales) || 0,
+          porcentaje: Number(data.porcentaje) || 0,
+          updated_at: data.updated_at || new Date().toISOString()
+        });
+      } else {
+        setHistorialProgresoData(null);
+      }
+    } catch (e) {
+      console.warn('Excepción al cargar historial de progreso:', e);
+    } finally {
+      setIsLoadingProgresoHistorial(false);
+    }
+  };
+
   const [tempStock, setTempStock] = useState<Record<string, number>>({});
   const [activePaymentSugerida, setActivePaymentSugerida] = useState<string | null>(null);
   const [posPaymentMethod, setPosPaymentMethod] = useState<string>('Efectivo');
@@ -1014,6 +1054,25 @@ export default function EmployeeWorkspace({
             >
               <Calendar className="w-4 h-4 shrink-0" />
               <span>Ver Turnos</span>
+            </button>
+
+            <button
+              id="btn-tab-progreso-react"
+              type="button"
+              onClick={() => {
+                setEmployeeTab('progreso');
+                const hoy = new Date().toISOString().split('T')[0];
+                const fecha = fechaProgresoHistorial || hoy;
+                cargarProgresoHistorial(fecha);
+              }}
+              className={`flex-1 py-2.5 px-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 min-w-[120px] ${
+                employeeTab === 'progreso'
+                  ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                  : 'text-slate-600 hover:bg-[#EBF5FB]/40 hover:text-[#2C3E50]'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4 shrink-0" />
+              <span>Progreso</span>
             </button>
           </div>
 
@@ -1956,6 +2015,77 @@ export default function EmployeeWorkspace({
                   </div>
                 );
               })()}
+            </div>
+          )}
+
+          {/* TAB 5: MI HISTORIAL DE PROGRESO Y PRODUCTIVIDAD (SUPABASE) */}
+          {employeeTab === 'progreso' && (
+            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4 animate-in fade-in duration-150">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b border-slate-100 gap-3">
+                <div>
+                  <h4 className="font-extrabold text-xs text-[#4B9CD3] uppercase tracking-wider">Historial de Productividad</h4>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Consulta tu rendimiento diario registrado en la base de datos Supabase.</p>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <input
+                    type="date"
+                    value={fechaProgresoHistorial}
+                    onChange={(e) => {
+                      setFechaProgresoHistorial(e.target.value);
+                      cargarProgresoHistorial(e.target.value);
+                    }}
+                    className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => cargarProgresoHistorial(fechaProgresoHistorial)}
+                    className="bg-[#4B9CD3] hover:bg-[#3A88BE] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
+                  >
+                    Actualizar
+                  </button>
+                </div>
+              </div>
+
+              {isLoadingProgresoHistorial ? (
+                <div className="p-8 text-center text-slate-400 text-xs">
+                  Cargando información de productividad...
+                </div>
+              ) : historialProgresoData ? (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col gap-3">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Jornada</span>
+                        <h3 className="text-xs font-black text-slate-800">{fechaProgresoHistorial}</h3>
+                      </div>
+                      <span className="text-2xl font-black text-[#4B9CD3]">{historialProgresoData.porcentaje}%</span>
+                    </div>
+
+                    <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden shadow-inner">
+                      <div
+                        className={`h-3 rounded-full transition-all duration-500 ${
+                          historialProgresoData.porcentaje >= 100
+                            ? 'bg-emerald-500'
+                            : historialProgresoData.porcentaje >= 50
+                            ? 'bg-[#4B9CD3]'
+                            : 'bg-amber-500'
+                        }`}
+                        style={{ width: `${historialProgresoData.porcentaje}%` }}
+                      ></div>
+                    </div>
+
+                    <div className="flex justify-between text-xs text-slate-500 pt-2 border-t border-slate-200">
+                      <span>Tareas Completadas: <strong className="text-slate-800">{historialProgresoData.completadas} de {historialProgresoData.totales}</strong></span>
+                      <span>Ultima actualizacion: <strong className="text-slate-800">{new Date(historialProgresoData.updated_at).toLocaleTimeString()}</strong></span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-slate-500 text-xs">
+                  <p className="font-bold">Sin registros de productividad para la fecha seleccionada ({fechaProgresoHistorial})</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Completa tareas desde tu checklist para generar el registro diario.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
