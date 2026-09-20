@@ -1,6 +1,6 @@
 // ==========================================
-// MODULO DE SINCRONIZACION Y TIEMPO REAL: VENTAS SUGERIDAS (EMPLEADO & ADMIN)
-// (Arquitectura Segura e Integracion Supabase)
+// MODULO DE SINCRONIZACION Y TIEMPO REAL: VENTAS SUGERIDAS
+// (Arquitectura Segura y Sincronizacion de Horario Local)
 // ==========================================
 
 import { getSupabaseClient } from './supabaseClient';
@@ -8,77 +8,53 @@ import { getSupabaseClient } from './supabaseClient';
 (function () {
   'use strict';
 
+  var canalSyncGlobal: any = null;
   var canalRealtimeVentas: any = null;
-  var canalRealtimeAdminSales: any = null;
 
-  function obtenerClienteSupabase() {
+  function obtenerSupabase() {
     if (typeof (window as any).supabase !== 'undefined' && (window as any).supabase) {
       return (window as any).supabase;
     }
     return getSupabaseClient();
   }
 
-  function obtenerRangoFechaHoy() {
-    var ahora = new Date();
-    var anio = ahora.getFullYear();
-    var mes = String(ahora.getMonth() + 1).padStart(2, '0');
-    var dia = String(ahora.getDate()).padStart(2, '0');
-
-    var inicio = anio + '-' + mes + '-' + dia + 'T00:00:00.000Z';
-    var fin = anio + '-' + mes + '-' + dia + 'T23:59:59.999Z';
-    return { inicio: inicio, fin: fin, fechaCorta: anio + '-' + mes + '-' + dia };
+  // Verificacion de fecha local (Resuelve el desfase de zona horaria UTC vs Local)
+  function esHoy(fechaString: any) {
+    if (!fechaString) return false;
+    var fecha = new Date(fechaString);
+    if (isNaN(fecha.getTime())) return false;
+    var hoy = new Date();
+    return fecha.getDate() === hoy.getDate() &&
+           fecha.getMonth() === hoy.getMonth() &&
+           fecha.getFullYear() === hoy.getFullYear();
   }
 
-  // Actualiza directamente la tarjeta del resumen operativo en el perfil Admin
-  function actualizarTarjetaAdmin(total: number) {
+  // Localizador exacto para la tarjeta visual del Administrador
+  function forzarActualizacionUI(total: number) {
     if (typeof document === 'undefined') return;
-    var elementos = document.querySelectorAll('div, p, span');
-    elementos.forEach(function (el) {
-      if (el.textContent && el.textContent.trim().toUpperCase() === 'VENTAS SUGERIDAS') {
-        var tarjetaPadre = el.closest('div.bg-white, div.rounded-2xl, div.p-6, div.p-4, div.bg-orange-50, div.rounded-xl, div.rounded-lg') || el.parentElement;
-        if (tarjetaPadre) {
-          var contador = tarjetaPadre.querySelector('.text-2xl, .text-3xl, .text-lg, h3, font-bold, span.font-bold');
-          if (!contador) {
-            var subElementos = tarjetaPadre.querySelectorAll('div, span, p');
-            subElementos.forEach(function (sub) {
-              if (/^\d+$/.test(sub.textContent ? sub.textContent.trim() : '')) {
-                contador = sub;
-              }
-            });
-          }
-          if (contador) {
-            contador.textContent = String(total);
-          }
+    var textos = document.querySelectorAll('p, span, h1, h2, h3, h4, h5, h6, div');
+    var tarjeta: HTMLElement | null = null;
+
+    // 1. Ubicar el contenedor de "VENTAS SUGERIDAS"
+    for (var i = 0; i < textos.length; i++) {
+      if (textos[i].textContent && textos[i].textContent.trim().toUpperCase() === 'VENTAS SUGERIDAS') {
+        tarjeta = (textos[i].closest('div.bg-orange-50, div.rounded-2xl, div.p-6, div.p-3, div') || textos[i].parentElement?.parentElement) as HTMLElement;
+        break;
+      }
+    }
+
+    // 2. Reemplazar exclusivamente el numero principal
+    if (tarjeta) {
+      var elementosHijos = tarjeta.querySelectorAll('*');
+      for (var j = 0; j < elementosHijos.length; j++) {
+        var hijo = elementosHijos[j];
+        // Valida que sea un nodo que contenga unicamente digitos numericos
+        if (/^\d+$/.test(hijo.textContent ? hijo.textContent.trim() : '') && hijo.children.length === 0) {
+          hijo.textContent = String(total);
+          break; // Detiene el ciclo tras actualizar el numero principal
         }
       }
-    });
-  }
-
-  // Refresca los elementos visuales de la interfaz de Empleado
-  function actualizarUIContadorVentas(cantidad: number) {
-    if (typeof document === 'undefined') return;
-
-    // Actualizar tarjeta resumen (VENTAS SUGERIDAS)
-    var tarjetas = document.querySelectorAll('div, span, p');
-    tarjetas.forEach(function (el) {
-      if (el.textContent && el.textContent.trim().toUpperCase() === 'VENTAS SUGERIDAS') {
-        var contenedorPadre = el.closest('div');
-        if (contenedorPadre) {
-          var numeroElem = contenedorPadre.querySelector('.text-2xl, .text-3xl, .text-lg, h3, span.font-bold');
-          if (!numeroElem) {
-            var elementosValor = contenedorPadre.querySelectorAll('div, span, p');
-            elementosValor.forEach(function (subEl) {
-              if (/^\d+$/.test(subEl.textContent ? subEl.textContent.trim() : '')) {
-                numeroElem = subEl;
-              }
-            });
-          }
-          if (numeroElem) {
-            numeroElem.textContent = String(cantidad);
-          }
-        }
-      }
-    });
+    }
 
     // Actualizar barra de progreso si existe en la vista del empleado
     var barraProgreso = document.getElementById('barra-progreso-ventas-sugeridas') || document.querySelector('.barra-ventas-sugeridas');
@@ -86,211 +62,116 @@ import { getSupabaseClient } from './supabaseClient';
 
     if (barraProgreso) {
       var meta = 15;
-      var porcentaje = Math.min(Math.round((cantidad / meta) * 100), 100);
+      var porcentaje = Math.min(Math.round((total / meta) * 100), 100);
       (barraProgreso as HTMLElement).style.width = porcentaje + '%';
     }
 
     if (textoProgreso) {
-      textoProgreso.textContent = cantidad + ' de 15 logradas';
+      textoProgreso.textContent = total + ' de 15 logradas';
     }
   }
 
-  // Consulta consolidada de todas las ventas del local en la fecha actual (Admin)
-  function consultarTotalVentasSugeridasAdmin() {
-    var cliente = obtenerClienteSupabase();
+  function sincronizarVentasAdminSeguro() {
+    var cliente = obtenerSupabase();
     if (!cliente) return;
 
-    var rango = obtenerRangoFechaHoy();
-
-    // 1. Cargar productos activos desde upsell_rules
+    // 1. Consultamos los productos configurados en la campana
     cliente
       .from('upsell_rules')
       .select('suggested_product_name, active')
-      .then(function (resRules: any) {
-        var productosImpulsados: string[] = [];
-        if (resRules.data && resRules.data.length > 0) {
-          productosImpulsados = resRules.data
+      .then(function (resReglas: any) {
+        var reglas: string[] = [];
+        if (resReglas.data && resReglas.data.length > 0) {
+          reglas = resReglas.data
             .filter(function (r: any) { return r.active !== false; })
             .map(function (r: any) {
               return (r.suggested_product_name || '').toLowerCase().trim();
             });
         }
 
-        // 2. Consultar todas las ventas registradas en sales hoy
+        // 2. Consultamos ventas recientes (Evitamos filtros rigidos de base de datos para no cruzar zonas horarias)
         cliente
           .from('sales')
           .select('*')
-          .gte('created_at', rango.inicio)
-          .lte('created_at', rango.fin)
-          .then(function (resSales: any) {
-            if (resSales.error) {
-              console.error('Error al consultar ventas globales para admin:', resSales.error);
-              return;
-            }
+          .order('created_at', { ascending: false })
+          .limit(1000)
+          .then(function (resVentas: any) {
+            if (resVentas.error) return;
 
-            var totalVentasGlobal = 0;
-            var registros = resSales.data || [];
-
-            registros.forEach(function (venta: any) {
-              var nombreProducto = (venta.product_name || venta.producto || venta.items || venta.producto_nombre || '').toString().toLowerCase();
-
-              if (productosImpulsados.length > 0) {
-                var coincide = productosImpulsados.some(function (pImp) {
-                  return pImp && nombreProducto.includes(pImp);
-                });
-
-                if (coincide) {
-                  totalVentasGlobal += Number(venta.quantity || venta.cantidad || venta.unidades || 1);
-                } else if (venta.tipo_venta === 'sugerida' || venta.es_sugerido === true || venta.es_sugerida === true) {
-                  totalVentasGlobal += Number(venta.quantity || venta.cantidad || 1);
-                } else {
-                  // Conteo directo si la tabla almacena registros de la campana
-                  totalVentasGlobal += Number(venta.quantity || venta.cantidad || 1);
-                }
-              } else {
-                totalVentasGlobal += Number(venta.quantity || venta.cantidad || 1);
-              }
-            });
-
-            actualizarTarjetaAdmin(totalVentasGlobal);
-          })
-          .catch(function (err: any) {
-            console.error('Excepcion al calcular total de ventas:', err);
-          });
-      })
-      .catch(function (err: any) {
-        console.error('Excepcion al consultar upsell_rules:', err);
-      });
-  }
-
-  // Consulta y calcula las ventas sugeridas acumuladas del dia para el empleado
-  function sincronizarVentasSugeridas() {
-    var cliente = obtenerClienteSupabase();
-    if (!cliente) return;
-
-    var rango = obtenerRangoFechaHoy();
-
-    cliente
-      .from('upsell_rules')
-      .select('suggested_product_name, active')
-      .then(function (resRules: any) {
-        if (resRules.error || !resRules.data) {
-          console.error('Error al cargar reglas de impulsados:', resRules.error);
-          return;
-        }
-
-        var reglasFiltradas = resRules.data.filter(function (r: any) {
-          return r.active !== false;
-        });
-
-        var productosImpulsados = reglasFiltradas.map(function (r: any) {
-          return r.suggested_product_name ? r.suggested_product_name.toLowerCase().trim() : '';
-        });
-
-        if (productosImpulsados.length === 0) {
-          actualizarUIContadorVentas(0);
-          return;
-        }
-
-        var sesion = (window as any).sesionActual || {};
-        var query = cliente.from('sales').select('*');
-
-        if (sesion.rol === 'empleado' && sesion.nombre) {
-          query = query.or('vendedor_nombre.eq.' + sesion.nombre + ',staff_id.eq.' + sesion.nombre + ',usuario_id.eq.' + sesion.nombre);
-        }
-
-        query
-          .gte('created_at', rango.inicio)
-          .lte('created_at', rango.fin)
-          .then(function (resSales: any) {
-            if (resSales.error) {
-              console.error('Error al consultar ventas:', resSales.error);
-              return;
-            }
-
-            var totalImpulsadosVendidos = 0;
-            var ventas = resSales.data || [];
+            var totalHoy = 0;
+            var ventas = resVentas.data || [];
 
             ventas.forEach(function (venta: any) {
-              var nombreProductoVendido = (venta.product_name || venta.producto || venta.items || venta.producto_nombre || '').toString().toLowerCase();
+              // Validar si la venta ocurrio estrictamente HOY segun el reloj del dispositivo local
+              if (esHoy(venta.created_at) || esHoy(venta.fecha)) {
+                var descripcion = (venta.product_name || venta.producto || venta.items || venta.producto_nombre || '').toString().toLowerCase();
 
-              var esImpulsado = productosImpulsados.some(function (pImp: string) {
-                return pImp && nombreProductoVendido.includes(pImp);
-              });
-
-              if (esImpulsado) {
-                totalImpulsadosVendidos += Number(venta.quantity || venta.cantidad || venta.unidades || 1);
-              } else if (venta.tipo_venta === 'sugerida' || venta.es_sugerido === true || venta.es_sugerida === true) {
-                totalImpulsadosVendidos += Number(venta.quantity || venta.cantidad || 1);
+                if (reglas.length > 0) {
+                  var impulsado = reglas.some(function (r: string) { return r && descripcion.includes(r); });
+                  if (impulsado) {
+                    totalHoy += Number(venta.quantity || venta.cantidad || venta.unidades || 1);
+                  } else if (venta.tipo_venta === 'sugerida' || venta.es_sugerido === true || venta.es_sugerida === true) {
+                    totalHoy += Number(venta.quantity || venta.cantidad || 1);
+                  }
+                } else {
+                  // Si no hay reglas especificas, conteo de registros
+                  totalHoy += Number(venta.quantity || venta.cantidad || 1);
+                }
               }
             });
 
-            actualizarUIContadorVentas(totalImpulsadosVendidos);
+            forzarActualizacionUI(totalHoy);
           })
           .catch(function (err: any) {
-            console.error('Excepcion al procesar ventas sugeridas:', err);
+            console.warn('Advertencia al consultar ventas recientes:', err);
           });
       })
       .catch(function (err: any) {
-        console.error('Excepcion al consultar upsell_rules:', err);
+        console.warn('Advertencia al consultar upsell_rules:', err);
       });
   }
 
-  // Escuchar inserciones en tiempo real en la tabla sales
-  function activarRealtimeSales() {
-    var cliente = obtenerClienteSupabase();
-    if (!cliente || canalRealtimeVentas) return;
-
-    try {
-      canalRealtimeVentas = cliente
-        .channel('canal-sales-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, function () {
-          sincronizarVentasSugeridas();
-        })
-        .subscribe();
-    } catch (e) {
-      console.warn('Error al suscribir canal realtime de sales:', e);
-    }
+  // Interceptar el clic en el boton superior azul (Actualizar Datos)
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', function (e: any) {
+      if (e.target && e.target.textContent && e.target.textContent.includes('Actualizar Datos')) {
+        // Retardo milimetrico para permitir que la app re-dibuje el HTML antes de inyectar el numero
+        setTimeout(sincronizarVentasAdminSeguro, 300);
+      }
+    });
   }
 
-  // Escucha cambios en tiempo real en la tabla sales para el perfil Administrador
-  function activarRealtimeAdminSales() {
-    var cliente = obtenerClienteSupabase();
-    if (!cliente || canalRealtimeAdminSales) return;
+  // Suscripcion al canal de Supabase y arranque automatico
+  function iniciarAdminGlobal() {
+    setTimeout(sincronizarVentasAdminSeguro, 1200);
 
-    try {
-      canalRealtimeAdminSales = cliente
-        .channel('canal-admin-sales-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, function () {
-          consultarTotalVentasSugeridasAdmin();
-        })
-        .subscribe();
-    } catch (e) {
-      console.warn('Error al suscribir canal realtime admin de sales:', e);
+    var cliente = obtenerSupabase();
+    if (cliente && !canalSyncGlobal) {
+      try {
+        canalSyncGlobal = cliente
+          .channel('admin-force-sales-sync')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, function () {
+            sincronizarVentasAdminSeguro();
+          })
+          .subscribe();
+      } catch (err) {
+        console.warn('Error al suscribir canal admin-force-sales-sync:', err);
+      }
     }
-  }
-
-  function iniciarModulos() {
-    setTimeout(function () {
-      sincronizarVentasSugeridas();
-      activarRealtimeSales();
-      consultarTotalVentasSugeridasAdmin();
-      activarRealtimeAdminSales();
-    }, 800);
   }
 
   if (typeof window !== 'undefined') {
-    (window as any).sincronizarVentasSugeridas = sincronizarVentasSugeridas;
-    (window as any).activarRealtimeSales = activarRealtimeSales;
-    (window as any).actualizarUIContadorVentas = actualizarUIContadorVentas;
-    (window as any).consultarTotalVentasSugeridasAdmin = consultarTotalVentasSugeridasAdmin;
-    (window as any).activarRealtimeAdminSales = activarRealtimeAdminSales;
-    (window as any).actualizarTarjetaAdmin = actualizarTarjetaAdmin;
+    (window as any).obtenerSupabase = obtenerSupabase;
+    (window as any).esHoy = esHoy;
+    (window as any).forzarActualizacionUI = forzarActualizacionUI;
+    (window as any).sincronizarVentasAdminSeguro = sincronizarVentasAdminSeguro;
+    (window as any).sincronizarVentasSugeridas = sincronizarVentasAdminSeguro;
+    (window as any).iniciarAdminGlobal = iniciarAdminGlobal;
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', iniciarModulos);
+      document.addEventListener('DOMContentLoaded', iniciarAdminGlobal);
     } else {
-      iniciarModulos();
+      iniciarAdminGlobal();
     }
   }
 })();
