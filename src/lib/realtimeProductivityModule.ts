@@ -3,7 +3,7 @@
 // (Arquitectura Segura y Aislada para Coccole Fit)
 // ==========================================
 
-import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredeterminadasAutonomas, getLocalDateString } from './supabaseClient';
+import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredeterminadasAutonomas, getLocalDateString, fetchDailyTasksFromSupabase } from './supabaseClient';
 
 (function () {
   'use strict';
@@ -433,6 +433,14 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
 
   // Exponer API publica en window
   if (typeof window !== 'undefined') {
+    (window as any).obtenerSupabase = () => (window as any).supabase || getSupabaseClient();
+    (window as any).obtenerFechaHoyISO = getLocalDateString;
+    (window as any).verificarYGenerarTareasAuto = verificarYGenerarTareasDiarias;
+    (window as any).verificarYGenerarTareasDiarias = verificarYGenerarTareasDiarias;
+    (window as any).cargarTareasDiarias = () => {
+      const hoy = getLocalDateString();
+      fetchDailyTasksFromSupabase(hoy);
+    };
     (window as any).cerrarSesion = cerrarSesion;
     (window as any).inicializarSesionProgresoEmpleadoSeguro = inicializarSesionProgresoEmpleadoSeguro;
     (window as any).inicializarSesionProgresoEmpleado = inicializarSesionProgresoEmpleadoSeguro;
