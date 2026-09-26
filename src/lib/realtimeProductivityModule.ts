@@ -411,18 +411,20 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
     }).length;
     const porcentaje = total > 0 ? Math.round((completadas / total) * 100) : 0;
 
-    // Actualizar el botón del tab: "Mis Tareas (X/Y)" y textos de resumen
-    const textos = document.querySelectorAll('button, p, span, div');
-    textos.forEach(function (el) {
-      if (el.textContent && (el.textContent.includes('Mis Tareas') || el.textContent.includes('Checklist de Tareas'))) {
-        if (el.children.length <= 1) {
-          el.textContent = 'Mis Tareas (' + completadas + '/' + total + ')';
+    // Actualizar el botón del tab: "Mis Tareas (X/Y)" y textos de resumen sin destruir contenedores React
+    const tabSpan = document.getElementById('tab-mis-tareas-label');
+    if (tabSpan) {
+      tabSpan.textContent = `Mis Tareas (${completadas}/${total})`;
+    } else {
+      const botones = document.querySelectorAll('button span');
+      botones.forEach(function (el) {
+        if (el.textContent && (el.textContent.includes('Mis Tareas') || el.textContent.includes('Checklist de Tareas'))) {
+          if (el.children.length === 0) {
+            el.textContent = 'Mis Tareas (' + completadas + '/' + total + ')';
+          }
         }
-      }
-      if (el.textContent && el.textContent.includes('0 de 0 tareas completadas hoy')) {
-        el.textContent = completadas + ' de ' + total + ' tareas completadas hoy';
-      }
-    });
+      });
+    }
 
     // Actualizar porcentaje de progreso diario
     const elemProgreso = document.getElementById('label-porcentaje-prod') || document.querySelector('.text-xl.font-bold, .text-blue-600');

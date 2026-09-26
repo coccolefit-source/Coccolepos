@@ -1017,7 +1017,7 @@ export default function EmployeeWorkspace({
               }`}
             >
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Mis Tareas ({misTareas.filter(t => t.estado === 'Completada').length}/{misTareas.length})</span>
+              <span id="tab-mis-tareas-label">Mis Tareas ({misTareas.filter(t => t.estado === 'Completada').length}/{misTareas.length})</span>
             </button>
 
             <button
