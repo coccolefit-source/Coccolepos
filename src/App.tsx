@@ -50,7 +50,8 @@ import {
   guardarProgresoEnSupabase,
   getSupabaseClient,
   updateTaskOrdersInSupabase,
-  getLocalDateString
+  getLocalDateString,
+  deleteAllDailyTasksFromSupabase
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -529,7 +530,7 @@ export default function App() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [activeUserRole, state.usuarios]);
+  }, [activeUserRole]);
 
   // Agregar una notificación al feed
   const pushNotification = (text: string, type: 'success' | 'alert' | 'info' = 'info') => {
@@ -766,6 +767,34 @@ export default function App() {
     } catch (err: any) {
       console.error('Error in handleDeleteTarea:', err);
       alert('Error inesperado al borrar la tarea en la nube: ' + (err?.message || err));
+    }
+  };
+
+  const handleDeleteAllTareas = async (fecha?: string) => {
+    const targetFecha = getLocalDateString(fecha);
+    if (!isSupabaseConfigured()) {
+      setState(prev => ({
+        ...prev,
+        tareas: prev.tareas.filter(t => t.fecha && getLocalDateString(t.fecha) !== targetFecha)
+      }));
+      pushNotification(`Todas las tareas de la fecha ${targetFecha} han sido eliminadas (Local)`, 'alert');
+      return;
+    }
+
+    try {
+      const ok = await deleteAllDailyTasksFromSupabase(targetFecha);
+      if (ok) {
+        setState(prev => ({
+          ...prev,
+          tareas: prev.tareas.filter(t => t.fecha && getLocalDateString(t.fecha) !== targetFecha)
+        }));
+        pushNotification(`Todas las tareas del ${targetFecha} fueron eliminadas en Supabase.`, 'alert');
+      } else {
+        throw new Error('No se pudo completar el borrado en Supabase.');
+      }
+    } catch (err: any) {
+      console.error('Error in handleDeleteAllTareas:', err);
+      throw err;
     }
   };
 
@@ -2279,6 +2308,7 @@ export default function App() {
                 onAddTareasBulk={handleAddTareasBulk}
                 onEditTarea={handleEditTarea}
                 onDeleteTarea={handleDeleteTarea}
+                onDeleteAllTareas={handleDeleteAllTareas}
                 onUpdateTaskOrders={handleUpdateTaskOrders}
                 onAddProducto={handleAddProducto}
                 onEditProducto={handleEditProducto}

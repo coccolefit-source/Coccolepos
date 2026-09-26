@@ -1564,7 +1564,7 @@ export async function generarLoteTareasPredeterminadasAutonomas(client: any, fec
   }
 }
 
-export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea[] | null> {
+export async function fetchDailyTasksFromSupabase(fecha?: string, autoGenerateIfEmpty: boolean = false): Promise<Tarea[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
 
@@ -1581,8 +1581,8 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
       return null;
     }
     
-    // Si la consulta devuelve 0 registros para la fecha objetivo, generar e insertar autónomamente el lote de 24 tareas
-    if (!data || data.length === 0) {
+    // Si la consulta devuelve 0 registros y se solicitó autogeneración explícita
+    if ((!data || data.length === 0) && autoGenerateIfEmpty) {
       console.log(`[Supabase Tasks] 0 tareas encontradas para fecha ${targetFecha}. Generando autónomamente el lote de 24 tareas...`);
       const tareasNuevas = await generarLoteTareasPredeterminadasAutonomas(client, targetFecha);
       if (tareasNuevas && tareasNuevas.length > 0) {
@@ -1825,6 +1825,36 @@ export async function deleteDailyTaskFromSupabase(id: string): Promise<boolean> 
     return true;
   } catch (err) {
     console.error('Exception in deleteDailyTaskFromSupabase:', err);
+    return false;
+  }
+}
+
+export async function deleteAllDailyTasksFromSupabase(fecha?: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const targetFecha = getLocalDateString(fecha);
+    if (targetFecha) {
+      const { error: err1 } = await client
+        .from('daily_tasks')
+        .delete()
+        .or(`date.eq.${targetFecha},fecha.eq.${targetFecha}`);
+      if (err1) {
+        await client.from('daily_tasks').delete().eq('fecha', targetFecha);
+      }
+      try {
+        await client.from('task_progress').delete().eq('fecha', targetFecha);
+      } catch (e) {}
+    } else {
+      await client.from('daily_tasks').delete().neq('id', '___non_existent___');
+      try {
+        await client.from('task_progress').delete().neq('id', '___non_existent___');
+      } catch (e) {}
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in deleteAllDailyTasksFromSupabase:', err);
     return false;
   }
 }

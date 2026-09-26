@@ -8,7 +8,7 @@ import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaTy
 
 import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase } from '../lib/supabaseClient';
+import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
@@ -38,6 +38,7 @@ export interface AdminDashboardProps {
 
   onEditTarea: (tarea: Tarea) => void;
   onDeleteTarea: (id: string) => void;
+  onDeleteAllTareas?: (fecha?: string) => Promise<boolean | void> | void;
   onAddProducto: (producto: Omit<ProductoPromocion, 'id'>) => void;
   onEditProducto?: (producto: ProductoPromocion) => void;
   onDeleteProducto?: (id: string) => void;
@@ -91,6 +92,7 @@ export default function AdminDashboard({
   onUpdateTaskOrders,
   onEditTarea,
   onDeleteTarea,
+  onDeleteAllTareas,
   onAddProducto,
   onEditProducto,
   onDeleteProducto,
@@ -985,6 +987,41 @@ export default function AdminDashboard({
     }
   };
 
+  const [eliminandoTareas, setEliminandoTareas] = useState(false);
+
+  const handleBorrarTodasLasTareas = async () => {
+    const tareasTarget = (tareasAdminFecha !== null ? tareasAdminFecha : tareas).filter(t => 
+      !t.fecha || getLocalDateString(t.fecha) === fechaFiltroBitacora
+    );
+
+    const cantidad = tareasTarget.length;
+    const confirmacion = window.confirm(
+      cantidad > 0
+        ? `¿Estás seguro de que deseas ELIMINAR TODAS las tareas (${cantidad} tareas) correspondientes a la fecha ${fechaFiltroBitacora}?\n\nEsta acción borrará los registros en Supabase de forma permanente.`
+        : `¿Deseas vaciar y eliminar cualquier tarea registrada para la fecha ${fechaFiltroBitacora}?`
+    );
+
+    if (!confirmacion) return;
+
+    setEliminandoTareas(true);
+    try {
+      if (onDeleteAllTareas) {
+        await onDeleteAllTareas(fechaFiltroBitacora);
+      } else {
+        await deleteAllDailyTasksFromSupabase(fechaFiltroBitacora);
+      }
+
+      setTareasAdminFecha([]);
+      alert(`Todas las tareas de la fecha ${fechaFiltroBitacora} han sido eliminadas correctamente.`);
+      await cargarTareasAdminPorFecha(fechaFiltroBitacora);
+    } catch (err: any) {
+      console.error("Error al borrar todas las tareas:", err);
+      alert("Error al intentar eliminar las tareas: " + (err?.message || err));
+    } finally {
+      setEliminandoTareas(false);
+    }
+  };
+
   const handleTareaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!tareaTitulo.trim()) return;
@@ -1778,14 +1815,28 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {cargandoTareasBitacora && (
                   <span className="text-[10px] text-blue-600 font-bold animate-pulse">Sincronizando...</span>
                 )}
+                {eliminandoTareas && (
+                  <span className="text-[10px] text-rose-600 font-bold animate-pulse">Borrando...</span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleBorrarTodasLasTareas}
+                  disabled={eliminandoTareas || cargandoTareasBitacora}
+                  title={`Eliminar todas las tareas del día ${fechaFiltroBitacora}`}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  Borrar Todas ({fechaFiltroBitacora})
+                </button>
                 <button
                   type="button"
                   onClick={handleGenerarAsignacionPredeterminada}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+                  disabled={eliminandoTareas || cargandoTareasBitacora}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   Generar 24 Tareas ({fechaFiltroBitacora})
