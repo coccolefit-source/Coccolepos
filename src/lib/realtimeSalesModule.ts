@@ -143,63 +143,67 @@ import { getSupabaseClient, getLocalDateString } from './supabaseClient';
   // Interceptar clic en botón "+1" de Venta Sugerida
   if (typeof document !== 'undefined') {
     document.addEventListener('click', function (e: any) {
-      var elemento = e.target;
-      if (!elemento) return;
-      var boton = (elemento.closest && (elemento.closest('button') || elemento.closest('.bg-blue-500'))) || elemento;
+      try {
+        var elemento = e.target;
+        if (!elemento) return;
+        var boton = (elemento.closest && (elemento.closest('button') || elemento.closest('.bg-blue-500'))) || elemento;
 
-      var esBotonSugerida = (boton && boton.textContent && boton.textContent.trim() === '+1') ||
-                            (elemento && elemento.textContent && elemento.textContent.trim() === '+1');
+        var esBotonSugerida = (boton && boton.textContent && boton.textContent.trim() === '+1') ||
+                              (elemento && elemento.textContent && elemento.textContent.trim() === '+1');
 
-      if (esBotonSugerida) {
-        var contenedor = (boton.closest && (boton.closest('div.border, div.bg-white') || boton.parentElement?.parentElement)) || boton.parentElement;
-        var nombreProducto = 'Producto Sugerido Desconocido';
+        if (esBotonSugerida) {
+          var contenedor = (boton.closest && (boton.closest('div.border, div.bg-white') || boton.parentElement?.parentElement)) || boton.parentElement;
+          var nombreProducto = 'Producto Sugerido Desconocido';
 
-        if (contenedor) {
-          var textos = contenedor.querySelectorAll('p, span, h2, h3, h4, div');
-          for (var i = 0; i < textos.length; i++) {
-            var txt = textos[i].textContent ? textos[i].textContent.trim() : '';
-            if (txt && txt.length > 2 && !txt.includes('+10 PTS') && !txt.includes('+1') && !txt.includes('/15') && !txt.includes('UNIDAD') && !txt.includes('Cruzada') && !txt.includes('Cross-selling')) {
-              nombreProducto = txt;
-              break;
+          if (contenedor) {
+            var textos = contenedor.querySelectorAll('p, span, h2, h3, h4, div');
+            for (var i = 0; i < textos.length; i++) {
+              var txt = textos[i].textContent ? textos[i].textContent.trim() : '';
+              if (txt && txt.length > 2 && !txt.includes('+10 PTS') && !txt.includes('+1') && !txt.includes('/15') && !txt.includes('UNIDAD') && !txt.includes('Cruzada') && !txt.includes('Cross-selling')) {
+                nombreProducto = txt;
+                break;
+              }
             }
           }
-        }
 
-        var cliente = obtenerCliente();
-        if (cliente) {
-          cliente.from('sales').insert([{
-            product_name: '[SUGERIDA] ' + nombreProducto,
-            quantity: 1,
-            created_at: new Date().toISOString(),
-            date: getLocalDateString(),
-            fecha: getLocalDateString(),
-            tipo_venta: 'sugerida'
-          }]).then(function (res: any) {
-            if (!res.error) {
-              sincronizarConDebounce();
-            }
-          }).catch(function (err: any) {
-            console.warn('Advertencia al registrar venta sugerida:', err);
-          });
+          var cliente = obtenerCliente();
+          if (cliente) {
+            cliente.from('sales').insert([{
+              product_name: '[SUGERIDA] ' + nombreProducto,
+              quantity: 1,
+              created_at: new Date().toISOString(),
+              date: getLocalDateString(),
+              fecha: getLocalDateString(),
+              tipo_venta: 'sugerida'
+            }]).then(function (res: any) {
+              if (!res.error) {
+                sincronizarConDebounce();
+              }
+            }).catch(function (err: any) {
+              console.warn('Advertencia al registrar venta sugerida:', err);
+            });
+          }
         }
+      } catch (error) {
+        console.error("Error capturado en módulo de ventas sugeridas:", error);
       }
     });
   }
 
   // Inicialización y Suscripción Realtime
   function iniciar() {
-    setTimeout(ejecutarSincronizacionLigera, 500);
+    try {
+      setTimeout(ejecutarSincronizacionLigera, 500);
 
-    var cliente = obtenerCliente();
-    if (cliente && !canalRealtimeVentas) {
-      try {
+      var cliente = obtenerCliente();
+      if (cliente && !canalRealtimeVentas) {
         canalRealtimeVentas = cliente
           .channel('canal-optimizado-sales')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, sincronizarConDebounce)
           .subscribe();
-      } catch (e) {
-        console.warn('Error al suscribir canal Realtime de ventas:', e);
       }
+    } catch (e) {
+      console.warn('Error capturado al iniciar canal Realtime de ventas:', e);
     }
   }
 
@@ -213,9 +217,19 @@ import { getSupabaseClient, getLocalDateString } from './supabaseClient';
     (window as any).sincronizarConDebounce = sincronizarConDebounce;
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', iniciar);
+      document.addEventListener('DOMContentLoaded', function () {
+        try {
+          iniciar();
+        } catch (error) {
+          console.error("Error crítico capturado para evitar pantalla en blanco en ventas:", error);
+        }
+      });
     } else {
-      iniciar();
+      try {
+        iniciar();
+      } catch (error) {
+        console.error("Error crítico capturado para evitar pantalla en blanco en ventas:", error);
+      }
     }
   }
 })();

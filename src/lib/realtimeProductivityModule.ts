@@ -530,32 +530,46 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
     // Escuchador global para cualquier boton o enlace de cierre de sesion o actualizacion de datos
     if (typeof document !== 'undefined') {
       document.addEventListener('click', function (evento: any) {
-        const target = evento.target;
-        const elemento = target?.closest ? (target.closest('button, a, div') || target) : target;
+        try {
+          const target = evento.target;
+          const elemento = target?.closest ? (target.closest('button, a, div') || target) : target;
 
-        if (
-          elemento &&
-          (
-            elemento.textContent?.trim().toLowerCase().includes('cerrar sesión') ||
-            elemento.textContent?.trim().toLowerCase().includes('cerrar sesion') ||
-            elemento.id === 'btn-cerrar-sesion' ||
-            elemento.id === 'logout-btn'
-          )
-        ) {
-          evento.preventDefault();
-          cerrarSesion();
-        }
+          if (
+            elemento &&
+            (
+              elemento.textContent?.trim().toLowerCase().includes('cerrar sesión') ||
+              elemento.textContent?.trim().toLowerCase().includes('cerrar sesion') ||
+              elemento.id === 'btn-cerrar-sesion' ||
+              elemento.id === 'logout-btn'
+            )
+          ) {
+            evento.preventDefault();
+            cerrarSesion();
+          }
 
-        if (elemento && elemento.textContent && elemento.textContent.includes('Actualizar Datos')) {
-          setTimeout(cargarYRenderizarTareasGlobal, 300);
+          if (elemento && elemento.textContent && elemento.textContent.includes('Actualizar Datos')) {
+            setTimeout(cargarYRenderizarTareasGlobal, 300);
+          }
+        } catch (error) {
+          console.error("Error capturado en listener de productividad:", error);
         }
       });
     }
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', iniciarModuloProductividadTiempoReal);
+      document.addEventListener('DOMContentLoaded', function () {
+        try {
+          iniciarModuloProductividadTiempoReal();
+        } catch (error) {
+          console.error("Error crítico capturado para evitar pantalla en blanco en tareas/productividad:", error);
+        }
+      });
     } else {
-      iniciarModuloProductividadTiempoReal();
+      try {
+        iniciarModuloProductividadTiempoReal();
+      } catch (error) {
+        console.error("Error crítico capturado para evitar pantalla en blanco en tareas/productividad:", error);
+      }
     }
   }
 })();
