@@ -1447,55 +1447,113 @@ export const DEFAULT_TASKS_24_TEMPLATES = [
   }
 ];
 
+/**
+ * Retorna la fecha local en formato YYYY-MM-DD sin desfases por zona horaria UTC.
+ */
+export function getLocalDateString(dateInput?: Date | string | null): string {
+  if (!dateInput) {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const d = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
+    if (!isNaN(d.getTime())) {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    return trimmed;
+  }
+  const yyyy = dateInput.getFullYear();
+  const mm = String(dateInput.getMonth() + 1).padStart(2, '0');
+  const dd = String(dateInput.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export async function generarLoteTareasPredeterminadasAutonomas(client: any, fechaTarget: string): Promise<Tarea[]> {
   try {
-    let asignadoPorDefecto = 'usr-shelsy';
-    const { data: usersData } = await client.from('profiles').select('id, role').eq('role', 'empleado').limit(1);
-    if (usersData && usersData.length > 0 && usersData[0].id) {
-      asignadoPorDefecto = usersData[0].id;
+    const fechaLimpia = getLocalDateString(fechaTarget);
+    let empleadosList: { id: string; nombre: string }[] = [];
+    try {
+      const { data: usersData } = await client
+        .from('profiles')
+        .select('id, name, nombre, role, rol')
+        .or('role.eq.empleado,rol.eq.empleado');
+        
+      if (usersData && usersData.length > 0) {
+        empleadosList = usersData.map((u: any) => ({
+          id: u.id,
+          nombre: u.nombre || u.name || 'Empleado'
+        }));
+      }
+    } catch (e) {
+      console.warn('No se pudieron consultar perfiles para asignación autónoma:', e);
+    }
+
+    if (empleadosList.length === 0) {
+      empleadosList = [{ id: 'usr-shelsy', nombre: 'Shelsy' }];
     }
 
     const tareasGeneradas: Tarea[] = [];
 
-    for (let i = 0; i < DEFAULT_TASKS_24_TEMPLATES.length; i++) {
-      const template = DEFAULT_TASKS_24_TEMPLATES[i];
-      const payload = {
-        title: template.titulo,
-        titulo: template.titulo,
-        description: template.descripcion,
-        descripcion: template.descripcion,
-        area: template.area,
-        date: fechaTarget,
-        fecha: fechaTarget,
-        status: 'Pendiente',
-        estado: 'Pendiente',
-        assigned_to: asignadoPorDefecto,
-        asignado_a: asignadoPorDefecto,
-        requires_photo: template.requiere_foto,
-        requiere_foto: template.requiere_foto,
-        tiempo_estimado_min: template.tiempo_estimado_min,
-        type: template.tipo_tarea,
-        tipo_tarea: template.tipo_tarea,
-        orden: i + 1
-      };
-
-      const { success } = await insertWithResilientColumns(client, 'daily_tasks', payload);
-      if (success) {
-        tareasGeneradas.push({
-          id: `task-auto-${Date.now()}-${i}`,
+    for (const emp of empleadosList) {
+      for (let i = 0; i < DEFAULT_TASKS_24_TEMPLATES.length; i++) {
+        const template = DEFAULT_TASKS_24_TEMPLATES[i];
+        const uniqueId = `tsk-${fechaLimpia}-${emp.id.replace(/[^a-zA-Z0-9]/g, '')}-${i + 1}-${Math.random().toString(36).substring(2, 7)}`;
+        
+        const payload = {
+          id: uniqueId,
+          title: template.titulo,
           titulo: template.titulo,
+          task_name: template.titulo,
+          description: template.descripcion,
           descripcion: template.descripcion,
-          tipo_tarea: template.tipo_tarea as any,
-          area: template.area as any,
-          asignado_a: asignadoPorDefecto,
+          area: template.area,
+          date: fechaLimpia,
+          fecha: fechaLimpia,
+          status: 'Pendiente',
           estado: 'Pendiente',
-          tiempo_estimado_min: template.tiempo_estimado_min,
-          hora_inicio: '',
-          hora_fin: '',
+          completed: false,
+          assigned_to: emp.id,
+          asignado_a: emp.id,
+          staff_id: emp.id,
+          staff_name: emp.nombre,
+          requires_photo: template.requiere_foto,
           requiere_foto: template.requiere_foto,
-          fecha: fechaTarget,
-          orden: i + 1
-        });
+          tiempo_estimado_min: template.tiempo_estimado_min,
+          type: template.tipo_tarea,
+          tipo_tarea: template.tipo_tarea,
+          orden: i + 1,
+          order_index: i + 1,
+          created_at: new Date().toISOString()
+        };
+
+        const { success } = await insertWithResilientColumns(client, 'daily_tasks', payload);
+        if (success) {
+          tareasGeneradas.push({
+            id: uniqueId,
+            titulo: template.titulo,
+            descripcion: template.descripcion,
+            tipo_tarea: template.tipo_tarea as any,
+            area: template.area as any,
+            asignado_a: emp.id,
+            estado: 'Pendiente',
+            tiempo_estimado_min: template.tiempo_estimado_min,
+            hora_inicio: '',
+            hora_fin: '',
+            requiere_foto: template.requiere_foto,
+            fecha: fechaLimpia,
+            orden: i + 1
+          });
+        }
       }
     }
 
@@ -1511,8 +1569,7 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
   if (!client) return null;
 
   try {
-    const hoyStr = new Date().toISOString().split('T')[0];
-    const targetFecha = fecha || hoyStr;
+    const targetFecha = getLocalDateString(fecha);
 
     let query = client.from('daily_tasks').select('*');
     if (targetFecha) {
@@ -1524,16 +1581,16 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
       return null;
     }
     
-    // Si no hay tareas para la fecha actual, generar autónomamente el lote de 24 tareas
-    if ((!data || data.length === 0) && targetFecha === hoyStr) {
-      console.log('Generando lote autónomo de 24 tareas para la fecha actual:', targetFecha);
+    // Si la consulta devuelve 0 registros para la fecha objetivo, generar e insertar autónomamente el lote de 24 tareas
+    if (!data || data.length === 0) {
+      console.log(`[Supabase Tasks] 0 tareas encontradas para fecha ${targetFecha}. Generando autónomamente el lote de 24 tareas...`);
       const tareasNuevas = await generarLoteTareasPredeterminadasAutonomas(client, targetFecha);
-      if (tareasNuevas.length > 0) {
+      if (tareasNuevas && tareasNuevas.length > 0) {
         return tareasNuevas;
       }
     }
 
-    if (!data) return null;
+    if (!data || data.length === 0) return [];
 
     return data.map((t: any) => {
       let rawEstado = t.estado || t.status || (t.completed ? 'Completada' : 'Pendiente');
@@ -1552,12 +1609,12 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
         hora_inicio: t.hora_inicio || '',
         hora_fin: t.hora_fin || '',
         requiere_foto: Boolean(t.requires_photo ?? t.requiere_foto),
-        fecha: t.date || t.fecha || new Date().toISOString().split('T')[0],
+        fecha: t.date || t.fecha || targetFecha,
         foto_url: t.photo_url || t.foto_url,
         nota_evidencia: t.evidence_note || t.nota_evidencia,
         started_at: t.started_at || undefined,
         completed_at: t.completed_at || undefined,
-        orden: Number(t.orden) || 0
+        orden: Number(t.orden ?? t.order_index) || 0
       };
     });
   } catch (err) {

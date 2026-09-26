@@ -49,7 +49,8 @@ import {
   fetchSchedulesForEmployeeFromSupabase,
   guardarProgresoEnSupabase,
   getSupabaseClient,
-  updateTaskOrdersInSupabase
+  updateTaskOrdersInSupabase,
+  getLocalDateString
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -227,7 +228,7 @@ export default function App() {
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
       const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds] = await Promise.all([
-        fetchDailyTasksFromSupabase(new Date().toISOString().split('T')[0]),
+        fetchDailyTasksFromSupabase(getLocalDateString()),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
         fetchProfilesFromSupabase(),
@@ -444,7 +445,7 @@ export default function App() {
     
     async function loadFreshTasks() {
       try {
-        const supaTasks = await fetchDailyTasksFromSupabase(new Date().toISOString().split('T')[0]);
+        const supaTasks = await fetchDailyTasksFromSupabase(getLocalDateString());
         if (supaTasks) {
           setState(prev => ({
             ...prev,
@@ -607,7 +608,7 @@ export default function App() {
     const tarea: Tarea = {
       ...newTarea,
       id: TareaId,
-      fecha: newTarea.fecha || new Date().toISOString().split('T')[0]
+      fecha: newTarea.fecha || getLocalDateString()
     };
 
     if (!isSupabaseConfigured()) {
@@ -653,7 +654,7 @@ export default function App() {
       return {
         ...t,
         id: TareaId,
-        fecha: t.fecha || new Date().toISOString().split('T')[0]
+        fecha: t.fecha || getLocalDateString()
       };
     });
 

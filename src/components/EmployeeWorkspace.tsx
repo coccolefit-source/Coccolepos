@@ -9,7 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { calculateLeaderboard } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase } from '../lib/supabaseClient';
+import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase, getLocalDateString } from '../lib/supabaseClient';
 import { CheckCircle2, Clock, AlertTriangle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera, GripVertical } from 'lucide-react';
 
 interface EmployeeWorkspaceProps {
@@ -111,7 +111,7 @@ export default function EmployeeWorkspace({
     }
   };
 
-  const hoyFormatted = new Date().toISOString().split('T')[0];
+  const hoyFormatted = getLocalDateString();
   const [fechaFiltroTareas, setFechaFiltroTareas] = useState<string>(hoyFormatted);
   const [tareasFechaSupabase, setTareasFechaSupabase] = useState<Tarea[] | null>(null);
   const [cargandoTareasFecha, setCargandoTareasFecha] = useState<boolean>(false);
@@ -283,12 +283,15 @@ export default function EmployeeWorkspace({
   }, []);
 
   // Filtrar tareas asignadas a este empleado para la fecha seleccionada
-  const tareasFuente = (tareasFechaSupabase && (fechaFiltroTareas !== hoyFormatted || tareasFechaSupabase.length > 0))
+  const tareasFuente = tareasFechaSupabase !== null
     ? tareasFechaSupabase
     : tareas;
 
   const misTareas = tareasFuente
-    .filter(t => (t.asignado_a === empleado.id || t.asignado_a === empleado.nombre || !t.asignado_a) && (!t.fecha || t.fecha === fechaFiltroTareas || t.fecha === new Date().toISOString().split('T')[0]))
+    .filter(t => 
+      (t.asignado_a === empleado.id || t.asignado_a === empleado.nombre || !t.asignado_a || t.asignado_a === 'ALL') &&
+      (!t.fecha || getLocalDateString(t.fecha) === fechaFiltroTareas)
+    )
     .sort((a, b) => (a.orden || 0) - (b.orden || 0));
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);

@@ -3,7 +3,7 @@
 // (Arquitectura Segura y Aislada para Coccole Fit)
 // ==========================================
 
-import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredeterminadasAutonomas } from './supabaseClient';
+import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredeterminadasAutonomas, getLocalDateString } from './supabaseClient';
 
 (function () {
   'use strict';
@@ -26,7 +26,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
       const supabase = (window as any).supabase || getSupabaseClient();
       if (!supabase) return;
 
-      const hoyStr = new Date().toISOString().split('T')[0];
+      const hoyStr = getLocalDateString();
       const { data, error } = await supabase
         .from('daily_tasks')
         .select('id')
@@ -147,7 +147,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
             }
           });
 
-          const hoy = new Date().toISOString().split('T')[0];
+          const hoy = getLocalDateString();
           const inputFecha = document.getElementById('input-fecha-progreso') as HTMLInputElement;
           if (inputFecha) inputFecha.value = hoy;
 
@@ -179,7 +179,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
         vistaDiv.style.display = 'none';
         vistaDiv.className = 'mt-4 space-y-4 max-w-4xl mx-auto';
 
-        const hoy = new Date().toISOString().split('T')[0];
+        const hoy = getLocalDateString();
 
         vistaDiv.innerHTML = 
           '<div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">' +
@@ -280,7 +280,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
       if (existing) {
         existing.style.display = 'block';
         const input = document.getElementById('admin-input-fecha') as HTMLInputElement;
-        cargarProductividadAdminPorFecha(input?.value || new Date().toISOString().split('T')[0]);
+        cargarProductividadAdminPorFecha(input?.value || getLocalDateString());
         return;
       }
 
@@ -288,7 +288,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
       adminContainer.id = 'admin-productividad-panel';
       adminContainer.className = 'bg-white p-6 rounded-2xl shadow-sm border border-gray-100 my-6 max-w-5xl mx-auto';
 
-      const hoy = new Date().toISOString().split('T')[0];
+      const hoy = getLocalDateString();
 
       adminContainer.innerHTML = 
         '<div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 border-b border-gray-100 pb-4">' +
@@ -340,7 +340,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
         .on('postgres_changes', { event: '*', schema: 'public', table: 'task_progress' }, () => {
           const inputEmpleado = document.getElementById('input-fecha-progreso') as HTMLInputElement;
           const inputAdmin = document.getElementById('admin-input-fecha') as HTMLInputElement;
-          const fechaConsulta = (inputEmpleado && inputEmpleado.value) || (inputAdmin && inputAdmin.value) || new Date().toISOString().split('T')[0];
+          const fechaConsulta = (inputEmpleado && inputEmpleado.value) || (inputAdmin && inputAdmin.value) || getLocalDateString();
 
           const vistaEmpleado = document.getElementById('vista-progreso-empleado');
           if (vistaEmpleado && vistaEmpleado.style.display !== 'none') {

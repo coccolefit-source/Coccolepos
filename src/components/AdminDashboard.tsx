@@ -8,7 +8,7 @@ import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaTy
 
 import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient } from '../lib/supabaseClient';
+import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase } from '../lib/supabaseClient';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
@@ -281,6 +281,29 @@ export default function AdminDashboard({
   const [tareaRequiereFoto, setTareaRequiereFoto] = useState(false);
   const [asignarATodos, setAsignarATodos] = useState(false);
   const [editingTareaId, setEditingTareaId] = useState<string | null>(null);
+
+  // Bitácora de Tareas Diarias - Selección de Fecha y Sincronización Autónoma
+  const [fechaFiltroBitacora, setFechaFiltroBitacora] = useState<string>(getLocalDateString());
+  const [tareasAdminFecha, setTareasAdminFecha] = useState<Tarea[] | null>(null);
+  const [cargandoTareasBitacora, setCargandoTareasBitacora] = useState<boolean>(false);
+
+  const cargarTareasAdminPorFecha = async (fechaTarget: string) => {
+    try {
+      setCargandoTareasBitacora(true);
+      const res = await fetchDailyTasksFromSupabase(fechaTarget);
+      if (res) {
+        setTareasAdminFecha(res);
+      }
+    } catch (err) {
+      console.error('Error al cargar tareas de bitácora admin:', err);
+    } finally {
+      setCargandoTareasBitacora(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarTareasAdminPorFecha(fechaFiltroBitacora);
+  }, [fechaFiltroBitacora]);
 
   // Formulario de Producto Promocion
   const [prodNombre, setProdNombre] = useState('');
@@ -919,18 +942,18 @@ export default function AdminDashboard({
       }
     ];
 
-    if (confirm(`¿Estás seguro que deseas generar y asignar las 24 tareas predeterminadas a cada uno de los colaboradores en orden estricto?`)) {
+    if (confirm(`¿Estás seguro que deseas generar y asignar las 24 tareas predeterminadas para la fecha ${fechaFiltroBitacora} a cada uno de los colaboradores en orden estricto?`)) {
       try {
         const tareasParaCrear: Omit<Tarea, 'id'>[] = [];
         
-        // Recorrer cada empleado y generar sus 24 tareas oficiales en orden estricto
+        // Recorrer cada empleado y generar sus 24 tareas oficiales en orden estricto para la fecha seleccionada
         for (const emp of empleados) {
           defaultTasksTemplates.forEach((template, index) => {
             tareasParaCrear.push({
               titulo: template.titulo,
               descripcion: template.descripcion,
               area: template.area as AreaType,
-              fecha: new Date().toISOString().split('T')[0],
+              fecha: fechaFiltroBitacora,
               estado: 'Pendiente' as const,
               asignado_a: emp.id,
               tiempo_estimado_min: template.tiempo_estimado_min,
@@ -944,14 +967,16 @@ export default function AdminDashboard({
         if (onAddTareasBulk) {
           const ok = await onAddTareasBulk(tareasParaCrear);
           if (ok) {
-            alert("¡Éxito! Las 24 tareas se han generado y asignado a todos los trabajadores en orden!");
+            alert(`¡Éxito! Las 24 tareas se han generado y guardado en Supabase para el ${fechaFiltroBitacora}.`);
+            await cargarTareasAdminPorFecha(fechaFiltroBitacora);
           }
         } else {
           // Fallback sequential
           for (const item of tareasParaCrear) {
             await onAddTarea(item);
           }
-          alert("¡Éxito! Las 24 tareas se han generado y asignado a todos los trabajadores en orden!");
+          alert(`¡Éxito! Las 24 tareas se han generado y guardado en Supabase para el ${fechaFiltroBitacora}.`);
+          await cargarTareasAdminPorFecha(fechaFiltroBitacora);
         }
       } catch (err: any) {
         console.error("Error al autogenerar tareas:", err);
@@ -965,7 +990,7 @@ export default function AdminDashboard({
     if (!tareaTitulo.trim()) return;
 
     if (editingTareaId) {
-      const existing = tareas.find(t => t.id === editingTareaId);
+      const existing = (tareasAdminFecha || tareas).find(t => t.id === editingTareaId);
       if (existing) {
         onEditTarea({
           ...existing,
@@ -984,7 +1009,7 @@ export default function AdminDashboard({
         titulo: tareaTitulo,
         descripcion: tareaDesc,
         area: tareaArea,
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: fechaFiltroBitacora,
         estado: 'Pendiente' as const,
         asignado_a: emp.id,
         tiempo_estimado_min: Number(tareaTiempo),
@@ -993,27 +1018,30 @@ export default function AdminDashboard({
       }));
 
       if (onAddTareasBulk) {
-        onAddTareasBulk(tasksToCreate).then((ok) => {
+        onAddTareasBulk(tasksToCreate).then(async (ok) => {
           if (ok) {
             alert("¡Tareas asignadas a todos los trabajadores correctamente!");
+            await cargarTareasAdminPorFecha(fechaFiltroBitacora);
           }
         });
       } else {
         tasksToCreate.forEach(t => onAddTarea(t));
         alert("¡Tareas asignadas a todos los trabajadores correctamente!");
+        cargarTareasAdminPorFecha(fechaFiltroBitacora);
       }
     } else {
       onAddTarea({
         titulo: tareaTitulo,
         descripcion: tareaDesc,
         area: tareaArea,
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: fechaFiltroBitacora,
         estado: 'Pendiente',
         asignado_a: tareaAsignado,
         tiempo_estimado_min: Number(tareaTiempo),
         requiere_foto: tareaRequiereFoto,
         tipo_tarea: tareaTipo,
       });
+      setTimeout(() => cargarTareasAdminPorFecha(fechaFiltroBitacora), 400);
     }
 
     // Reset
@@ -1714,48 +1742,95 @@ export default function AdminDashboard({
 
           {/* Tabla de tareas del día */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4 border-b border-slate-100 pb-3">
-              <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
-                <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
-                Bitácora de Tareas Diarias
-              </h3>
-              <button
-                type="button"
-                onClick={handleGenerarAsignacionPredeterminada}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Generar 24 Tareas Predeterminadas
-              </button>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 border-b border-slate-100 pb-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5 mr-2">
+                  <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
+                  Bitácora de Tareas Diarias
+                </h3>
+                
+                {/* Selector de Fecha para Bitácora */}
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
+                  <Calendar className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                  <input
+                    type="date"
+                    value={fechaFiltroBitacora}
+                    onChange={(e) => setFechaFiltroBitacora(e.target.value)}
+                    className="bg-white border border-slate-300 text-slate-800 text-[11px] font-bold rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] cursor-pointer"
+                  />
+                  {fechaFiltroBitacora !== getLocalDateString() && (
+                    <button
+                      type="button"
+                      onClick={() => setFechaFiltroBitacora(getLocalDateString())}
+                      className="text-[10px] bg-[#EBF5FB] hover:bg-[#D4E6F1] text-[#4B9CD3] font-bold px-2 py-1 rounded-md transition-all cursor-pointer"
+                    >
+                      Hoy
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => cargarTareasAdminPorFecha(fechaFiltroBitacora)}
+                    title="Recargar tareas desde Supabase"
+                    className="p-1 hover:bg-slate-200 text-slate-500 rounded-md transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${cargandoTareasBitacora ? 'animate-spin text-[#4B9CD3]' : ''}`} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {cargandoTareasBitacora && (
+                  <span className="text-[10px] text-blue-600 font-bold animate-pulse">Sincronizando...</span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleGenerarAsignacionPredeterminada}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Generar 24 Tareas ({fechaFiltroBitacora})
+                </button>
+              </div>
             </div>
 
-            {tareas.length === 0 ? (
-              <div className="text-center py-12 text-slate-400 text-xs">
-                No hay tareas creadas para el día de hoy. Usa el formulario de la izquierda.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-[#E2E8F0] text-[10px] uppercase text-slate-400 font-bold tracking-wider">
-                      <th className="w-8"></th>
-                      <th className="py-2 px-3">Tarea</th>
-                      <th className="py-2 px-3 text-center">Área</th>
-                      <th className="py-2 px-3">Asignado</th>
-                      <th className="py-2 px-3 text-center">Tiempo Est.</th>
-                      <th className="py-2 px-3 text-center">Duración</th>
-                      <th className="py-2 px-3 text-center">Foto</th>
-                      <th className="py-2 px-3 text-center">Estado</th>
-                      <th className="py-2 px-3 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E5EAE4] text-xs">
-                    {[...tareas].sort((a, b) => {
-                      const empA = getEmpleadoNombre(a.asignado_a);
-                      const empB = getEmpleadoNombre(b.asignado_a);
-                      if (empA !== empB) return empA.localeCompare(empB);
-                      return (a.orden || 0) - (b.orden || 0);
-                    }).map(t => (
+            {(() => {
+              const tareasMostrar = (tareasAdminFecha !== null ? tareasAdminFecha : tareas).filter(t => 
+                !t.fecha || getLocalDateString(t.fecha) === fechaFiltroBitacora
+              );
+
+              if (tareasMostrar.length === 0) {
+                return (
+                  <div className="text-center py-12 text-slate-400 text-xs">
+                    {cargandoTareasBitacora 
+                      ? 'Cargando bitácora de Supabase...' 
+                      : `No hay tareas creadas para la fecha ${fechaFiltroBitacora}.`}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#E2E8F0] text-[10px] uppercase text-slate-400 font-bold tracking-wider">
+                        <th className="w-8"></th>
+                        <th className="py-2 px-3">Tarea</th>
+                        <th className="py-2 px-3 text-center">Área</th>
+                        <th className="py-2 px-3">Asignado</th>
+                        <th className="py-2 px-3 text-center">Tiempo Est.</th>
+                        <th className="py-2 px-3 text-center">Duración</th>
+                        <th className="py-2 px-3 text-center">Foto</th>
+                        <th className="py-2 px-3 text-center">Estado</th>
+                        <th className="py-2 px-3 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E5EAE4] text-xs">
+                      {[...tareasMostrar].sort((a, b) => {
+                        const empA = getEmpleadoNombre(a.asignado_a);
+                        const empB = getEmpleadoNombre(b.asignado_a);
+                        if (empA !== empB) return empA.localeCompare(empB);
+                        return (a.orden || 0) - (b.orden || 0);
+                      }).map(t => (
                       <tr 
                         key={t.id} 
                         className={`hover:bg-[#FFFDF6]/50 ${draggedTaskId === t.id ? 'opacity-50' : ''}`}
@@ -1851,8 +1926,9 @@ export default function AdminDashboard({
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
+            );
+          })()}
+        </div>
         </div>
       )}
 

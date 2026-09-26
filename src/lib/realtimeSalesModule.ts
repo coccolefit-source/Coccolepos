@@ -1,17 +1,26 @@
 // ==========================================
-// MODULO UNIFICADO DE VENTAS SUGERIDAS (EMPLEADO & ADMIN)
+// MODULO ULTRA-LIGERO Y DEBOUNCED DE VENTAS SUGERIDAS
+// (Arquitectura Realtime Optimizada para Coccole Fit)
 // ==========================================
 
-import { getSupabaseClient } from './supabaseClient';
+import { getSupabaseClient, getLocalDateString } from './supabaseClient';
 
 (function () {
   'use strict';
 
-  function obtenerSupabase() {
-    if (typeof (window as any).supabase !== 'undefined' && (window as any).supabase) {
-      return (window as any).supabase;
+  var clienteSupabase: any = null;
+  var temporizadorDebounce: any = null;
+  var canalRealtimeVentas: any = null;
+
+  function obtenerCliente() {
+    if (!clienteSupabase) {
+      if (typeof (window as any).supabase !== 'undefined' && (window as any).supabase) {
+        clienteSupabase = (window as any).supabase;
+      } else {
+        clienteSupabase = getSupabaseClient();
+      }
     }
-    return getSupabaseClient();
+    return clienteSupabase;
   }
 
   function esHoy(fechaString: any) {
@@ -22,21 +31,126 @@ import { getSupabaseClient } from './supabaseClient';
     return f.getDate() === h.getDate() && f.getMonth() === h.getMonth() && f.getFullYear() === h.getFullYear();
   }
 
-  // ==========================================
-  // 1. LOGICA DEL EMPLEADO: Interceptar el boton "+1"
-  // ==========================================
+  // Cachear y actualizar selector del número para no recorrer el DOM innecesariamente
+  function actualizarNumeroSugeridas(valor: number) {
+    if (typeof document === 'undefined') return;
+
+    var elementos = document.querySelectorAll('div, p, span, h1, h2, h3, h4, h5, h6');
+    var tarjetaSugeridas: HTMLElement | null = null;
+
+    for (var i = 0; i < elementos.length; i++) {
+      var el = elementos[i];
+      if (el.textContent && el.textContent.trim().toUpperCase() === 'VENTAS SUGERIDAS') {
+        tarjetaSugeridas = (el.closest('div.bg-orange-50, div.rounded-2xl, div.p-6, div.p-4, div.border, div') || el.parentElement?.parentElement) as HTMLElement;
+        break;
+      }
+    }
+
+    if (tarjetaSugeridas) {
+      var elementosHijos = tarjetaSugeridas.querySelectorAll('*');
+      for (var j = 0; j < elementosHijos.length; j++) {
+        var hijo = elementosHijos[j];
+        if (/^\d+$/.test(hijo.textContent ? hijo.textContent.trim() : '') && hijo.children.length === 0) {
+          hijo.textContent = String(valor);
+          break;
+        }
+      }
+    }
+
+    // Actualizar barra de progreso de ventas sugeridas si existe
+    var barraProgreso = document.getElementById('barra-progreso-ventas-sugeridas') || document.querySelector('.barra-ventas-sugeridas');
+    var textoProgreso = document.getElementById('texto-progreso-ventas') || document.querySelector('.texto-ventas-sugeridas');
+
+    if (barraProgreso) {
+      var meta = 15;
+      var porcentaje = Math.min(Math.round((valor / meta) * 100), 100);
+      (barraProgreso as HTMLElement).style.width = porcentaje + '%';
+    }
+
+    if (textoProgreso) {
+      textoProgreso.textContent = valor + ' de 15 logradas';
+    }
+  }
+
+  // Consulta optimizada a Supabase
+  function ejecutarSincronizacionLigera() {
+    var cliente = obtenerCliente();
+    if (!cliente) return;
+
+    var hoyLocal = getLocalDateString();
+    var hoyInicio = new Date();
+    hoyInicio.setHours(0, 0, 0, 0);
+
+    // 1. Obtener reglas activas de upsell
+    cliente
+      .from('upsell_rules')
+      .select('suggested_product_name, active')
+      .then(function (resRules: any) {
+        var catalogoValido: string[] = [];
+        if (resRules.data && resRules.data.length > 0) {
+          catalogoValido = resRules.data
+            .filter(function (r: any) { return r.active !== false; })
+            .map(function (r: any) { return (r.suggested_product_name || '').toLowerCase().trim(); });
+        }
+
+        // 2. Consultar ventas de la jornada
+        cliente
+          .from('sales')
+          .select('quantity, cantidad, product_name, producto, items, producto_nombre, tipo_venta, created_at, date, fecha')
+          .order('created_at', { ascending: false })
+          .limit(1000)
+          .then(function (resSales: any) {
+            if (resSales.error || !resSales.data) return;
+
+            var total = 0;
+            resSales.data.forEach(function (fila: any) {
+              var fStr = fila.created_at || fila.date || fila.fecha;
+              var matchFecha = esHoy(fStr) || (fila.fecha && fila.fecha === hoyLocal) || (fila.date && fila.date === hoyLocal);
+
+              if (matchFecha) {
+                var desc = (fila.product_name || fila.producto || fila.items || fila.producto_nombre || '').toString().toLowerCase();
+                var esImpulsado = desc.includes('[sugerida]') || fila.tipo_venta === 'sugerida' || fila.es_sugerido === true;
+
+                if (!esImpulsado && catalogoValido.length > 0) {
+                  esImpulsado = catalogoValido.some(function (p: string) { return p && desc.includes(p); });
+                } else if (!esImpulsado && catalogoValido.length === 0) {
+                  esImpulsado = desc.includes('[sugerida]') || fila.tipo_venta === 'sugerida';
+                }
+
+                if (esImpulsado) {
+                  total += Number(fila.quantity || fila.cantidad || 1);
+                }
+              }
+            });
+
+            actualizarNumeroSugeridas(total);
+          })
+          .catch(function (err: any) {
+            console.error('Error en sincronización liviana de ventas:', err);
+          });
+      })
+      .catch(function (err: any) {
+        console.error('Error al consultar reglas de venta:', err);
+      });
+  }
+
+  // Debounce: evita sobrecargar peticiones si se registran varios clics consecutivos
+  function sincronizarConDebounce() {
+    clearTimeout(temporizadorDebounce);
+    temporizadorDebounce = setTimeout(ejecutarSincronizacionLigera, 300);
+  }
+
+  // Interceptar clic en botón "+1" de Venta Sugerida
   if (typeof document !== 'undefined') {
     document.addEventListener('click', function (e: any) {
       var elemento = e.target;
       if (!elemento) return;
       var boton = (elemento.closest && (elemento.closest('button') || elemento.closest('.bg-blue-500'))) || elemento;
 
-      // Verificar si se hizo clic exactamente en el boton de sumar venta sugerida
       var esBotonSugerida = (boton && boton.textContent && boton.textContent.trim() === '+1') ||
                             (elemento && elemento.textContent && elemento.textContent.trim() === '+1');
 
       if (esBotonSugerida) {
-        // Ubicar la tarjeta que contiene el producto para extraer el nombre
         var contenedor = (boton.closest && (boton.closest('div.border, div.bg-white') || boton.parentElement?.parentElement)) || boton.parentElement;
         var nombreProducto = 'Producto Sugerido Desconocido';
 
@@ -44,7 +158,6 @@ import { getSupabaseClient } from './supabaseClient';
           var textos = contenedor.querySelectorAll('p, span, h2, h3, h4, div');
           for (var i = 0; i < textos.length; i++) {
             var txt = textos[i].textContent ? textos[i].textContent.trim() : '';
-            // Descartar textos genericos de la tarjeta para capturar solo el nombre real
             if (txt && txt.length > 2 && !txt.includes('+10 PTS') && !txt.includes('+1') && !txt.includes('/15') && !txt.includes('UNIDAD') && !txt.includes('Cruzada') && !txt.includes('Cross-selling')) {
               nombreProducto = txt;
               break;
@@ -52,16 +165,18 @@ import { getSupabaseClient } from './supabaseClient';
           }
         }
 
-        var cliente = obtenerSupabase();
+        var cliente = obtenerCliente();
         if (cliente) {
-          // Enviar el clic a la tabla 'sales' con etiqueta especial
           cliente.from('sales').insert([{
             product_name: '[SUGERIDA] ' + nombreProducto,
             quantity: 1,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            date: getLocalDateString(),
+            fecha: getLocalDateString(),
+            tipo_venta: 'sugerida'
           }]).then(function (res: any) {
             if (!res.error) {
-              console.log('Venta sugerida registrada con exito:', nombreProducto);
+              sincronizarConDebounce();
             }
           }).catch(function (err: any) {
             console.warn('Advertencia al registrar venta sugerida:', err);
@@ -71,137 +186,36 @@ import { getSupabaseClient } from './supabaseClient';
     });
   }
 
-  // ==========================================
-  // 2. LOGICA DEL ADMINISTRADOR: Actualizar el contador UI
-  // ==========================================
-  function forzarActualizacionUI(total: number) {
-    if (typeof document === 'undefined') return;
-    var textos = document.querySelectorAll('p, span, div, h1, h2, h3, h4, h5, h6');
-    var tarjeta: HTMLElement | null = null;
+  // Inicialización y Suscripción Realtime
+  function iniciar() {
+    setTimeout(ejecutarSincronizacionLigera, 500);
 
-    // Ubicar la tarjeta especifica del panel admin
-    for (var i = 0; i < textos.length; i++) {
-      if (textos[i].textContent && textos[i].textContent.trim().toUpperCase() === 'VENTAS SUGERIDAS') {
-        tarjeta = (textos[i].closest('div.bg-orange-50, div.rounded-2xl, div.p-6, div.p-3, div') || textos[i].parentElement?.parentElement) as HTMLElement;
-        break;
-      }
-    }
-
-    // Reemplazar el numero principal
-    if (tarjeta) {
-      var elementosHijos = tarjeta.querySelectorAll('*');
-      for (var j = 0; j < elementosHijos.length; j++) {
-        var hijo = elementosHijos[j];
-        if (/^\d+$/.test(hijo.textContent ? hijo.textContent.trim() : '') && hijo.children.length === 0) {
-          hijo.textContent = String(total);
-          break;
-        }
-      }
-    }
-
-    // Actualizar barra de progreso si existe en la vista del empleado
-    var barraProgreso = document.getElementById('barra-progreso-ventas-sugeridas') || document.querySelector('.barra-ventas-sugeridas');
-    var textoProgreso = document.getElementById('texto-progreso-ventas') || document.querySelector('.texto-ventas-sugeridas');
-
-    if (barraProgreso) {
-      var meta = 15;
-      var porcentaje = Math.min(Math.round((total / meta) * 100), 100);
-      (barraProgreso as HTMLElement).style.width = porcentaje + '%';
-    }
-
-    if (textoProgreso) {
-      textoProgreso.textContent = total + ' de 15 logradas';
-    }
-  }
-
-  function sincronizarPanelAdmin() {
-    var cliente = obtenerSupabase();
-    if (!cliente) return;
-
-    // Obtener transacciones recientes
-    cliente.from('sales').select('created_at, product_name, items, producto, quantity, cantidad, producto_nombre, tipo_venta')
-      .order('created_at', { ascending: false }).limit(1000)
-      .then(function (resVentas: any) {
-        if (resVentas.error) return;
-
-        // Cruzar con los nombres activos en upsell_rules
-        cliente.from('upsell_rules').select('suggested_product_name, active').then(function (resReglas: any) {
-          var catalogoValido: string[] = [];
-          if (resReglas.data && resReglas.data.length > 0) {
-            catalogoValido = resReglas.data
-              .filter(function (r: any) { return r.active !== false; })
-              .map(function (r: any) { return (r.suggested_product_name || '').toLowerCase().trim(); });
-          }
-
-          var totalHoy = 0;
-          var ventas = resVentas.data || [];
-
-          ventas.forEach(function (venta: any) {
-            if (esHoy(venta.created_at) || esHoy(venta.fecha)) {
-              var desc = (venta.product_name || venta.producto || venta.items || venta.producto_nombre || '').toString().toLowerCase();
-
-              // Sumar si tiene la marca de script OR si coincide con el catalogo
-              var esImpulsado = desc.includes('[sugerida]') || venta.tipo_venta === 'sugerida' || venta.es_sugerido === true;
-              if (!esImpulsado && catalogoValido.length > 0) {
-                esImpulsado = catalogoValido.some(function (p: string) { return p && desc.includes(p); });
-              } else if (!esImpulsado && catalogoValido.length === 0) {
-                // Si no hay reglas configuradas, contar registros
-                esImpulsado = true;
-              }
-
-              if (esImpulsado) {
-                totalHoy += Number(venta.quantity || venta.cantidad || 1);
-              }
-            }
-          });
-          forzarActualizacionUI(totalHoy);
-        });
-      }).catch(function (err: any) {
-        console.warn('Advertencia al sincronizar panel admin:', err);
-      });
-  }
-
-  // ==========================================
-  // 3. INICIO Y SUSCRIPCION EN TIEMPO REAL
-  // ==========================================
-  var canalVentas: any = null;
-  function iniciarSistemaUnificado() {
-    setTimeout(sincronizarPanelAdmin, 1200);
-
-    var cliente = obtenerSupabase();
-    if (cliente && !canalVentas) {
+    var cliente = obtenerCliente();
+    if (cliente && !canalRealtimeVentas) {
       try {
-        canalVentas = cliente.channel('sync-ventas-global')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, function () {
-            sincronizarPanelAdmin();
-          }).subscribe();
-      } catch (err) {
-        console.warn('Error al suscribir canal sync-ventas-global:', err);
+        canalRealtimeVentas = cliente
+          .channel('canal-optimizado-sales')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, sincronizarConDebounce)
+          .subscribe();
+      } catch (e) {
+        console.warn('Error al suscribir canal Realtime de ventas:', e);
       }
     }
-  }
-
-  // Reconocer clics en el boton de actualizacion manual
-  if (typeof document !== 'undefined') {
-    document.addEventListener('click', function (e: any) {
-      if (e.target && e.target.textContent && e.target.textContent.includes('Actualizar Datos')) {
-        setTimeout(sincronizarPanelAdmin, 400);
-      }
-    });
   }
 
   if (typeof window !== 'undefined') {
-    (window as any).obtenerSupabase = obtenerSupabase;
-    (window as any).esHoy = esHoy;
-    (window as any).forzarActualizacionUI = forzarActualizacionUI;
-    (window as any).sincronizarPanelAdmin = sincronizarPanelAdmin;
-    (window as any).sincronizarVentasAdminSeguro = sincronizarPanelAdmin;
-    (window as any).iniciarSistemaUnificado = iniciarSistemaUnificado;
+    (window as any).obtenerSupabase = obtenerCliente;
+    (window as any).actualizarNumeroSugeridas = actualizarNumeroSugeridas;
+    (window as any).forzarActualizacionUI = actualizarNumeroSugeridas;
+    (window as any).ejecutarSincronizacionLigera = ejecutarSincronizacionLigera;
+    (window as any).sincronizarPanelAdmin = ejecutarSincronizacionLigera;
+    (window as any).sincronizarVentasAdminSeguro = ejecutarSincronizacionLigera;
+    (window as any).sincronizarConDebounce = sincronizarConDebounce;
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', iniciarSistemaUnificado);
+      document.addEventListener('DOMContentLoaded', iniciar);
     } else {
-      iniciarSistemaUnificado();
+      iniciar();
     }
   }
 })();
