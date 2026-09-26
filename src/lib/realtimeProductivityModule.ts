@@ -400,6 +400,74 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
   };
 
   // ==========================================
+  // 6. CARGA UNIFICADA Y SINCRONIZACIÓN VISUAL DE CONTADORES
+  // ==========================================
+  const actualizarContadoresUI = (tareas: any[]) => {
+    if (typeof document === 'undefined' || !tareas) return;
+
+    const total = tareas.length;
+    const completadas = tareas.filter(function (t: any) {
+      return t.completada || t.completed || t.estado === 'Completada' || t.status === 'Completada';
+    }).length;
+    const porcentaje = total > 0 ? Math.round((completadas / total) * 100) : 0;
+
+    // Actualizar el botón del tab: "Mis Tareas (X/Y)" y textos de resumen
+    const textos = document.querySelectorAll('button, p, span, div');
+    textos.forEach(function (el) {
+      if (el.textContent && (el.textContent.includes('Mis Tareas') || el.textContent.includes('Checklist de Tareas'))) {
+        if (el.children.length <= 1) {
+          el.textContent = 'Mis Tareas (' + completadas + '/' + total + ')';
+        }
+      }
+      if (el.textContent && el.textContent.includes('0 de 0 tareas completadas hoy')) {
+        el.textContent = completadas + ' de ' + total + ' tareas completadas hoy';
+      }
+    });
+
+    // Actualizar porcentaje de progreso diario
+    const elemProgreso = document.getElementById('label-porcentaje-prod') || document.querySelector('.text-xl.font-bold, .text-blue-600');
+    if (elemProgreso && elemProgreso.textContent && elemProgreso.textContent.includes('%')) {
+      elemProgreso.textContent = porcentaje + '%';
+    }
+
+    const barraProgreso = document.getElementById('barra-progreso-prod');
+    if (barraProgreso) {
+      barraProgreso.style.width = porcentaje + '%';
+    }
+
+    const labelDetalle = document.getElementById('label-detalle-prod');
+    if (labelDetalle) {
+      labelDetalle.textContent = completadas + ' de ' + total + ' tareas completadas hoy';
+    }
+  };
+
+  const cargarYRenderizarTareasGlobal = async () => {
+    const cliente = (window as any).supabase || getSupabaseClient();
+    if (!cliente) return;
+
+    const fechaHoy = getLocalDateString();
+
+    try {
+      const { data, error } = await cliente
+        .from('daily_tasks')
+        .select('*')
+        .or(`date.eq.${fechaHoy},fecha.eq.${fechaHoy}`);
+
+      if (error) {
+        console.error('Error al obtener tareas globales:', error);
+        return;
+      }
+
+      const tareas = (data || []).sort((a: any, b: any) => (Number(a.orden ?? a.order_index) || 0) - (Number(b.orden ?? b.order_index) || 0));
+      if (tareas.length > 0) {
+        actualizarContadoresUI(tareas);
+      }
+    } catch (e) {
+      console.warn('Advertencia en carga unificada de tareas:', e);
+    }
+  };
+
+  // ==========================================
   // 7. INICIADOR AUTOMATICO DEL MODULO
   // ==========================================
   const iniciarModuloProductividadTiempoReal = () => {
@@ -409,6 +477,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
       try {
         // Verificar y generar tareas si es necesario
         verificarYGenerarTareasDiarias();
+        cargarYRenderizarTareasGlobal();
 
         const sesionGuardada = localStorage.getItem('coccole_sesion');
         if (sesionGuardada) {
@@ -437,9 +506,12 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
     (window as any).obtenerFechaHoyISO = getLocalDateString;
     (window as any).verificarYGenerarTareasAuto = verificarYGenerarTareasDiarias;
     (window as any).verificarYGenerarTareasDiarias = verificarYGenerarTareasDiarias;
+    (window as any).cargarYRenderizarTareasGlobal = cargarYRenderizarTareasGlobal;
+    (window as any).actualizarContadoresUI = actualizarContadoresUI;
     (window as any).cargarTareasDiarias = () => {
       const hoy = getLocalDateString();
       fetchDailyTasksFromSupabase(hoy);
+      cargarYRenderizarTareasGlobal();
     };
     (window as any).cerrarSesion = cerrarSesion;
     (window as any).inicializarSesionProgresoEmpleadoSeguro = inicializarSesionProgresoEmpleadoSeguro;
@@ -455,7 +527,7 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
     (window as any).iniciarModuloProductividadTiempoReal = iniciarModuloProductividadTiempoReal;
     (window as any).ejecutarModulo = iniciarModuloProductividadTiempoReal;
 
-    // Escuchador global para cualquier boton o enlace de cierre de sesion
+    // Escuchador global para cualquier boton o enlace de cierre de sesion o actualizacion de datos
     if (typeof document !== 'undefined') {
       document.addEventListener('click', function (evento: any) {
         const target = evento.target;
@@ -472,6 +544,10 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
         ) {
           evento.preventDefault();
           cerrarSesion();
+        }
+
+        if (elemento && elemento.textContent && elemento.textContent.includes('Actualizar Datos')) {
+          setTimeout(cargarYRenderizarTareasGlobal, 300);
         }
       });
     }

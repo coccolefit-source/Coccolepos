@@ -1616,7 +1616,7 @@ export async function fetchDailyTasksFromSupabase(fecha?: string): Promise<Tarea
         completed_at: t.completed_at || undefined,
         orden: Number(t.orden ?? t.order_index) || 0
       };
-    });
+    }).sort((a: any, b: any) => (a.orden || 0) - (b.orden || 0));
   } catch (err) {
     console.warn('Exception in fetchDailyTasksFromSupabase:', err);
     return null;
