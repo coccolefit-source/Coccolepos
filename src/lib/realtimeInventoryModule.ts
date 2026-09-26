@@ -21,8 +21,9 @@ import { getSupabaseClient } from './supabaseClient';
         if (!elemento) return;
         var btn = (elemento.closest && elemento.closest('button')) || elemento;
         
-        // Verificar que se hizo clic en un boton "Registrar"
+        // Verificar que se hizo clic en un boton "Registrar" fuera de formularios gestionados por React
         if (!btn || !btn.textContent || btn.textContent.trim() !== 'Registrar') return;
+        if (btn.closest('form')) return; // React form handles this with state and onSubmit
 
         // Subir en el arbol HTML para encontrar el contenedor de la seccion de inventario
         var contenedor = (btn.closest && (btn.closest('div.bg-white, div.rounded-2xl, div.border') || btn.parentElement?.parentElement)) || btn.parentElement;

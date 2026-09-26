@@ -152,6 +152,11 @@ import { getSupabaseClient, getLocalDateString } from './supabaseClient';
                               (elemento && elemento.textContent && elemento.textContent.trim() === '+1');
 
         if (esBotonSugerida) {
+          // Si el botón ya está gestionado por el modal de cobro obligatorio de React, no duplicar la inserción
+          if (boton && boton.id && boton.id.startsWith('increment-btn-')) {
+            return;
+          }
+
           var contenedor = (boton.closest && (boton.closest('div.border, div.bg-white') || boton.parentElement?.parentElement)) || boton.parentElement;
           var nombreProducto = 'Producto Sugerido Desconocido';
 
