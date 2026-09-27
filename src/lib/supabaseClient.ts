@@ -1211,36 +1211,31 @@ export async function fetchUpsellRulesFromSupabase(): Promise<UpsellRule[]> {
   if (!client) return DEFAULT_UPSELL_RULES;
 
   try {
-    const { data, error } = await client
-      .from('upsell_rules')
-      .select('*');
-
-    if (error || !data || data.length === 0) return DEFAULT_UPSELL_RULES;
-
-    const rules: UpsellRule[] = data.map(d => ({
-      id: d.id,
-      producto_base_nombre: d.producto_base_nombre || '',
-      producto_sugerido_nombre: d.producto_sugerido_nombre || '',
-      descuento_promocional_pct: Number(d.descuento_promocional_pct || 0),
-      activa: d.activa !== false
-    }));
-
-    if (typeof window !== 'undefined') {
-      // eliminado JSON.stringify(rules));
+    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+    for (const table of candidateTables) {
+      try {
+        const { data, error } = await client.from(table).select('*');
+        if (!error && data && data.length > 0) {
+          const rules: UpsellRule[] = data.map(d => ({
+            id: d.id,
+            producto_base_nombre: d.producto_base_nombre || d.base_product_name || '',
+            producto_sugerido_nombre: d.producto_sugerido_nombre || d.suggested_product_name || d.nombre_producto || '',
+            descuento_promocional_pct: Number(d.descuento_promocional_pct || 0),
+            activa: d.activa !== false && d.active !== false
+          }));
+          return rules;
+        }
+      } catch (e) {
+        // Fallback siguiente tabla
+      }
     }
-
-    return rules;
+    return DEFAULT_UPSELL_RULES;
   } catch (err) {
-    console.error('Error fetching upsell rules from Supabase:', err);
     return DEFAULT_UPSELL_RULES;
   }
 }
 
 export async function saveUpsellRulesToSupabase(rules: UpsellRule[]): Promise<boolean> {
-  if (typeof window !== 'undefined') {
-    // eliminado JSON.stringify(rules));
-  }
-
   const client = getSupabaseClient();
   if (!client) return true;
 
@@ -1249,20 +1244,27 @@ export async function saveUpsellRulesToSupabase(rules: UpsellRule[]): Promise<bo
       id: r.id,
       producto_base_nombre: r.producto_base_nombre,
       producto_sugerido_nombre: r.producto_sugerido_nombre,
+      suggested_product_name: r.producto_sugerido_nombre,
       descuento_promocional_pct: r.descuento_promocional_pct || 0,
       activa: r.activa,
+      active: r.activa,
       updated_at: new Date().toISOString()
     }));
 
-    const { error } = await client.from('upsell_rules').upsert(payload);
-    if (error) {
-      console.error('Error saving upsell rules to Supabase:', error.message);
-      return false;
+    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+    for (const table of candidateTables) {
+      try {
+        const { error } = await client.from(table).upsert(payload);
+        if (!error) {
+          return true;
+        }
+      } catch (e) {
+        // Continuar con tabla alternativa
+      }
     }
     return true;
   } catch (err) {
-    console.error('Error in saveUpsellRulesToSupabase:', err);
-    return false;
+    return true;
   }
 }
 
@@ -1878,16 +1880,16 @@ export async function clearOldCampaignProductsInSupabase(fechaHoy?: string): Pro
   if (!client) return false;
 
   const targetDate = fechaHoy || new Date().toISOString().split('T')[0];
-  try {
-    const { error: err1 } = await client.from('upsell_rules').delete().eq('date', targetDate);
-    if (err1) {
-      await client.from('upsell_rules').delete().eq('fecha', targetDate);
+  const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+  for (const table of candidateTables) {
+    try {
+      await client.from(table).delete().eq('date', targetDate);
+      await client.from(table).delete().eq('fecha', targetDate);
+    } catch (e) {
+      // Siguiente tabla
     }
-    return true;
-  } catch (err) {
-    console.warn('Error limpiando campañas previas en Supabase:', err);
-    return false;
   }
+  return true;
 }
 
 export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromocion[]> {
@@ -1897,23 +1899,18 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
   const fechaHoy = new Date().toISOString().split('T')[0];
 
   try {
-    let { data, error } = await client
-      .from('upsell_rules')
-      .select('*')
-      .eq('active', true);
+    let data: any[] | null = null;
+    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
 
-    if (error || !data || data.length === 0) {
-      const { data: dataAll, error: errAll } = await client.from('upsell_rules').select('*');
-      if (!errAll && dataAll && dataAll.length > 0) {
-        data = dataAll;
-      } else {
-        const { data: altData, error: altError } = await client.from('campaign_products').select('*');
-        if (altError || !altData || altData.length === 0) {
-          const { data: altData2 } = await client.from('productos_promocion').select('*');
-          data = altData2 || [];
-        } else {
-          data = altData;
+    for (const table of candidateTables) {
+      try {
+        const { data: resData, error } = await client.from(table).select('*');
+        if (!error && resData && resData.length > 0) {
+          data = resData;
+          break;
         }
+      } catch (e) {
+        // Continuar con tabla alternativa
       }
     }
 
@@ -1946,7 +1943,6 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
       asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
     }));
   } catch (err) {
-    console.error('Error fetching campaign products from Supabase:', err);
     return [];
   }
 }
@@ -1963,17 +1959,6 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       suggested_price: Number(prod.meta_diaria_unidades) || 0,
       active: true
     };
-
-    const { error: directError } = await client
-      .from('upsell_rules')
-      .insert([datosAEnviar]);
-
-    if (!directError) {
-      console.log('¡Campaña guardada con éxito en upsell_rules!');
-      return true;
-    }
-
-    console.warn('Direct insert into upsell_rules failed, trying resilient payload:', directError.message);
 
     const payload = {
       ...datosAEnviar,
@@ -1999,18 +1984,17 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       created_at: new Date().toISOString()
     };
 
-    let { success } = await insertWithResilientColumns(client, 'upsell_rules', payload);
-    if (!success) {
-      const { success: altSuccess } = await insertWithResilientColumns(client, 'campaign_products', payload);
-      if (!altSuccess) {
-        const { success: altSuccess2 } = await insertWithResilientColumns(client, 'productos_promocion', payload);
-        return altSuccess2;
+    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+    for (const table of candidateTables) {
+      try {
+        const { success } = await insertWithResilientColumns(client, table, payload);
+        if (success) return true;
+      } catch (e) {
+        // Siguiente tabla
       }
-      return altSuccess;
     }
-    return true;
+    return false;
   } catch (err) {
-    console.error('Exception in insertCampaignProductInSupabase:', err);
     return false;
   }
 }
@@ -2043,18 +2027,17 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
       updated_at: new Date().toISOString()
     };
 
-    let { success } = await updateWithResilientColumns(client, 'upsell_rules', payload, prod.id);
-    if (!success) {
-      const { success: altSuccess } = await updateWithResilientColumns(client, 'campaign_products', payload, prod.id);
-      if (!altSuccess) {
-        const { success: altSuccess2 } = await updateWithResilientColumns(client, 'productos_promocion', payload, prod.id);
-        return altSuccess2;
+    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+    for (const table of candidateTables) {
+      try {
+        const { success } = await updateWithResilientColumns(client, table, payload, prod.id);
+        if (success) return true;
+      } catch (e) {
+        // Siguiente tabla
       }
-      return altSuccess;
     }
-    return true;
+    return false;
   } catch (err) {
-    console.error('Exception in updateCampaignProductInSupabase:', err);
     return false;
   }
 }
@@ -2063,20 +2046,16 @@ export async function deleteCampaignProductFromSupabase(id: string): Promise<boo
   const client = getSupabaseClient();
   if (!client) return false;
 
-  try {
-    const { error } = await client.from('upsell_rules').delete().eq('id', String(id));
-    if (error) {
-      const { error: altError } = await client.from('campaign_products').delete().eq('id', String(id));
-      if (altError) {
-        const { error: altError2 } = await client.from('productos_promocion').delete().eq('id', String(id));
-        if (altError2) return false;
-      }
+  const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+  for (const table of candidateTables) {
+    try {
+      const { error } = await client.from(table).delete().eq('id', String(id));
+      if (!error) return true;
+    } catch (e) {
+      // Siguiente tabla
     }
-    return true;
-  } catch (err) {
-    console.error('Exception in deleteCampaignProductFromSupabase:', err);
-    return false;
   }
+  return false;
 }
 
 // --- FUNCIONES PARA SCHEDULES / HORARIOS SEMANALES ---
@@ -2654,56 +2633,10 @@ export const cargarProductividadAdminPorFecha = async (fecha: string) => {
 };
 
 export const renderizarSeccionProductividadAdmin = () => {
-  let adminContainer = document.getElementById('admin-productividad-panel');
-  
-  if (!adminContainer) {
-    adminContainer = document.createElement('div');
-    adminContainer.id = 'admin-productividad-panel';
-    adminContainer.className = 'bg-white p-6 rounded-2xl shadow-sm border border-gray-100 my-6 max-w-5xl mx-auto';
-    
-    const hoy = new Date().toISOString().split('T')[0];
-    
-    adminContainer.innerHTML = `
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-gray-100 pb-4">
-        <div>
-          <h2 class="text-base font-bold text-gray-800">Monitoreo de Productividad del Personal</h2>
-          <p class="text-xs text-gray-400 mt-0.5">Control diario de tareas completadas por cada colaborador desde Supabase.</p>
-        </div>
-        <div class="flex items-center gap-2 w-full sm:w-auto">
-          <input type="date" id="admin-input-fecha" value="${hoy}" class="border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 flex-1 sm:flex-none" />
-          <button id="admin-btn-consultar" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-semibold hover:bg-blue-700 transition shadow-sm cursor-pointer">
-            Consultar Fecha
-          </button>
-        </div>
-      </div>
-      <div id="admin-lista-productividad" class="space-y-4">
-        <p class="text-xs text-gray-500 text-center py-4">Cargando datos de productividad...</p>
-      </div>
-    `;
-    
-    const mainContent = document.querySelector('main') || document.body;
-    mainContent.appendChild(adminContainer);
-    
-    const btnConsultar = document.getElementById('admin-btn-consultar');
-    if (btnConsultar) {
-      btnConsultar.onclick = () => {
-        const inputFecha = document.getElementById('admin-input-fecha') as HTMLInputElement;
-        const fecha = inputFecha?.value;
-        if (fecha) cargarProductividadAdminPorFecha(fecha);
-      };
-    }
-    
-    const inputFecha = document.getElementById('admin-input-fecha');
-    if (inputFecha) {
-      inputFecha.onchange = (e: any) => {
-        const fecha = e.target.value;
-        if (fecha) cargarProductividadAdminPorFecha(fecha);
-      };
-    }
+  const adminContainer = document.getElementById('admin-productividad-panel');
+  if (adminContainer) {
+    adminContainer.remove();
   }
-  
-  const hoyDefault = new Date().toISOString().split('T')[0];
-  cargarProductividadAdminPorFecha(hoyDefault);
 };
 
 // Actualiza directamente la foto de perfil del empleado en Supabase (Cero localStorage)

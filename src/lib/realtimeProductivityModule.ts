@@ -278,47 +278,10 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
     try {
       const existing = document.getElementById('admin-productividad-panel');
       if (existing) {
-        existing.style.display = 'block';
-        const input = document.getElementById('admin-input-fecha') as HTMLInputElement;
-        cargarProductividadAdminPorFecha(input?.value || getLocalDateString());
-        return;
+        existing.remove();
       }
-
-      const adminContainer = document.createElement('div');
-      adminContainer.id = 'admin-productividad-panel';
-      adminContainer.className = 'bg-white p-6 rounded-2xl shadow-sm border border-gray-100 my-6 max-w-5xl mx-auto';
-
-      const hoy = getLocalDateString();
-
-      adminContainer.innerHTML = 
-        '<div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 border-b border-gray-100 pb-4">' +
-          '<div><h2 class="text-base font-bold text-gray-800">Monitoreo de Productividad</h2></div>' +
-          '<div class="flex items-center gap-2">' +
-            '<input type="date" id="admin-input-fecha" value="' + hoy + '" class="border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium text-gray-700 outline-none bg-gray-50" />' +
-            '<button id="admin-btn-consultar" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-semibold hover:bg-blue-700 cursor-pointer">Ver</button>' +
-          '</div>' +
-        '</div>' +
-        '<div id="admin-lista-productividad" class="space-y-4"><p class="text-xs text-gray-500 text-center py-4">Cargando...</p></div>';
-
-      const mainContent = document.querySelector('main') || document.querySelector('#root > div') || document.getElementById('root') || document.body;
-      mainContent.appendChild(adminContainer);
-
-      const btnConsultar = document.getElementById('admin-btn-consultar');
-      if (btnConsultar) {
-        btnConsultar.onclick = () => {
-          const input = document.getElementById('admin-input-fecha') as HTMLInputElement;
-          cargarProductividadAdminPorFecha(input?.value || hoy);
-        };
-      }
-
-      const inputFecha = document.getElementById('admin-input-fecha');
-      if (inputFecha) {
-        inputFecha.onchange = (e: any) => cargarProductividadAdminPorFecha(e.target.value);
-      }
-
-      cargarProductividadAdminPorFecha(hoy);
     } catch (err) {
-      console.warn('Error al renderizar seccion de productividad admin:', err);
+      console.warn('Error al limpiar seccion de productividad en admin:', err);
     }
   };
 

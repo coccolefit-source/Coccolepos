@@ -523,7 +523,10 @@ export default function App() {
 
     const timer = setTimeout(() => {
       if (rol === 'admin') {
-        renderizarSeccionProductividadAdminSeguro();
+        const existingAdminPanel = document.getElementById('admin-productividad-panel');
+        if (existingAdminPanel) {
+          existingAdminPanel.remove();
+        }
       } else {
         inicializarSesionProgresoEmpleadoSeguro(nombre);
       }
@@ -2069,304 +2072,57 @@ export default function App() {
           /* ========================================================= */
           /* VISTA ADMINISTRADOR (VISTA DEL DUEÑO / MARIANA SILVA) */
           /* ========================================================= */
-          <div className="space-y-6">
-            
-            {/* FILA 2: BARRA DE MÉTRICAS RÁPIDAS Y FILTRO DE TIEMPO COMPACTO */}
-            <div id="admin-kpi-bar" className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-xs">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-2.5 mb-3">
-                <div>
-                  <h3 className="font-extrabold text-xs text-[#4B9CD3] uppercase tracking-wider flex items-center gap-1.5">
-                    <TrendingUp className="w-4 h-4 text-[#4B9CD3]" />
-                    Resumen Operativo del Local
-                  </h3>
-                  <p className="text-[10px] text-slate-500">Métricas clave consolidadas en tiempo real</p>
-                </div>
+          <div className="w-full">
+            <AdminDashboard
+              openTabs={openTabs}
+              activeTab={activeTab}
+              setActiveTab={handleSelectTab}
+              onCloseTab={handleCloseTab}
+              rankingWeights={rankingWeights}
+              onUpdateRankingWeights={handleUpdateRankingWeights}
+              upsellRules={upsellRules}
+              onUpdateUpsellRules={handleUpdateUpsellRules}
+              usuarios={state.usuarios}
 
-                {/* Selector de Periodo de tiempo global */}
-                <div className="flex bg-[#EBF5FB] p-0.5 rounded-lg border border-[#AED6F1]/70">
-                  {(['diario', 'semanal', 'mensual'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      id={`global-filter-btn-${mode}`}
-                      onClick={() => {
-                        setFiltroGeneral(mode);
-                        pushNotification(`Cambiando periodo de métricas a: ${mode}.`, 'info');
-                      }}
-                      className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all capitalize ${
-                        filtroGeneral === mode
-                          ? 'bg-[#4B9CD3] text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-[#2C3E50]'
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Grid de KPIs - Compacto grid-cols-4 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                {/* KPI 1: Cumplimiento de tareas */}
-                <div id="kpi-task-completion" className="bg-[#EBF5FB] border border-[#AED6F1] p-3 rounded-lg flex items-center gap-2.5">
-                  <div className="p-2 bg-[#4B9CD3] text-white rounded-lg shrink-0">
-                    <CheckCircle className="w-4.5 h-4.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[9px] font-bold text-[#4B9CD3] uppercase tracking-wider truncate">Cumplimiento Tareas</p>
-                    <h3 className="text-lg font-black text-[#2C3E50] leading-none mt-0.5">
-                      {metrics.porcentajeTareasCompletadas}%
-                    </h3>
-                    <p className="text-[9px] text-[#4B9CD3] font-semibold mt-0.5 truncate">
-                      {metrics.tareasCompletadas}/{metrics.tareasTotales} listas
-                    </p>
-                  </div>
-                </div>
-
-                {/* KPI 2: Ventas Sugeridas */}
-                <div id="kpi-suggested-sales" className="bg-orange-50 border border-orange-100/80 p-3 rounded-lg flex items-center gap-2.5">
-                  <div className="p-2 bg-orange-100 text-orange-700 rounded-lg shrink-0">
-                    <Sparkles className="w-4.5 h-4.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[9px] font-bold text-orange-800 uppercase tracking-wider truncate">Ventas Sugeridas</p>
-                    <h3 className="text-lg font-black text-orange-950 leading-none mt-0.5">
-                      {metrics.totalVentasSugeridas}
-                    </h3>
-                    <p className="text-[9px] text-orange-700 font-semibold mt-0.5 truncate">
-                      Meta: {metrics.metaVentasAcumulada}
-                    </p>
-                  </div>
-                </div>
-
-                {/* KPI 3: Eficiencia de Tiempo */}
-                <div id="kpi-time-efficiency" className="bg-white border border-[#E2E8F0] p-3 rounded-lg flex items-center gap-2.5 shadow-2xs">
-                  <div className="p-2 bg-[#85C1E9] text-white rounded-lg shrink-0">
-                    <Clock className="w-4.5 h-4.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider truncate">Eficiencia Tiempo</p>
-                    <h3 className="text-lg font-black text-[#2C3E50] leading-none mt-0.5">
-                      {metrics.eficienciaTiempoGlobal}%
-                    </h3>
-                    <p className="text-[9px] text-[#4B9CD3] font-semibold mt-0.5 truncate">
-                      A tiempo
-                    </p>
-                  </div>
-                </div>
-
-                {/* KPI 4: Estado Operativo */}
-                <div id="kpi-operational-status" className="bg-[#FFFDF6] border border-[#E2E8F0] p-3 rounded-lg flex items-center gap-2.5">
-                  <div className="p-2 bg-[#E2E8F0] text-[#2C3E50] rounded-lg shrink-0">
-                    <AlertCircle className="w-4.5 h-4.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider truncate">En Cola de Espera</p>
-                    <h3 className="text-lg font-black text-[#2C3E50] leading-none mt-0.5">
-                      {metrics.tareasEnProgreso + metrics.tareasPendientes}
-                    </h3>
-                    <p className="text-[9px] text-slate-600 font-semibold mt-0.5 truncate">
-                      {metrics.tareasEnProgreso} act · {metrics.tareasPendientes} pte
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* SECUENCIA DE FILAS 100% HORIZONTALES (Full-Width Row Layout) */}
-            <div className="flex flex-col gap-6 w-full">
-              
-              {/* FILA 3: Visualización de Progreso (w-full) */}
-              <div id="row-progress" className="w-full">
-                <AnalyticsPanel
-                  tareas={state.tareas}
-                  ventas={state.ventas}
-                  productos={state.productos}
-                  filtro={filtroGeneral}
-                  setFiltro={setFiltroGeneral}
-                  renderMode="progress"
-                />
-              </div>
-
-              {/* FILA 4: Impulso Operativo Coccole Fit (w-full) */}
-              <div id="row-impulse" className="w-full">
-                <AnalyticsPanel
-                  tareas={state.tareas}
-                  ventas={state.ventas}
-                  productos={state.productos}
-                  filtro={filtroGeneral}
-                  setFiltro={setFiltroGeneral}
-                  renderMode="impulse"
-                />
-              </div>
-
-              {/* FILA 5: Tabla de Posiciones y Ranking (w-full) */}
-              <div id="row-leaderboard" className="w-full">
-                <Leaderboard
-                  usuarios={state.usuarios}
-                  tareas={state.tareas}
-                  ventas={state.ventas}
-                  fichajes={state.fichajes}
-                  productos={state.productos}
-                  filtro={filtroGeneral}
-                  posVentas={state.ventasRegistradas}
-                  rankingWeights={rankingWeights}
-                />
-              </div>
-
-
-              {/* FILA 6: Alertas e Incidencias del Local (w-full) */}
-              <div id="row-incidencias" className="w-full rounded-xl border bg-white p-5 shadow-sm font-sans">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-3 mb-4">
-                  <div>
-                    <h3 className="font-bold text-[#2C3E50] text-sm flex items-center gap-2">
-                      <Bell className="w-4.5 h-4.5 text-red-600" />
-                      Alertas e Incidencias del Local
-                    </h3>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Reportes de incidencias críticas de equipos o insumos en tiempo real.</p>
-                  </div>
-                  <span className="text-[10px] bg-red-100 text-red-800 font-extrabold px-3 py-1 rounded-full shrink-0">
-                    {state.incidencias.filter(i => i.estado === 'Pendiente').length} Activas Hoy
-                  </span>
-                </div>
-
-                {state.incidencias.length === 0 ? (
-                  <p className="text-center py-8 text-slate-400 text-xs">No hay alertas ni incidencias reportadas el día de hoy.</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {state.incidencias.map(inc => (
-                      <div
-                        key={inc.id}
-                        className={`p-4 rounded-xl border text-xs flex flex-col justify-between transition-all shadow-3xs ${
-                          inc.estado === 'Pendiente'
-                            ? 'bg-red-50/50 border-red-200 text-red-950 hover:bg-red-50'
-                            : 'bg-slate-50/50 border-slate-200 text-[#2C3E50] hover:bg-slate-50'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex justify-between items-start mb-2">
-                            <span className={`font-black uppercase text-[9px] tracking-wider px-2 py-0.5 rounded-full ${
-                              inc.tipo === 'insumo' ? 'bg-amber-100 text-amber-950' : 'bg-red-100 text-red-950'
-                            }`}>
-                              {inc.tipo === 'insumo' ? 'Falta Insumo' : 'Falla Equipo'}
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-semibold">{inc.fecha}</span>
-                          </div>
-                          <h4 className="font-extrabold text-sm text-[#2C3E50]">{inc.titulo}</h4>
-                          <p className="text-slate-600 mt-1 text-[11px] leading-relaxed mb-3">{inc.descripcion}</p>
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
-                          <span className="text-[9px] text-slate-400 font-bold">
-                            Por: {state.usuarios.find(u => u.id === inc.usuario_id)?.nombre || 'Colaborador'}
-                          </span>
-                          {inc.estado === 'Pendiente' ? (
-                            <button
-                              onClick={() => handleResolveIncidencia(inc.id)}
-                              className="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-3 py-1 rounded-lg transition-all shadow-3xs"
-                            >
-                              Resolver Alerta
-                            </button>
-                          ) : (
-                            <span className="text-[#4B9CD3] font-extrabold text-[10px] uppercase flex items-center gap-1">
-                              ✓ Resuelto
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* FILA 7: Actividades Recientes y Reportes (w-full) */}
-              <div id="row-activities" className="w-full rounded-xl border bg-white p-5 shadow-sm font-sans">
-                <div className="border-b border-slate-200 pb-3 mb-4 flex justify-between items-center">
-                  <div>
-                    <h3 className="font-bold text-[#2C3E50] text-sm flex items-center gap-2">
-                      <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
-                      Actividades Recientes y Reportes del Sistema
-                    </h3>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Log en tiempo real de operaciones, fichajes, y checklists completados.</p>
-                  </div>
-                  <span className="text-[9px] bg-[#EBF5FB] text-[#4B9CD3] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                    Conexión Activa
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[300px] overflow-y-auto pr-1">
-                  {notifications.map(notif => (
-                    <div
-                      key={notif.id}
-                      className="p-3 bg-slate-50 border border-slate-150 rounded-lg flex items-start gap-2.5 hover:bg-slate-100 transition-colors"
-                    >
-                      <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                        notif.type === 'success' ? 'bg-[#4B9CD3]' : notif.type === 'alert' ? 'bg-red-500' : 'bg-sky-500'
-                      }`}></div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-slate-700 text-[11px] leading-relaxed font-semibold break-words">{notif.text}</p>
-                        <span className="text-[9px] text-slate-400 font-extrabold mt-1 block">{notif.time}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-            </div>
-
-            {/* FILA 4: MÓDULOS DE GESTIÓN INTERACTIVOS - FULL WIDTH */}
-            <div className="w-full">
-              <AdminDashboard
-                openTabs={openTabs}
-                activeTab={activeTab}
-                setActiveTab={handleSelectTab}
-                onCloseTab={handleCloseTab}
-                rankingWeights={rankingWeights}
-                onUpdateRankingWeights={handleUpdateRankingWeights}
-                upsellRules={upsellRules}
-                onUpdateUpsellRules={handleUpdateUpsellRules}
-                usuarios={state.usuarios}
-
-                tareas={state.tareas}
-                productos={state.productos}
-                fichajes={state.fichajes}
-                incidencias={state.incidencias}
-                anuncios={state.anuncios}
-                feedbacks={state.feedbacks || []}
-                inventario={state.inventario || []}
-                horarios={state.horarios || []}
-                productosCatalogo={state.productosCatalogo || []}
-                ventasRegistradas={state.ventasRegistradas || []}
-                cuadresCaja={state.cuadresCaja || []}
-                alertasPanico={state.alertasPanico || []}
-                clientes={state.clientes || []}
-                onAddTarea={handleAddTarea}
-                onAddTareasBulk={handleAddTareasBulk}
-                onEditTarea={handleEditTarea}
-                onDeleteTarea={handleDeleteTarea}
-                onDeleteAllTareas={handleDeleteAllTareas}
-                onUpdateTaskOrders={handleUpdateTaskOrders}
-                onAddProducto={handleAddProducto}
-                onEditProducto={handleEditProducto}
-                onDeleteProducto={handleDeleteProducto}
-                onAddAnuncio={handleAddAnuncio}
-                onResolveIncidencia={handleResolveIncidencia}
-                onAddFeedback={handleAddFeedback}
-                onCreateUsuario={handleCreateUsuario}
-                onEditUsuario={handleEditUsuario}
-                onDeleteUsuario={handleDeleteUsuario}
-                onSaveInventarioItem={handleSaveInventarioItem}
-                onDeleteInventarioItem={handleDeleteInventarioItem}
-                onSaveTurno={handleSaveTurno}
-                onDeleteTurno={handleDeleteTurno}
-                onDeleteFichaje={handleDeleteFichaje}
-                onSaveProductoCatalogo={handleSaveProductoCatalogo}
-                onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
-                onDuplicarHorarios={handleDuplicarHorarios}
-                onUpdateVenta={handleUpdateVenta}
-                onAnularVenta={handleAnularVenta}
-              />
-            </div>
-
+              tareas={state.tareas}
+              productos={state.productos}
+              fichajes={state.fichajes}
+              incidencias={state.incidencias}
+              anuncios={state.anuncios}
+              feedbacks={state.feedbacks || []}
+              inventario={state.inventario || []}
+              horarios={state.horarios || []}
+              productosCatalogo={state.productosCatalogo || []}
+              ventasRegistradas={state.ventasRegistradas || []}
+              cuadresCaja={state.cuadresCaja || []}
+              alertasPanico={state.alertasPanico || []}
+              clientes={state.clientes || []}
+              onAddTarea={handleAddTarea}
+              onAddTareasBulk={handleAddTareasBulk}
+              onEditTarea={handleEditTarea}
+              onDeleteTarea={handleDeleteTarea}
+              onDeleteAllTareas={handleDeleteAllTareas}
+              onUpdateTaskOrders={handleUpdateTaskOrders}
+              onAddProducto={handleAddProducto}
+              onEditProducto={handleEditProducto}
+              onDeleteProducto={handleDeleteProducto}
+              onAddAnuncio={handleAddAnuncio}
+              onResolveIncidencia={handleResolveIncidencia}
+              onAddFeedback={handleAddFeedback}
+              onCreateUsuario={handleCreateUsuario}
+              onEditUsuario={handleEditUsuario}
+              onDeleteUsuario={handleDeleteUsuario}
+              onSaveInventarioItem={handleSaveInventarioItem}
+              onDeleteInventarioItem={handleDeleteInventarioItem}
+              onSaveTurno={handleSaveTurno}
+              onDeleteTurno={handleDeleteTurno}
+              onDeleteFichaje={handleDeleteFichaje}
+              onSaveProductoCatalogo={handleSaveProductoCatalogo}
+              onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
+              onDuplicarHorarios={handleDuplicarHorarios}
+              onUpdateVenta={handleUpdateVenta}
+              onAnularVenta={handleAnularVenta}
+            />
           </div>
         ) : (
           /* ========================================================= */
@@ -2392,6 +2148,8 @@ export default function App() {
               posVentas={state.ventasRegistradas}
               rankingWeights={rankingWeights}
               upsellRules={upsellRules}
+              notifications={notifications}
+              onResolveIncidencia={handleResolveIncidencia}
               onUpdateTareaEstado={handleUpdateTareaEstado}
               onUpdateTaskOrders={handleUpdateTaskOrders}
 

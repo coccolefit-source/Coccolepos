@@ -81,57 +81,68 @@ import { getSupabaseClient, getLocalDateString } from './supabaseClient';
     var hoyInicio = new Date();
     hoyInicio.setHours(0, 0, 0, 0);
 
-    // 1. Obtener reglas activas de upsell
-    cliente
-      .from('upsell_rules')
-      .select('suggested_product_name, active')
-      .then(function (resRules: any) {
-        var catalogoValido: string[] = [];
-        if (resRules.data && resRules.data.length > 0) {
-          catalogoValido = resRules.data
-            .filter(function (r: any) { return r.active !== false; })
-            .map(function (r: any) { return (r.suggested_product_name || '').toLowerCase().trim(); });
+    // 1. Obtener reglas activas de upsell (con fallback silencioso)
+    var obtenerCatalogo = async function() {
+      var catalogo: string[] = [];
+      var candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+      for (var i = 0; i < candidateTables.length; i++) {
+        try {
+          var res = await cliente.from(candidateTables[i]).select('*');
+          if (!res.error && res.data && res.data.length > 0) {
+            catalogo = res.data
+              .filter(function(r: any) { return r.active !== false && r.activa !== false; })
+              .map(function(r: any) {
+                return (r.suggested_product_name || r.product_name || r.nombre_producto || r.producto_sugerido_nombre || '').toLowerCase().trim();
+              })
+              .filter(Boolean);
+            break;
+          }
+        } catch (e) {
+          // Fallback silencioso
         }
+      }
+      return catalogo;
+    };
 
-        // 2. Consultar ventas de la jornada
-        cliente
-          .from('sales')
-          .select('quantity, cantidad, product_name, producto, items, producto_nombre, tipo_venta, created_at, date, fecha')
-          .order('created_at', { ascending: false })
-          .limit(1000)
-          .then(function (resSales: any) {
-            if (resSales.error || !resSales.data) return;
+    obtenerCatalogo().then(function(catalogoValido) {
+      // 2. Consultar ventas de la jornada
+      cliente
+        .from('sales')
+        .select('quantity, cantidad, product_name, producto, items, producto_nombre, tipo_venta, created_at, date, fecha')
+        .order('created_at', { ascending: false })
+        .limit(1000)
+        .then(function (resSales: any) {
+          if (resSales.error || !resSales.data) return;
 
-            var total = 0;
-            resSales.data.forEach(function (fila: any) {
-              var fStr = fila.created_at || fila.date || fila.fecha;
-              var matchFecha = esHoy(fStr) || (fila.fecha && fila.fecha === hoyLocal) || (fila.date && fila.date === hoyLocal);
+          var total = 0;
+          resSales.data.forEach(function (fila: any) {
+            var fStr = fila.created_at || fila.date || fila.fecha;
+            var matchFecha = esHoy(fStr) || (fila.fecha && fila.fecha === hoyLocal) || (fila.date && fila.date === hoyLocal);
 
-              if (matchFecha) {
-                var desc = (fila.product_name || fila.producto || fila.items || fila.producto_nombre || '').toString().toLowerCase();
-                var esImpulsado = desc.includes('[sugerida]') || fila.tipo_venta === 'sugerida' || fila.es_sugerido === true;
+            if (matchFecha) {
+              var desc = (fila.product_name || fila.producto || fila.items || fila.producto_nombre || '').toString().toLowerCase();
+              var esImpulsado = desc.includes('[sugerida]') || fila.tipo_venta === 'sugerida' || fila.es_sugerido === true;
 
-                if (!esImpulsado && catalogoValido.length > 0) {
-                  esImpulsado = catalogoValido.some(function (p: string) { return p && desc.includes(p); });
-                } else if (!esImpulsado && catalogoValido.length === 0) {
-                  esImpulsado = desc.includes('[sugerida]') || fila.tipo_venta === 'sugerida';
-                }
-
-                if (esImpulsado) {
-                  total += Number(fila.quantity || fila.cantidad || 1);
-                }
+              if (!esImpulsado && catalogoValido.length > 0) {
+                esImpulsado = catalogoValido.some(function (p: string) { return p && desc.includes(p); });
+              } else if (!esImpulsado && catalogoValido.length === 0) {
+                esImpulsado = desc.includes('[sugerida]') || fila.tipo_venta === 'sugerida';
               }
-            });
 
-            actualizarNumeroSugeridas(total);
-          })
-          .catch(function (err: any) {
-            console.error('Error en sincronización liviana de ventas:', err);
+              if (esImpulsado) {
+                total += Number(fila.quantity || fila.cantidad || 1);
+              }
+            }
           });
-      })
-      .catch(function (err: any) {
-        console.error('Error al consultar reglas de venta:', err);
-      });
+
+          actualizarNumeroSugeridas(total);
+        })
+        .catch(function () {
+          // Silencioso
+        });
+    }).catch(function() {
+      // Silencioso
+    });
   }
 
   // Debounce: evita sobrecargar peticiones si se registran varios clics consecutivos
