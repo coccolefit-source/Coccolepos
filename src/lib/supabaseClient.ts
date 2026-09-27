@@ -21,19 +21,29 @@ export function getSupabaseCredentials(): { url: string; key: string } {
     envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY || '';
   }
 
-  const localUrl = '';
-  const localKey = '';
+  let localUrl = '';
+  let localKey = '';
+
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localUrl = localStorage.getItem('coccole_supabase_url') || localStorage.getItem('supabase_url') || '';
+      localKey = localStorage.getItem('coccole_supabase_key') || localStorage.getItem('supabase_key') || localStorage.getItem('supabase_anon_key') || '';
+    }
+  } catch (e) {}
 
   return {
-    url: localUrl || envUrl,
-    key: localKey || envKey
+    url: envUrl || localUrl,
+    key: envKey || localKey
   };
 }
 
 export function saveSupabaseCredentials(url: string, key: string) {
-  if (typeof window !== 'undefined') {
-    // eliminado url.trim());
-    // eliminado key.trim());
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      localStorage.setItem('coccole_supabase_url', url.trim());
+      localStorage.setItem('coccole_supabase_key', key.trim());
+      supabaseInstance = null;
+    } catch (e) {}
   }
 }
 
@@ -1207,67 +1217,77 @@ export async function insertAnnouncementInSupabase(anuncio: {
   titulo: string;
   contenido: string;
   activo?: boolean;
+  prioridad?: string;
   fecha_creacion?: string;
-  creador_nombre?: string;
-  id?: string;
 }): Promise<{ success: boolean; data?: Anuncio; error?: string }> {
   const client = getSupabaseClient();
-  if (!client) return { success: false, error: 'No hay conexión a Supabase' };
+  if (!client) {
+    console.error('Supabase no está configurado (URL o Key ausentes)');
+    return { success: false, error: 'Faltan credenciales de Supabase (VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY).' };
+  }
 
   try {
     const nowIso = new Date().toISOString();
+    const tituloClean = String(anuncio.titulo || '').trim();
+    const contenidoClean = String(anuncio.contenido || '').trim();
+    const activoVal = anuncio.activo !== undefined ? Boolean(anuncio.activo) : true;
+    const prioridadVal = anuncio.prioridad || 'normal';
+
+    // Payload que coincide con las columnas exactas de la tabla announcements:
+    // id (uuid autogenerado por Postgres), titulo (text), contenido (text), activo (bool), prioridad (text), fecha_creacion (timestamptz)
     const payload: any = {
-      titulo: anuncio.titulo.trim(),
-      contenido: anuncio.contenido.trim(),
-      activo: anuncio.activo !== undefined ? anuncio.activo : true,
+      titulo: tituloClean,
+      contenido: contenidoClean,
+      activo: activoVal,
+      prioridad: prioridadVal,
       fecha_creacion: anuncio.fecha_creacion || nowIso
     };
-    if (anuncio.creador_nombre) {
-      payload.creador_nombre = anuncio.creador_nombre;
+
+    console.log('Insertando comunicado en Supabase announcements:', payload);
+
+    let { data, error } = await client
+      .from('announcements')
+      .insert(payload)
+      .select();
+
+    if (error) {
+      console.warn('Advertencia en insert payload completo:', error.message);
+      // Fallback sin prioridad por si la columna no existe en alguna versión previa
+      const fallbackPayload = {
+        titulo: tituloClean,
+        contenido: contenidoClean,
+        activo: activoVal,
+        fecha_creacion: anuncio.fecha_creacion || nowIso
+      };
+      const res2 = await client.from('announcements').insert(fallbackPayload).select();
+      data = res2.data;
+      error = res2.error;
     }
 
-    const { data, error } = await client.from('announcements').insert(payload).select().single();
     if (error) {
-      console.warn('Error inserting announcement in Supabase with full payload, trying standard payload:', error.message);
-      // Minimal payload in case extra columns aren't in user's table
-      const minPayload = {
-        titulo: anuncio.titulo.trim(),
-        contenido: anuncio.contenido.trim(),
-        activo: true,
-        fecha_creacion: nowIso
-      };
-      const { data: minData, error: minErr } = await client.from('announcements').insert(minPayload).select().single();
-      if (minErr) {
-        console.error('Supabase insert announcement failed:', minErr);
-        return { success: false, error: minErr.message };
-      }
-      return { 
-        success: true, 
-        data: {
-          id: String(minData.id),
-          titulo: minData.titulo,
-          contenido: minData.contenido,
-          activo: minData.activo !== false,
-          fecha_creacion: minData.fecha_creacion || nowIso,
-          creador_nombre: minData.creador_nombre || 'Mariana Silva (Admin)'
-        }
-      };
+      console.error('Error definitivo de Supabase al insertar comunicado:', error.message, error);
+      return { success: false, error: error.message };
     }
+
+    const insertedRow = Array.isArray(data) && data.length > 0 ? data[0] : (data as any);
+    const createdId = insertedRow?.id ? String(insertedRow.id) : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `an-${Date.now()}`);
+
+    console.log('¡Comunicado guardado en Supabase con éxito!', insertedRow);
 
     return { 
       success: true, 
       data: {
-        id: String(data.id),
-        titulo: data.titulo,
-        contenido: data.contenido,
-        activo: data.activo !== false,
-        fecha_creacion: data.fecha_creacion || nowIso,
-        creador_nombre: data.creador_nombre || 'Mariana Silva (Admin)'
+        id: createdId,
+        titulo: insertedRow?.titulo || tituloClean,
+        contenido: insertedRow?.contenido || contenidoClean,
+        activo: insertedRow?.activo !== false,
+        fecha_creacion: insertedRow?.fecha_creacion || nowIso,
+        creador_nombre: 'Mariana Silva (Admin)'
       }
     };
   } catch (err: any) {
-    console.error('Exception in insertAnnouncementInSupabase:', err);
-    return { success: false, error: err?.message || 'Error al crear comunicado' };
+    console.error('Excepción al insertar comunicado en Supabase:', err);
+    return { success: false, error: err?.message || 'Error inesperado al guardar comunicado' };
   }
 }
 
@@ -1282,7 +1302,6 @@ export async function updateAnnouncementInSupabase(
     if (updates.activo !== undefined) payload.activo = updates.activo;
     if (updates.titulo !== undefined) payload.titulo = updates.titulo.trim();
     if (updates.contenido !== undefined) payload.contenido = updates.contenido.trim();
-    if (updates.lecturas_confirmadas !== undefined) payload.lecturas_confirmadas = updates.lecturas_confirmadas;
 
     const { error } = await client.from('announcements').update(payload).eq('id', id);
     if (error) {

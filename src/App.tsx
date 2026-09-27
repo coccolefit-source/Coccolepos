@@ -1571,8 +1571,9 @@ export default function App() {
 
   // --- ACTIONS: ANUNCIOS ---
 
-  const handleAddAnuncio = async (newAn: Omit<Anuncio, 'id'>) => {
-    const anId = (newAn as any).id || `an-${Date.now()}`;
+  const handleAddAnuncio = async (newAn: Anuncio | Omit<Anuncio, 'id'>) => {
+    const hasPreassignedId = Boolean((newAn as any).id);
+    const anId = (newAn as any).id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `an-${Date.now()}`);
     const an: Anuncio = {
       ...newAn,
       id: anId,
@@ -1586,14 +1587,15 @@ export default function App() {
     }));
     pushNotification('Nuevo comunicado publicado en el tablero.', 'success');
 
-    if (isSupabaseConfigured()) {
+    // Si no fue guardado previamente con ID asignado, guardar en Supabase
+    if (!hasPreassignedId && isSupabaseConfigured()) {
       try {
         await insertAnnouncementInSupabase({
           titulo: an.titulo,
           contenido: an.contenido,
           activo: an.activo !== false,
-          fecha_creacion: an.fecha_creacion,
-          creador_nombre: an.creador_nombre
+          prioridad: 'normal',
+          fecha_creacion: an.fecha_creacion
         });
       } catch (err) {
         console.error('Error al insertar comunicado en Supabase:', err);

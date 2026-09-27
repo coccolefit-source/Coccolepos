@@ -1166,34 +1166,41 @@ export default function AdminDashboard({
 
   const handleAnuncioSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!anuncioTitulo.trim() || !anuncioContenido.trim()) return;
+    const tituloTrim = anuncioTitulo.trim();
+    const contenidoTrim = anuncioContenido.trim();
+    if (!tituloTrim || !contenidoTrim) return;
 
     setIsSubmittingAnuncio(true);
     try {
       const nowIso = new Date().toISOString();
       const res = await insertAnnouncementInSupabase({
-        titulo: anuncioTitulo.trim(),
-        contenido: anuncioContenido.trim(),
+        titulo: tituloTrim,
+        contenido: contenidoTrim,
         activo: true,
-        fecha_creacion: nowIso,
-        creador_nombre: 'Mariana Silva (Admin)',
+        prioridad: 'normal',
+        fecha_creacion: nowIso
       });
 
       if (res.success && res.data) {
         onAddAnuncio(res.data);
+        setAnuncioTitulo('');
+        setAnuncioContenido('');
       } else {
+        console.warn('Advertencia al insertar en Supabase:', res.error);
+        if (res.error) {
+          alert('Aviso de Supabase: ' + res.error);
+        }
         onAddAnuncio({
-          titulo: anuncioTitulo.trim(),
-          contenido: anuncioContenido.trim(),
+          titulo: tituloTrim,
+          contenido: contenidoTrim,
           fecha: nowIso.split('T')[0],
           fecha_creacion: nowIso,
           activo: true,
-          creador_nombre: 'Mariana Silva (Admin)',
+          creador_nombre: 'Mariana Silva (Admin)'
         });
+        setAnuncioTitulo('');
+        setAnuncioContenido('');
       }
-
-      setAnuncioTitulo('');
-      setAnuncioContenido('');
     } catch (err: any) {
       console.error('Error al publicar anuncio en Supabase:', err);
       alert('Error al publicar el comunicado: ' + (err?.message || err));
