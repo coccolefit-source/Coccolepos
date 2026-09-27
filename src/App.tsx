@@ -5,13 +5,23 @@
 
 import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES } from './types';
-import AnalyticsPanel from './components/AnalyticsPanel';
 import Leaderboard from './components/Leaderboard';
-import AdminDashboard from './components/AdminDashboard';
-import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
+import { enqueueOfflineAction } from './lib/offlineQueue';
+
+// Lazy loading para optimización de bundle inicial
+const AnalyticsPanel = React.lazy(() => import('./components/AnalyticsPanel'));
+const AdminDashboard = React.lazy(() => import('./components/AdminDashboard'));
+const EmployeeWorkspace = React.lazy(() => import('./components/EmployeeWorkspace'));
+
+const SectionLoadingFallback = () => (
+  <div className="flex flex-col items-center justify-center py-12 space-y-3 w-full bg-white rounded-xl border border-slate-100 shadow-3xs">
+    <div className="w-7 h-7 border-2 border-[#4B9CD3] border-t-transparent rounded-full animate-spin"></div>
+    <span className="text-[11px] text-slate-400 font-semibold tracking-wide">Cargando módulo...</span>
+  </div>
+);
 import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database } from 'lucide-react';
 import { getGlobalMetrics } from './utils/metrics';
 import {
@@ -427,18 +437,7 @@ export default function App() {
     }
   }, [state.alertasPanico, soundEnabled, activeUserRole]);
 
-  // Sincronizar cambios del estado general con localStorage
-  useEffect(() => {
-  }, [state]);
 
-  // Sincronizar activeUserRole con localStorage
-  useEffect(() => {
-    if (activeUserRole) {
-      // localStorage eliminado
-    } else {
-      // localStorage eliminado
-    }
-  }, [activeUserRole]);
 
   // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario para evitar datos obsoletos en localStorage
   useEffect(() => {
@@ -1609,8 +1608,17 @@ export default function App() {
       clientes: updatedClientes
     }));
 
-    // Sincronizar Venta en Supabase
-    insertSaleInSupabase(venta);
+    // Sincronizar Venta en Supabase con tolerancia a fallos offline
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      enqueueOfflineAction('insert_sale', venta);
+    } else {
+      insertSaleInSupabase(venta).then(ok => {
+        if (!ok) enqueueOfflineAction('insert_sale', venta);
+      }).catch(err => {
+        console.warn('Error al registrar venta en Supabase, encolando offline:', err);
+        enqueueOfflineAction('insert_sale', venta);
+      });
+    }
 
     const rawItems = nuevaVenta.productos_vendidos || (nuevaVenta as any).productos || [];
     const articulos = rawItems.map((p: any) => ({
@@ -2142,26 +2150,30 @@ export default function App() {
               
               {/* FILA 3: Visualización de Progreso (w-full) */}
               <div id="row-progress" className="w-full">
-                <AnalyticsPanel
-                  tareas={state.tareas}
-                  ventas={state.ventas}
-                  productos={state.productos}
-                  filtro={filtroGeneral}
-                  setFiltro={setFiltroGeneral}
-                  renderMode="progress"
-                />
+                <React.Suspense fallback={<SectionLoadingFallback />}>
+                  <AnalyticsPanel
+                    tareas={state.tareas}
+                    ventas={state.ventas}
+                    productos={state.productos}
+                    filtro={filtroGeneral}
+                    setFiltro={setFiltroGeneral}
+                    renderMode="progress"
+                  />
+                </React.Suspense>
               </div>
 
               {/* FILA 4: Impulso Operativo Coccole Fit (w-full) */}
               <div id="row-impulse" className="w-full">
-                <AnalyticsPanel
-                  tareas={state.tareas}
-                  ventas={state.ventas}
-                  productos={state.productos}
-                  filtro={filtroGeneral}
-                  setFiltro={setFiltroGeneral}
-                  renderMode="impulse"
-                />
+                <React.Suspense fallback={<SectionLoadingFallback />}>
+                  <AnalyticsPanel
+                    tareas={state.tareas}
+                    ventas={state.ventas}
+                    productos={state.productos}
+                    filtro={filtroGeneral}
+                    setFiltro={setFiltroGeneral}
+                    renderMode="impulse"
+                  />
+                </React.Suspense>
               </div>
 
               {/* FILA 5: Tabla de Posiciones y Ranking (w-full) */}
@@ -2280,19 +2292,73 @@ export default function App() {
 
             {/* FILA 4: MÓDULOS DE GESTIÓN INTERACTIVOS - FULL WIDTH */}
             <div className="w-full">
-              <AdminDashboard
-                openTabs={openTabs}
-                activeTab={activeTab}
-                setActiveTab={handleSelectTab}
-                onCloseTab={handleCloseTab}
-                rankingWeights={rankingWeights}
-                onUpdateRankingWeights={handleUpdateRankingWeights}
-                upsellRules={upsellRules}
-                onUpdateUpsellRules={handleUpdateUpsellRules}
-                usuarios={state.usuarios}
+              <React.Suspense fallback={<SectionLoadingFallback />}>
+                <AdminDashboard
+                  openTabs={openTabs}
+                  activeTab={activeTab}
+                  setActiveTab={handleSelectTab}
+                  onCloseTab={handleCloseTab}
+                  rankingWeights={rankingWeights}
+                  onUpdateRankingWeights={handleUpdateRankingWeights}
+                  upsellRules={upsellRules}
+                  onUpdateUpsellRules={handleUpdateUpsellRules}
+                  usuarios={state.usuarios}
 
+                  tareas={state.tareas}
+                  productos={state.productos}
+                  fichajes={state.fichajes}
+                  incidencias={state.incidencias}
+                  anuncios={state.anuncios}
+                  feedbacks={state.feedbacks || []}
+                  inventario={state.inventario || []}
+                  horarios={state.horarios || []}
+                  productosCatalogo={state.productosCatalogo || []}
+                  ventasRegistradas={state.ventasRegistradas || []}
+                  cuadresCaja={state.cuadresCaja || []}
+                  alertasPanico={state.alertasPanico || []}
+                  clientes={state.clientes || []}
+                  onAddTarea={handleAddTarea}
+                  onAddTareasBulk={handleAddTareasBulk}
+                  onEditTarea={handleEditTarea}
+                  onDeleteTarea={handleDeleteTarea}
+                  onDeleteAllTareas={handleDeleteAllTareas}
+                  onUpdateTaskOrders={handleUpdateTaskOrders}
+                  onAddProducto={handleAddProducto}
+                  onEditProducto={handleEditProducto}
+                  onDeleteProducto={handleDeleteProducto}
+                  onAddAnuncio={handleAddAnuncio}
+                  onResolveIncidencia={handleResolveIncidencia}
+                  onAddFeedback={handleAddFeedback}
+                  onCreateUsuario={handleCreateUsuario}
+                  onEditUsuario={handleEditUsuario}
+                  onDeleteUsuario={handleDeleteUsuario}
+                  onSaveInventarioItem={handleSaveInventarioItem}
+                  onDeleteInventarioItem={handleDeleteInventarioItem}
+                  onSaveTurno={handleSaveTurno}
+                  onDeleteTurno={handleDeleteTurno}
+                  onDeleteFichaje={handleDeleteFichaje}
+                  onSaveProductoCatalogo={handleSaveProductoCatalogo}
+                  onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
+                  onDuplicarHorarios={handleDuplicarHorarios}
+                  onUpdateVenta={handleUpdateVenta}
+                  onAnularVenta={handleAnularVenta}
+                />
+              </React.Suspense>
+            </div>
+
+          </div>
+        ) : (
+          /* ========================================================= */
+          /* VISTA EMPLEADO (ESTACIÓN DE TRABAJO PC DE NUTRIFIT)       */
+          /* ========================================================= */
+          <div className="space-y-6 max-w-7xl mx-auto py-4">
+            <React.Suspense fallback={<SectionLoadingFallback />}>
+              <EmployeeWorkspace
+                empleado={currentUser}
+                usuarios={state.usuarios}
                 tareas={state.tareas}
                 productos={state.productos}
+                ventas={state.ventas}
                 fichajes={state.fichajes}
                 incidencias={state.incidencias}
                 anuncios={state.anuncios}
@@ -2302,73 +2368,22 @@ export default function App() {
                 productosCatalogo={state.productosCatalogo || []}
                 ventasRegistradas={state.ventasRegistradas || []}
                 cuadresCaja={state.cuadresCaja || []}
-                alertasPanico={state.alertasPanico || []}
                 clientes={state.clientes || []}
-                onAddTarea={handleAddTarea}
-                onAddTareasBulk={handleAddTareasBulk}
-                onEditTarea={handleEditTarea}
-                onDeleteTarea={handleDeleteTarea}
-                onDeleteAllTareas={handleDeleteAllTareas}
+                posVentas={state.ventasRegistradas}
+                rankingWeights={rankingWeights}
+                upsellRules={upsellRules}
+                onUpdateTareaEstado={handleUpdateTareaEstado}
                 onUpdateTaskOrders={handleUpdateTaskOrders}
-                onAddProducto={handleAddProducto}
-                onEditProducto={handleEditProducto}
-                onDeleteProducto={handleDeleteProducto}
-                onAddAnuncio={handleAddAnuncio}
-                onResolveIncidencia={handleResolveIncidencia}
-                onAddFeedback={handleAddFeedback}
-                onCreateUsuario={handleCreateUsuario}
-                onEditUsuario={handleEditUsuario}
-                onDeleteUsuario={handleDeleteUsuario}
-                onSaveInventarioItem={handleSaveInventarioItem}
-                onDeleteInventarioItem={handleDeleteInventarioItem}
-                onSaveTurno={handleSaveTurno}
-                onDeleteTurno={handleDeleteTurno}
-                onDeleteFichaje={handleDeleteFichaje}
-                onSaveProductoCatalogo={handleSaveProductoCatalogo}
-                onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
-                onDuplicarHorarios={handleDuplicarHorarios}
-                onUpdateVenta={handleUpdateVenta}
-                onAnularVenta={handleAnularVenta}
+
+                onAddVentaSugerida={handleAddVentaSugerida}
+                onRegistrarFichaje={handleRegistrarFichaje}
+                onAddIncidencia={handleAddIncidencia}
+                onUpdateStock={handleUpdateStock}
+                onRegistrarVenta={handleRegistrarVenta}
+                onRegistrarCuadreCaja={handleRegistrarCuadreCaja}
+                onConfirmarLecturaAnuncio={handleConfirmarLecturaAnuncio}
               />
-            </div>
-
-          </div>
-        ) : (
-          /* ========================================================= */
-          /* VISTA EMPLEADO (ESTACIÓN DE TRABAJO PC DE NUTRIFIT)       */
-          /* ========================================================= */
-          <div className="space-y-6 max-w-7xl mx-auto py-4">
-            <EmployeeWorkspace
-              empleado={currentUser}
-              usuarios={state.usuarios}
-              tareas={state.tareas}
-              productos={state.productos}
-              ventas={state.ventas}
-              fichajes={state.fichajes}
-              incidencias={state.incidencias}
-              anuncios={state.anuncios}
-              feedbacks={state.feedbacks || []}
-              inventario={state.inventario || []}
-              horarios={state.horarios || []}
-              productosCatalogo={state.productosCatalogo || []}
-              ventasRegistradas={state.ventasRegistradas || []}
-              cuadresCaja={state.cuadresCaja || []}
-              clientes={state.clientes || []}
-              posVentas={state.ventasRegistradas}
-              rankingWeights={rankingWeights}
-              upsellRules={upsellRules}
-              onUpdateTareaEstado={handleUpdateTareaEstado}
-              onUpdateTaskOrders={handleUpdateTaskOrders}
-
-              onAddVentaSugerida={handleAddVentaSugerida}
-              onRegistrarFichaje={handleRegistrarFichaje}
-              onAddIncidencia={handleAddIncidencia}
-              onUpdateStock={handleUpdateStock}
-              onRegistrarVenta={handleRegistrarVenta}
-              onRegistrarCuadreCaja={handleRegistrarCuadreCaja}
-              onConfirmarLecturaAnuncio={handleConfirmarLecturaAnuncio}
-            />
-
+            </React.Suspense>
           </div>
         )}
 

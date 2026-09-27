@@ -19,7 +19,7 @@ interface LeaderboardProps {
   rankingWeights?: RankingWeights;
 }
 
-export default function Leaderboard({
+function Leaderboard({
   usuarios,
   tareas,
   ventas,
@@ -29,18 +29,21 @@ export default function Leaderboard({
   posVentas = [],
   rankingWeights = DEFAULT_RANKING_WEIGHTS,
 }: LeaderboardProps) {
-  // Calcular leaderboard según el filtro activo y ponderación
-  const leaderboardData = calculateLeaderboard(
-    usuarios,
-    tareas,
-    ventas,
-    fichajes,
-    productos,
-    filtro,
-    new Date().toISOString().split('T')[0],
-    posVentas,
-    rankingWeights
-  );
+  // Calcular leaderboard según el filtro activo y ponderación optimizado con useMemo
+  const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
+  const leaderboardData = React.useMemo(() => {
+    return calculateLeaderboard(
+      usuarios,
+      tareas,
+      ventas,
+      fichajes,
+      productos,
+      filtro,
+      todayStr,
+      posVentas,
+      rankingWeights
+    );
+  }, [usuarios, tareas, ventas, fichajes, productos, filtro, todayStr, posVentas, rankingWeights]);
 
 
   // Separar Top 3 del resto
@@ -249,3 +252,5 @@ export default function Leaderboard({
     </div>
   );
 }
+
+export default React.memo(Leaderboard);
