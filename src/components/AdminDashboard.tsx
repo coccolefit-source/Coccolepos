@@ -155,14 +155,23 @@ export default function AdminDashboard({
         console.warn('Advertencia al consultar task_progress en admin:', error.message);
       }
       if (data && data.length > 0) {
-        setAdminProductividadData(data.map((d: any) => ({
-          id: String(d.id || d.employee_name),
-          employee_name: d.employee_name || 'Colaborador',
-          completadas: Number(d.completadas) || 0,
-          totales: Number(d.totales) || 0,
-          porcentaje: Number(d.porcentaje) || 0,
-          updated_at: d.updated_at || new Date().toISOString()
-        })));
+        setAdminProductividadData(data.map((d: any) => {
+          let rawTot = Number(d.totales) || 0;
+          let rawComp = Number(d.completadas) || 0;
+          if (rawTot > 24 && (rawTot % 24 === 0 || rawTot === 48)) {
+            rawTot = 24;
+            rawComp = Math.min(rawComp, 24);
+          }
+          const pct = rawTot > 0 ? Math.round((rawComp / rawTot) * 100) : (Number(d.porcentaje) || 0);
+          return {
+            id: String(d.id || d.employee_name),
+            employee_name: d.employee_name || 'Colaborador',
+            completadas: rawComp,
+            totales: rawTot,
+            porcentaje: pct,
+            updated_at: d.updated_at || new Date().toISOString()
+          };
+        }));
       } else {
         setAdminProductividadData([]);
       }
@@ -249,10 +258,22 @@ export default function AdminDashboard({
 
   const handleExportRendimiento = () => {
     const headers = ['ID Colaborador', 'Nombre', 'Area Trabajo', 'Tareas Completadas', 'Tareas Asignadas', 'Eficiencia (%)'];
+    const hoyStr = getLocalDateString();
     const rows = usuarios.filter(u => u.rol === 'empleado').map(emp => {
-      const empTareas = tareas.filter(t => t.asignado_a === emp.id);
+      const empTareasRaw = tareas.filter(t => (t.asignado_a === emp.id || t.asignado_a === emp.nombre) && (!t.fecha || getLocalDateString(t.fecha) === hoyStr));
+      const deduplicatedMap = new Map<string, Tarea>();
+      empTareasRaw.forEach(t => {
+        const key = (t.titulo || '').trim().toLowerCase();
+        const existing = deduplicatedMap.get(key);
+        if (!existing) {
+          deduplicatedMap.set(key, t);
+        } else if (t.estado === 'Completada' && existing.estado !== 'Completada') {
+          deduplicatedMap.set(key, t);
+        }
+      });
+      const empTareas = deduplicatedMap.size > 0 ? Array.from(deduplicatedMap.values()) : empTareasRaw;
       const compl = empTareas.filter(t => t.estado === 'Completada').length;
-      const totalT = empTareas.length;
+      const totalT = empTareas.length > 24 && empTareas.length % 24 === 0 ? 24 : (empTareas.length > 0 ? Math.min(empTareas.length, 24) : 24);
       const pct = totalT > 0 ? ((compl / totalT) * 100).toFixed(1) : '100.0';
       return [
         emp.id,
@@ -2617,18 +2638,6 @@ export default function AdminDashboard({
                 filtro={filtroGeneral}
                 setFiltro={setFiltroGeneral}
                 renderMode="progress"
-              />
-            </div>
-
-            {/* Impulso Operativo */}
-            <div id="row-impulse-admin" className="w-full">
-              <AnalyticsPanel
-                tareas={tareas}
-                ventas={ventas}
-                productos={productos}
-                filtro={filtroGeneral}
-                setFiltro={setFiltroGeneral}
-                renderMode="impulse"
               />
             </div>
 

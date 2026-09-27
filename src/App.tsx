@@ -897,9 +897,27 @@ export default function App() {
       const assignedUser = state.usuarios.find(u => u.id === originalTask.asignado_a);
       const empName = assignedUser?.nombre || currentUser.nombre;
       if (empName) {
-        const userTasks = state.tareas.filter(t => t.asignado_a === (assignedUser?.id || currentUser.id));
-        const completedCount = userTasks.filter(t => t.id === id ? estado === 'Completada' : t.estado === 'Completada').length;
-        guardarProgresoEnSupabase(empName, completedCount, userTasks.length);
+        const hoyStr = getLocalDateString();
+        const userTasksRaw = state.tareas.filter(t => 
+          (t.asignado_a === (assignedUser?.id || currentUser.id) || t.asignado_a === empName || !t.asignado_a) &&
+          (!t.fecha || getLocalDateString(t.fecha) === hoyStr)
+        );
+        // Deduplicar tareas por título
+        const deduplicatedMap = new Map<string, Tarea>();
+        userTasksRaw.forEach(t => {
+          const key = (t.titulo || '').trim().toLowerCase();
+          const existing = deduplicatedMap.get(key);
+          const isComp = t.id === id ? estado === 'Completada' : t.estado === 'Completada';
+          if (!existing) {
+            deduplicatedMap.set(key, { ...t, estado: isComp ? 'Completada' : t.estado });
+          } else if (isComp) {
+            deduplicatedMap.set(key, { ...t, estado: 'Completada' });
+          }
+        });
+        const userTasks = Array.from(deduplicatedMap.values());
+        const totalCount = userTasks.length > 24 && userTasks.length % 24 === 0 ? 24 : (userTasks.length > 0 ? Math.min(userTasks.length, 24) : 24);
+        const completedCount = userTasks.filter(t => t.estado === 'Completada').length;
+        guardarProgresoEnSupabase(empName, completedCount, totalCount, hoyStr);
       }
 
       const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';

@@ -2439,8 +2439,12 @@ export const guardarProgresoEnSupabase = async (employeeName: string, completada
   const client = getSupabaseClient();
   if (!client) return;
 
-  const fechaRegistro = fecha || new Date().toISOString().split('T')[0]; // Obtiene la fecha actual 'YYYY-MM-DD'
-  const porcentaje = totales > 0 ? Math.round((completadas / totales) * 100) : 0;
+  const fechaRegistro = fecha || getLocalDateString();
+  // En Coccole Fit la jornada diaria oficial consta de 24 tareas predeterminadas.
+  // Si totales llega en 48 o múltiplo por duplicidad de lotes o múltiples colaboradores, normalizar a 24.
+  const totalesAjustados = totales > 24 && (totales % 24 === 0 || totales === 48) ? 24 : (totales > 0 ? Math.min(totales, 24) : 24);
+  const completadasAjustadas = Math.min(completadas, totalesAjustados);
+  const porcentaje = totalesAjustados > 0 ? Math.round((completadasAjustadas / totalesAjustados) * 100) : 0;
   
   // ID único por empleado y por día para actualizar la misma fila sin duplicar basura
   const recordId = `${employeeName}_${fechaRegistro}`.replace(/\s+/g, '_');
@@ -2453,8 +2457,8 @@ export const guardarProgresoEnSupabase = async (employeeName: string, completada
           id: recordId,
           employee_name: employeeName,
           fecha: fechaRegistro,
-          completadas: completadas,
-          totales: totales,
+          completadas: completadasAjustadas,
+          totales: totalesAjustados,
           porcentaje: porcentaje,
           updated_at: new Date().toISOString()
         }
@@ -2463,7 +2467,7 @@ export const guardarProgresoEnSupabase = async (employeeName: string, completada
     if (error) {
       console.error('Error al guardar el progreso en Supabase:', error.message);
     } else {
-      console.log('Progreso sincronizado en Supabase con éxito:', { completadas, totales, porcentaje, fecha: fechaRegistro });
+      console.log('Progreso sincronizado en Supabase con éxito:', { completadas: completadasAjustadas, totales: totalesAjustados, porcentaje, fecha: fechaRegistro });
     }
   } catch (err) {
     console.error('Error inesperado al guardar progreso en Supabase:', err);
@@ -2534,9 +2538,14 @@ export const actualizarVistaProductividadEmpleado = async (nombreEmpleado: strin
       .eq('fecha', fechaBuscar)
       .maybeSingle();
 
-    const completadas = data ? data.completadas : 0;
-    const totales = data ? data.totales : 0;
-    const porcentaje = data ? data.porcentaje : 0;
+    let completadas = data ? (Number(data.completadas) || 0) : 0;
+    let totales = data ? (Number(data.totales) || 0) : 0;
+    // Si la base de datos tenía 48 tareas registradas por duplicidad, normalizar al estricto de 24 diarias
+    if (totales > 24 && (totales % 24 === 0 || totales === 48)) {
+      totales = 24;
+      completadas = Math.min(completadas, 24);
+    }
+    const porcentaje = totales > 0 ? Math.round((completadas / totales) * 100) : (data ? Number(data.porcentaje) || 0 : 0);
 
     // Actualizar los elementos visuales en el HTML del empleado
     const barra = document.getElementById('barra-progreso-prod');
@@ -2603,9 +2612,13 @@ export const renderizarSeccionProductividadEmpleado = async (nombreEmpleado: str
       .eq('fecha', fechaBuscar)
       .maybeSingle();
 
-    const completadas = data ? data.completadas : 0;
-    const totales = data ? data.totales : 0;
-    const porcentaje = data ? data.porcentaje : 0;
+    let completadas = data ? (Number(data.completadas) || 0) : 0;
+    let totales = data ? (Number(data.totales) || 0) : 0;
+    if (totales > 24 && (totales % 24 === 0 || totales === 48)) {
+      totales = 24;
+      completadas = Math.min(completadas, 24);
+    }
+    const porcentaje = totales > 0 ? Math.round((completadas / totales) * 100) : (data ? Number(data.porcentaje) || 0 : 0);
 
     // 3. Actualizar los elementos visuales en pantalla
     const barra = document.getElementById('barra-progreso-prod');
@@ -2663,8 +2676,14 @@ export const cargarProgresoEmpleadoDesdeSupabase = async (nombreEmpleado: string
       return;
     }
 
-    const completadas = data ? data.completadas : (tareasFecha ? tareasFecha.filter(t => t.estado === 'Completada').length : 0);
-    const totales = data ? data.totales : (tareasFecha ? tareasFecha.length : 0);
+    let rawComp = data ? (Number(data.completadas) || 0) : (tareasFecha ? tareasFecha.filter(t => t.estado === 'Completada').length : 0);
+    let rawTot = data ? (Number(data.totales) || 0) : (tareasFecha ? tareasFecha.length : 0);
+    if (rawTot > 24 && (rawTot % 24 === 0 || rawTot === 48)) {
+      rawTot = 24;
+      rawComp = Math.min(rawComp, 24);
+    }
+    const completadas = rawComp;
+    const totales = rawTot;
     const porcentaje = data ? data.porcentaje : (totales > 0 ? Math.round((completadas / totales) * 100) : 0);
     const updated_at = data?.updated_at;
 
@@ -2717,105 +2736,12 @@ export const cargarProgresoEmpleadoDesdeSupabase = async (nombreEmpleado: string
   }
 };
 
-export const inicializarSesionProgresoEmpleado = (nombreEmpleado = 'Shelsy') => {
-  const botonesTabs = document.querySelectorAll('button');
-  let contenedorTabsNav: HTMLElement | null = null;
-  
-  botonesTabs.forEach(btn => {
-    if (btn.textContent?.includes('Mis Tareas') || btn.textContent?.includes('Mi Checklist') || btn.textContent?.includes('Stock')) {
-      contenedorTabsNav = btn.parentElement as HTMLElement;
-    }
-  });
-
-  if (!contenedorTabsNav) return;
-
-  // Crear la quinta pestaña en la barra de navegacion si no existe
-  if (!document.getElementById('btn-tab-progreso')) {
-    const btnProgreso = document.createElement('button');
-    btnProgreso.id = 'btn-tab-progreso';
-    btnProgreso.className = 'flex-1 py-3 px-4 text-center font-medium text-sm text-gray-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2 border-b-2 border-transparent cursor-pointer';
-    btnProgreso.textContent = 'Progreso';
-    
-    btnProgreso.onclick = (e) => {
-      e.preventDefault();
-      
-      const vistaProgreso = document.getElementById('vista-progreso-empleado');
-      if (vistaProgreso) {
-        vistaProgreso.style.display = 'block';
-      }
-
-      document.querySelectorAll('#btn-tab-progreso, button').forEach(b => {
-        if (b.id === 'btn-tab-progreso') {
-          b.className = 'flex-1 py-3 px-4 text-center font-bold text-sm text-blue-600 transition-all flex items-center justify-center gap-2 border-b-2 border-blue-600 bg-blue-50/30';
-        } else if (b.textContent?.includes('Tareas') || b.textContent?.includes('Checklist') || b.textContent?.includes('Stock') || b.textContent?.includes('Caja') || b.textContent?.includes('Turnos')) {
-          b.className = 'flex-1 py-3 px-4 text-center font-medium text-sm text-gray-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2 border-b-2 border-transparent';
-        }
-      });
-
-      const hoy = new Date().toISOString().split('T')[0];
-      const inputFecha = document.getElementById('input-fecha-progreso') as HTMLInputElement;
-      if (inputFecha) inputFecha.value = hoy;
-      
-      cargarProgresoEmpleadoDesdeSupabase(nombreEmpleado, hoy);
-    };
-
-    (contenedorTabsNav as HTMLElement).appendChild(btnProgreso);
-  }
-
-  // Crear la vista de progreso del empleado
-  if (!document.getElementById('vista-progreso-empleado')) {
-    const vistaDiv = document.createElement('div');
-    vistaDiv.id = 'vista-progreso-empleado';
-    vistaDiv.style.display = 'none';
-    vistaDiv.className = 'mt-6 space-y-4 max-w-4xl mx-auto px-4';
-
-    const hoy = new Date().toISOString().split('T')[0];
-
-    vistaDiv.innerHTML = `
-      <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-gray-100 pb-4">
-          <div>
-            <h2 class="text-base font-bold text-gray-800">Mi Historial de Productividad</h2>
-            <p class="text-xs text-gray-400 mt-0.5">Consulta tu rendimiento diario almacenado directamente en Supabase.</p>
-          </div>
-          <div class="flex items-center gap-2 w-full sm:w-auto">
-            <input type="date" id="input-fecha-progreso" value="${hoy}" class="border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 flex-1 sm:flex-none" />
-            <button id="btn-consultar-fecha" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-semibold hover:bg-blue-700 transition shadow-sm cursor-pointer">
-              Ver Fecha
-            </button>
-          </div>
-        </div>
-        <div id="resultado-progreso-supabase" class="bg-gray-50 p-6 rounded-xl border border-gray-200 text-center">
-          <p class="text-xs text-gray-500">Selecciona una fecha y haz clic en Ver Fecha para consultar el registro.</p>
-        </div>
-      </div>
-    `;
-
-    if ((contenedorTabsNav as HTMLElement).parentNode) {
-      (contenedorTabsNav as HTMLElement).parentNode!.insertBefore(vistaDiv, (contenedorTabsNav as HTMLElement).nextSibling);
-    }
-
-    const btnConsultar = document.getElementById('btn-consultar-fecha');
-    if (btnConsultar) {
-      btnConsultar.onclick = () => {
-        const inputFecha = document.getElementById('input-fecha-progreso') as HTMLInputElement;
-        const fechaSeleccionada = inputFecha?.value;
-        if (fechaSeleccionada) {
-          cargarProgresoEmpleadoDesdeSupabase(nombreEmpleado, fechaSeleccionada);
-        }
-      };
-    }
-
-    const inputFecha = document.getElementById('input-fecha-progreso');
-    if (inputFecha) {
-      inputFecha.onchange = (e: any) => {
-        const fechaSeleccionada = e.target.value;
-        if (fechaSeleccionada) {
-          cargarProgresoEmpleadoDesdeSupabase(nombreEmpleado, fechaSeleccionada);
-        }
-      };
-    }
-  }
+export const inicializarSesionProgresoEmpleado = (_nombreEmpleado = 'Shelsy') => {
+  // Asegurar que no se inyecte ni permanezca la pestaña 'btn-tab-progreso' ni su vista en el DOM
+  const btn = document.getElementById('btn-tab-progreso');
+  if (btn) btn.remove();
+  const vista = document.getElementById('vista-progreso-empleado');
+  if (vista) vista.remove();
 };
 
 
@@ -2968,12 +2894,30 @@ export async function fetchWorkerCompleteMetricsFromSupabase(workerId: string, w
 
   if (progresoEnRango.length > 0) {
     progresoEnRango.forEach((r: any) => {
-      completadasCount += Number(r.completadas || 0);
-      totalesCount += Number(r.totales || 0);
+      let rTot = Number(r.totales || 0);
+      let rComp = Number(r.completadas || 0);
+      if (rTot > 24 && (rTot % 24 === 0 || rTot === 48)) {
+        rTot = 24;
+        rComp = Math.min(rComp, 24);
+      }
+      completadasCount += rComp;
+      totalesCount += rTot;
     });
   } else {
-    completadasCount = tareasEmpleado.filter((t: any) => t.estado === 'Completada').length;
-    totalesCount = tareasEmpleado.length;
+    // Deduplicar tareas del colaborador por título
+    const tareasUnicasMap = new Map<string, any>();
+    tareasEmpleado.forEach((t: any) => {
+      const key = (t.titulo || t.title || '').trim().toLowerCase();
+      const existing = tareasUnicasMap.get(key);
+      if (!existing) {
+        tareasUnicasMap.set(key, t);
+      } else if (t.estado === 'Completada' && existing.estado !== 'Completada') {
+        tareasUnicasMap.set(key, t);
+      }
+    });
+    const listaUnica = tareasEmpleado.length > 24 && tareasUnicasMap.size <= 24 ? Array.from(tareasUnicasMap.values()) : tareasEmpleado;
+    completadasCount = listaUnica.filter((t: any) => t.estado === 'Completada').length;
+    totalesCount = listaUnica.length > 24 && (listaUnica.length % 24 === 0 || listaUnica.length === 48) ? 24 : (listaUnica.length > 0 ? Math.min(listaUnica.length, 24) : 24);
   }
 
   const cumplimientoPct = totalesCount > 0 ? Math.round((completadasCount / totalesCount) * 100) : (progresoEnRango.length > 0 ? 85 : 88);

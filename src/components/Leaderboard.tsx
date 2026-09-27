@@ -127,33 +127,6 @@ export default function Leaderboard({
             <p className="text-[10px] text-center text-slate-400 py-4">No hay suficientes datos de empleados para armar el podio.</p>
           )}
 
-          {/* Reglas de Puntuación según la Ponderación Configurada */}
-          <div className="bg-white border border-slate-200 rounded-lg p-3 text-[9px] text-slate-500 space-y-1 mt-2">
-            <p className="font-bold text-[#2C3E50] text-[10px]">Criterios de Ponderación Activa</p>
-            <ul className="space-y-1 text-[9.5px]">
-              <li className="flex justify-between border-b border-slate-100 pb-0.5">
-                <span>Ventas $ Facturado:</span>
-                <strong className="text-[#4B9CD3]">{rankingWeights?.ventas_monto_pct ?? 30}%</strong>
-              </li>
-              <li className="flex justify-between border-b border-slate-100 pb-0.5">
-                <span>Cantidad Transacciones:</span>
-                <strong className="text-[#4B9CD3]">{rankingWeights?.ventas_cantidad_pct ?? 20}%</strong>
-              </li>
-              <li className="flex justify-between border-b border-slate-100 pb-0.5">
-                <span>Tareas Diarias:</span>
-                <strong className="text-[#4B9CD3]">{rankingWeights?.tareas_cumplimiento_pct ?? 25}%</strong>
-              </li>
-              <li className="flex justify-between border-b border-slate-100 pb-0.5">
-                <span>Fidelización Clientes:</span>
-                <strong className="text-[#4B9CD3]">{rankingWeights?.captura_clientes_pct ?? 15}%</strong>
-              </li>
-              <li className="flex justify-between">
-                <span>Puntualidad Fichaje:</span>
-                <strong className="text-[#4B9CD3]">{rankingWeights?.puntualidad_fichaje_pct ?? 10}%</strong>
-              </li>
-            </ul>
-          </div>
-
         </div>
 
         {/* Lado Derecho: Tabla extendida de posiciones */}

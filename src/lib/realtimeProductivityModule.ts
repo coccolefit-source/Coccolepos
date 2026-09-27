@@ -106,124 +106,15 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
   // ==========================================
   // 3. INYECCION DE LA 5ª PESTAÑA DE PROGRESO (EMPLEADO)
   // ==========================================
-  const inicializarSesionProgresoEmpleadoSeguro = (nombreEmpleado = 'Shelsy') => {
+  const inicializarSesionProgresoEmpleadoSeguro = (_nombreEmpleado = 'Shelsy') => {
     if (typeof document === 'undefined') return;
-
     try {
-      const botonesTabs = document.querySelectorAll('button');
-      let contenedorTabsNav: HTMLElement | null = null;
-
-      botonesTabs.forEach(btn => {
-        const txt = btn.textContent || '';
-        if (txt.includes('Mi Checklist') || txt.includes('Mis Tareas') || txt.includes('Stock') || txt.includes('Caja / Ventas')) {
-          contenedorTabsNav = btn.parentElement as HTMLElement;
-        }
-      });
-
-      if (!contenedorTabsNav) return;
-
-      // Insertar solo si no existe
-      if (!document.getElementById('btn-tab-progreso')) {
-        const btnProgreso = document.createElement('button');
-        btnProgreso.id = 'btn-tab-progreso';
-        btnProgreso.type = 'button';
-        btnProgreso.className = 'flex-1 py-2.5 px-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 min-w-[120px] text-slate-600 hover:bg-[#EBF5FB]/40 hover:text-[#2C3E50] cursor-pointer';
-        btnProgreso.innerHTML = 
-          '<svg class="w-4 h-4 shrink-0" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>' +
-          '<span>Progreso</span>';
-
-        btnProgreso.onclick = (e) => {
-          e.preventDefault();
-
-          const vistaProgreso = document.getElementById('vista-progreso-empleado');
-          if (vistaProgreso) vistaProgreso.style.display = 'block';
-
-          // Resaltar boton
-          contenedorTabsNav?.querySelectorAll('button').forEach(b => {
-            if (b.id === 'btn-tab-progreso') {
-              b.className = 'flex-1 py-2.5 px-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 min-w-[120px] bg-[#4B9CD3] text-white shadow-2xs cursor-pointer';
-            } else {
-              b.className = 'flex-1 py-2.5 px-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 min-w-[120px] text-slate-600 hover:bg-[#EBF5FB]/40 hover:text-[#2C3E50] cursor-pointer';
-            }
-          });
-
-          const hoy = getLocalDateString();
-          const inputFecha = document.getElementById('input-fecha-progreso') as HTMLInputElement;
-          if (inputFecha) inputFecha.value = hoy;
-
-          const nombreActual = (window as any).sesionActual?.nombre || nombreEmpleado;
-          cargarProgresoEmpleadoDesdeSupabase(nombreActual, hoy);
-        };
-
-        // Al hacer clic en los otros botones del tab, ocultar la vista de progreso si estaba activa
-        contenedorTabsNav.querySelectorAll('button').forEach(btn => {
-          if (btn.id !== 'btn-tab-progreso') {
-            btn.addEventListener('click', () => {
-              const vistaProgreso = document.getElementById('vista-progreso-empleado');
-              if (vistaProgreso) vistaProgreso.style.display = 'none';
-              const btnProg = document.getElementById('btn-tab-progreso');
-              if (btnProg) {
-                btnProg.className = 'flex-1 py-2.5 px-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 min-w-[120px] text-slate-600 hover:bg-[#EBF5FB]/40 hover:text-[#2C3E50] cursor-pointer';
-              }
-            });
-          }
-        });
-
-        contenedorTabsNav.appendChild(btnProgreso);
-      }
-
-      // Inyectar la vista de progreso sin borrar el contenido actual
-      if (!document.getElementById('vista-progreso-empleado')) {
-        const vistaDiv = document.createElement('div');
-        vistaDiv.id = 'vista-progreso-empleado';
-        vistaDiv.style.display = 'none';
-        vistaDiv.className = 'mt-4 space-y-4 max-w-4xl mx-auto';
-
-        const hoy = getLocalDateString();
-
-        vistaDiv.innerHTML = 
-          '<div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">' +
-            '<div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-gray-100 pb-4">' +
-              '<div>' +
-                '<h2 class="text-base font-bold text-gray-800">Mi Historial de Productividad</h2>' +
-                '<p class="text-xs text-gray-400 mt-0.5">Consulta tu rendimiento diario almacenado directamente en Supabase.</p>' +
-              '</div>' +
-              '<div class="flex items-center gap-2 w-full sm:w-auto">' +
-                '<input type="date" id="input-fecha-progreso" value="' + hoy + '" class="border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 flex-1 sm:flex-none" />' +
-                '<button id="btn-consultar-fecha" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-semibold hover:bg-blue-700 transition shadow-sm cursor-pointer">' +
-                  'Ver Fecha' +
-                '</button>' +
-              '</div>' +
-            '</div>' +
-            '<div id="resultado-progreso-supabase" class="bg-gray-50 p-6 rounded-xl border border-gray-200 text-center">' +
-              '<p class="text-xs text-gray-500">Selecciona una fecha y haz clic en Ver Fecha para consultar el registro.</p>' +
-            '</div>' +
-          '</div>';
-
-        if (contenedorTabsNav.parentNode) {
-          contenedorTabsNav.parentNode.insertBefore(vistaDiv, contenedorTabsNav.nextSibling);
-        }
-
-        const btnConsultar = document.getElementById('btn-consultar-fecha');
-        if (btnConsultar) {
-          btnConsultar.onclick = () => {
-            const inputFecha = document.getElementById('input-fecha-progreso') as HTMLInputElement;
-            const fechaSeleccionada = inputFecha?.value;
-            const nombreActual = (window as any).sesionActual?.nombre || nombreEmpleado;
-            if (fechaSeleccionada) cargarProgresoEmpleadoDesdeSupabase(nombreActual, fechaSeleccionada);
-          };
-        }
-
-        const inputFecha = document.getElementById('input-fecha-progreso');
-        if (inputFecha) {
-          inputFecha.onchange = (e: any) => {
-            const nombreActual = (window as any).sesionActual?.nombre || nombreEmpleado;
-            if (e.target?.value) cargarProgresoEmpleadoDesdeSupabase(nombreActual, e.target.value);
-          };
-        }
-      }
+      const btn = document.getElementById('btn-tab-progreso');
+      if (btn) btn.remove();
+      const vista = document.getElementById('vista-progreso-empleado');
+      if (vista) vista.remove();
     } catch (err) {
-      console.warn('Error al inicializar sesión de progreso del empleado:', err);
+      console.warn('Error al limpiar sesión de progreso del empleado:', err);
     }
   };
 
@@ -368,10 +259,34 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
   const actualizarContadoresUI = (tareas: any[]) => {
     if (typeof document === 'undefined' || !tareas) return;
 
-    const total = tareas.length;
-    const completadas = tareas.filter(function (t: any) {
-      return t.completada || t.completed || t.estado === 'Completada' || t.status === 'Completada';
-    }).length;
+    // Deduplicar tareas por título para evitar contar duplicados o lotes múltiples del mismo día
+    const tareasMap = new Map<string, any>();
+    tareas.forEach((t: any) => {
+      const title = (t.title || t.titulo || t.task_name || '').trim().toLowerCase();
+      const isComp = Boolean(t.completada || t.completed || t.estado === 'Completada' || t.status === 'Completada');
+      const existing = tareasMap.get(title);
+      if (!existing) {
+        tareasMap.set(title, { ...t, isComp });
+      } else if (isComp && !existing.isComp) {
+        tareasMap.set(title, { ...t, isComp: true });
+      }
+    });
+
+    const tareasFiltradas = (tareas.length > 24 && tareasMap.size <= 24 && tareasMap.size > 0)
+      ? Array.from(tareasMap.values())
+      : (tareasMap.size > 0 ? Array.from(tareasMap.values()) : tareas);
+
+    // En Coccole Fit la jornada diaria de checklist consta oficialmente de 24 tareas
+    const total = tareasFiltradas.length > 24 && (tareasFiltradas.length % 24 === 0 || tareasFiltradas.length === 48)
+      ? 24 
+      : (tareasFiltradas.length > 0 ? Math.min(tareasFiltradas.length, 24) : 24);
+
+    const completadas = Math.min(
+      tareasFiltradas.filter(function (t: any) {
+        return t.isComp !== undefined ? t.isComp : Boolean(t.completada || t.completed || t.estado === 'Completada' || t.status === 'Completada');
+      }).length,
+      total
+    );
     const porcentaje = total > 0 ? Math.round((completadas / total) * 100) : 0;
 
     // Actualizar el botón del tab: "Mis Tareas (X/Y)" y textos de resumen sin destruir contenedores React
@@ -423,7 +338,21 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
         return;
       }
 
-      const tareas = (data || []).sort((a: any, b: any) => (Number(a.orden ?? a.order_index) || 0) - (Number(b.orden ?? b.order_index) || 0));
+      let tareas = (data || []).sort((a: any, b: any) => (Number(a.orden ?? a.order_index) || 0) - (Number(b.orden ?? b.order_index) || 0));
+      
+      const sesion = (window as any).sesionActual;
+      if (sesion?.rol === 'empleado' && (sesion?.nombre || sesion?.id)) {
+        const empNombre = sesion.nombre?.toLowerCase();
+        const empId = sesion.id;
+        const tareasEmpleado = tareas.filter((t: any) => {
+          const asig = (t.assigned_to || t.asignado_a || t.staff_id || t.staff_name || '').toLowerCase();
+          return asig === empNombre || asig === empId || (!asig && !tareas.some((x: any) => (x.assigned_to === empNombre || x.asignado_a === empNombre)));
+        });
+        if (tareasEmpleado.length > 0) {
+          tareas = tareasEmpleado;
+        }
+      }
+
       if (tareas.length > 0) {
         actualizarContadoresUI(tareas);
       }

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, UpsellRule, DEFAULT_UPSELL_RULES } from '../types';
 
 import { calculateLeaderboard, getGlobalMetrics } from '../utils/metrics';
@@ -211,9 +211,6 @@ export default function EmployeeWorkspace({
       });
       actualizarVistaProductividadEmpleado(empleado.nombre);
       renderizarSeccionProductividadEmpleado(empleado.nombre);
-      setTimeout(() => {
-        inicializarSesionProgresoEmpleado(empleado.nombre);
-      }, 300);
     }
   }, [empleado?.nombre]);
 
@@ -316,12 +313,48 @@ export default function EmployeeWorkspace({
     ? tareasFechaSupabase
     : tareas;
 
-  const misTareas = tareasFuente
-    .filter(t => 
-      (t.asignado_a === empleado.id || t.asignado_a === empleado.nombre || !t.asignado_a || t.asignado_a === 'ALL') &&
-      (!t.fecha || getLocalDateString(t.fecha) === fechaFiltroTareas)
-    )
-    .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  // Filtrar tareas para este colaborador en la fecha seleccionada
+  const misTareasRaw = useMemo(() => {
+    return (tareasFuente || []).filter(t => {
+      // Verificar fecha
+      const fechaOk = !t.fecha || getLocalDateString(t.fecha) === fechaFiltroTareas;
+      if (!fechaOk) return false;
+
+      // Si tiene asignación explícita a este empleado
+      const matchDirecto = t.asignado_a === empleado.id || 
+        t.asignado_a === empleado.nombre || 
+        (Boolean(t.asignado_a) && Boolean(empleado.nombre) && t.asignado_a.toLowerCase() === empleado.nombre.toLowerCase()) ||
+        t.asignado_a === 'ALL';
+      if (matchDirecto) return true;
+
+      // Si no tiene asignado_a, sólo incluirla si no existen tareas explícitamente asignadas a este empleado en el lote
+      const hayAsignadasAEmpleado = (tareasFuente || []).some(x => 
+        x.asignado_a === empleado.id || 
+        x.asignado_a === empleado.nombre || 
+        (Boolean(x.asignado_a) && Boolean(empleado.nombre) && x.asignado_a.toLowerCase() === empleado.nombre.toLowerCase())
+      );
+      return !t.asignado_a && !hayAsignadasAEmpleado;
+    });
+  }, [tareasFuente, empleado.id, empleado.nombre, fechaFiltroTareas]);
+
+  // Deduplicar tareas por título y fecha para garantizar que hoy se cuenten exactamente las 24 tareas oficiales
+  const misTareas = useMemo(() => {
+    const map = new Map<string, Tarea>();
+    for (const t of misTareasRaw) {
+      const key = (t.titulo || '').trim().toLowerCase();
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, t);
+      } else {
+        // Si una de las dos está completada, priorizar la completada
+        if (t.estado === 'Completada' && existing.estado !== 'Completada') {
+          map.set(key, t);
+        }
+      }
+    }
+    const unicas = Array.from(map.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+    return unicas.length > 0 ? unicas : misTareasRaw.sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  }, [misTareasRaw]);
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
@@ -371,7 +404,8 @@ export default function EmployeeWorkspace({
   };
 
   const tareasCompletadasCount = misTareas.filter(t => t.estado === 'Completada').length;
-  const totalTareasCount = misTareas.length;
+  // La jornada diaria oficial de tareas consta de 24 tareas
+  const totalTareasCount = misTareas.length > 0 ? (misTareas.length > 24 && misTareas.length % 24 === 0 ? 24 : misTareas.length) : 24;
   const porcentajeCumplimientoTareas = totalTareasCount > 0 ? Math.round((tareasCompletadasCount / totalTareasCount) * 100) : 100;
 
   // Sincronizar progreso de tareas a Supabase
@@ -896,10 +930,10 @@ export default function EmployeeWorkspace({
             <div className="min-w-0 flex-1">
               <p className="text-[9px] font-bold text-[#4B9CD3] uppercase tracking-wider truncate">Cumplimiento Tareas</p>
               <h3 className="text-lg font-black text-[#2C3E50] leading-none mt-0.5">
-                {metrics.porcentajeTareasCompletadas}%
+                {porcentajeCumplimientoTareas}%
               </h3>
               <p className="text-[9px] text-[#4B9CD3] font-semibold mt-0.5 truncate">
-                {metrics.tareasCompletadas}/{metrics.tareasTotales} listas
+                {tareasCompletadasCount}/{totalTareasCount} listas
               </p>
             </div>
           </div>
@@ -956,31 +990,6 @@ export default function EmployeeWorkspace({
 
       {/* SECUENCIA DE FILAS 100% HORIZONTALES (Full-Width Row Layout) EN LA SESIÓN DE TRABAJADORES */}
       <div className="flex flex-col gap-6 w-full">
-        
-        {/* FILA: Visualización de Progreso (w-full) */}
-        <div id="row-progress" className="w-full">
-          <AnalyticsPanel
-            tareas={tareas}
-            ventas={ventas}
-            productos={localProductos}
-            filtro={filtroGeneral}
-            setFiltro={setFiltroGeneral}
-            renderMode="progress"
-          />
-        </div>
-
-        {/* FILA: Impulso Operativo Coccole Fit (w-full) */}
-        <div id="row-impulse" className="w-full">
-          <AnalyticsPanel
-            tareas={tareas}
-            ventas={ventas}
-            productos={localProductos}
-            filtro={filtroGeneral}
-            setFiltro={setFiltroGeneral}
-            renderMode="impulse"
-          />
-        </div>
-
         {/* FILA: Tabla de Posiciones y Ranking (w-full) */}
         <div id="row-leaderboard" className="w-full">
           <Leaderboard
@@ -994,106 +1003,6 @@ export default function EmployeeWorkspace({
             rankingWeights={rankingWeights}
           />
         </div>
-
-        {/* FILA: Alertas e Incidencias del Local (w-full) */}
-        <div id="row-incidencias" className="w-full rounded-xl border bg-white p-5 shadow-sm font-sans">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-3 mb-4">
-            <div>
-              <h3 className="font-bold text-[#2C3E50] text-sm flex items-center gap-2">
-                <Bell className="w-4.5 h-4.5 text-red-600" />
-                Alertas e Incidencias del Local
-              </h3>
-              <p className="text-[10px] text-slate-500 mt-0.5">Reportes de incidencias críticas de equipos o insumos en tiempo real.</p>
-            </div>
-            <span className="text-[10px] bg-red-100 text-red-800 font-extrabold px-3 py-1 rounded-full shrink-0">
-              {incidencias.filter(i => i.estado === 'Pendiente').length} Activas Hoy
-            </span>
-          </div>
-
-          {incidencias.length === 0 ? (
-            <p className="text-center py-8 text-slate-400 text-xs">No hay alertas ni incidencias reportadas el día de hoy.</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {incidencias.map(inc => (
-                <div
-                  key={inc.id}
-                  className={`p-4 rounded-xl border text-xs flex flex-col justify-between transition-all shadow-3xs ${
-                    inc.estado === 'Pendiente'
-                      ? 'bg-red-50/50 border-red-200 text-red-950 hover:bg-red-50'
-                      : 'bg-slate-50/50 border-slate-200 text-[#2C3E50] hover:bg-slate-50'
-                  }`}
-                >
-                  <div>
-                    <div className="flex justify-between items-start mb-2">
-                      <span className={`font-black uppercase text-[9px] tracking-wider px-2 py-0.5 rounded-full ${
-                        inc.tipo === 'insumo' ? 'bg-amber-100 text-amber-950' : 'bg-red-100 text-red-950'
-                      }`}>
-                        {inc.tipo === 'insumo' ? 'Falta Insumo' : 'Falla Equipo'}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-semibold">{inc.fecha}</span>
-                    </div>
-                    <h4 className="font-extrabold text-sm text-[#2C3E50]">{inc.titulo}</h4>
-                    <p className="text-slate-600 mt-1 text-[11px] leading-relaxed mb-3">{inc.descripcion}</p>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
-                    <span className="text-[9px] text-slate-400 font-bold">
-                      Por: {usuarios.find(u => u.id === inc.usuario_id)?.nombre || 'Colaborador'}
-                    </span>
-                    {inc.estado === 'Pendiente' && onResolveIncidencia ? (
-                      <button
-                        onClick={() => onResolveIncidencia(inc.id)}
-                        className="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-3 py-1 rounded-lg transition-all shadow-3xs cursor-pointer"
-                      >
-                        Resolver Alerta
-                      </button>
-                    ) : (
-                      <span className="text-[#4B9CD3] font-extrabold text-[10px] uppercase flex items-center gap-1">
-                        ✓ {inc.estado === 'Pendiente' ? 'Pendiente' : 'Resuelto'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* FILA: Actividades Recientes y Reportes (w-full) */}
-        {notifications && notifications.length > 0 && (
-          <div id="row-activities" className="w-full rounded-xl border bg-white p-5 shadow-sm font-sans">
-            <div className="border-b border-slate-200 pb-3 mb-4 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-[#2C3E50] text-sm flex items-center gap-2">
-                  <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
-                  Actividades Recientes y Reportes del Sistema
-                </h3>
-                <p className="text-[10px] text-slate-500 mt-0.5">Log en tiempo real de operaciones, fichajes, y checklists completados.</p>
-              </div>
-              <span className="text-[9px] bg-[#EBF5FB] text-[#4B9CD3] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                Conexión Activa
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[300px] overflow-y-auto pr-1">
-              {notifications.map(notif => (
-                <div
-                  key={notif.id}
-                  className="p-3 bg-slate-50 border border-slate-150 rounded-lg flex items-start gap-2.5 hover:bg-slate-100 transition-colors"
-                >
-                  <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                    notif.type === 'success' ? 'bg-[#4B9CD3]' : notif.type === 'alert' ? 'bg-red-500' : 'bg-sky-500'
-                  }`}></div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-slate-700 text-[11px] leading-relaxed font-semibold break-words">{notif.text}</p>
-                    <span className="text-[9px] text-slate-400 font-extrabold mt-1 block">{notif.time}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
       </div>
 
       {/* MÓDULO DE CIERRE DE TURNO Y CUADRE DE CAJA (CORTE DIARIO) */}
@@ -1317,7 +1226,7 @@ export default function EmployeeWorkspace({
               }`}
             >
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span id="tab-mis-tareas-label">Mis Tareas ({misTareas.filter(t => t.estado === 'Completada').length}/{misTareas.length})</span>
+              <span id="tab-mis-tareas-label">Mis Tareas ({tareasCompletadasCount}/{totalTareasCount})</span>
             </button>
 
             <button
@@ -1455,18 +1364,6 @@ export default function EmployeeWorkspace({
                         await guardarProgresoEnSupabase(empleado.nombre, completadas, totales, fechaFiltroTareas);
                         await actualizarVistaProductividadEmpleado(empleado.nombre, fechaFiltroTareas);
                         await renderizarSeccionProductividadEmpleado(empleado.nombre, fechaFiltroTareas);
-
-                        // Redirigir a la vista de progreso
-                        const btnProgreso = document.getElementById('btn-tab-progreso');
-                        if (btnProgreso) {
-                          btnProgreso.click();
-                        } else {
-                          inicializarSesionProgresoEmpleado(empleado.nombre);
-                          setTimeout(() => {
-                            const btn = document.getElementById('btn-tab-progreso');
-                            if (btn) btn.click();
-                          }, 150);
-                        }
                       }}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] px-3 py-1 rounded-lg shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
                     >

@@ -246,7 +246,9 @@ export const getGlobalMetrics = (
     if (isNaN(itemDate.getTime())) return false;
     
     if (filtro === 'diario') {
-      return fechaStr === fechaReferencia;
+      const targetStr = fechaReferencia.split('T')[0];
+      const itemStr = fechaStr.split('T')[0];
+      return itemStr === targetStr;
     } else if (filtro === 'semanal') {
       const diffTime = Math.abs(refDate.getTime() - itemDate.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -259,9 +261,28 @@ export const getGlobalMetrics = (
 
   // Filtrar tareas y calcular estados
   const tareasPeriodo = tareas.filter(t => isInPeriod(t.fecha));
-  const completadas = tareasPeriodo.filter(t => t.estado === 'Completada').length;
-  const enProgreso = tareasPeriodo.filter(t => t.estado === 'En proceso').length;
-  const pendientes = tareasPeriodo.filter(t => t.estado === 'Pendiente').length;
+
+  // Para evitar contar lotes duplicados en la jornada diaria (ej. 48 tareas cuando hoy son 24):
+  let tareasEfectivas = tareasPeriodo;
+  if (filtro === 'diario' && tareasPeriodo.length > 24) {
+    const deduplicadasMap = new Map<string, Tarea>();
+    tareasPeriodo.forEach(t => {
+      const key = (t.titulo || '').trim().toLowerCase();
+      const existing = deduplicadasMap.get(key);
+      if (!existing) {
+        deduplicadasMap.set(key, t);
+      } else if (t.estado === 'Completada' && existing.estado !== 'Completada') {
+        deduplicadasMap.set(key, t);
+      }
+    });
+    if (deduplicadasMap.size > 0 && deduplicadasMap.size <= 24) {
+      tareasEfectivas = Array.from(deduplicadasMap.values());
+    }
+  }
+
+  const completadas = tareasEfectivas.filter(t => t.estado === 'Completada').length;
+  const enProgreso = tareasEfectivas.filter(t => t.estado === 'En proceso').length;
+  const pendientes = tareasEfectivas.filter(t => t.estado === 'Pendiente').length;
 
   // Filtrar ventas sugeridas
   const ventasPeriodo = ventas.filter(v => isInPeriod(v.fecha));
