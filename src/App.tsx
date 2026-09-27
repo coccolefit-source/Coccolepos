@@ -5,23 +5,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES } from './types';
+import AnalyticsPanel from './components/AnalyticsPanel';
 import Leaderboard from './components/Leaderboard';
+import AdminDashboard from './components/AdminDashboard';
+import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
-import { enqueueOfflineAction } from './lib/offlineQueue';
-
-// Lazy loading para optimización de bundle inicial
-const AnalyticsPanel = React.lazy(() => import('./components/AnalyticsPanel'));
-const AdminDashboard = React.lazy(() => import('./components/AdminDashboard'));
-const EmployeeWorkspace = React.lazy(() => import('./components/EmployeeWorkspace'));
-
-const SectionLoadingFallback = () => (
-  <div className="flex flex-col items-center justify-center py-12 space-y-3 w-full bg-white rounded-xl border border-slate-100 shadow-3xs">
-    <div className="w-7 h-7 border-2 border-[#4B9CD3] border-t-transparent rounded-full animate-spin"></div>
-    <span className="text-[11px] text-slate-400 font-semibold tracking-wide">Cargando módulo...</span>
-  </div>
-);
 import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database } from 'lucide-react';
 import { getGlobalMetrics } from './utils/metrics';
 import {
@@ -35,6 +25,7 @@ import {
   updateSaleInSupabase,
   upsertCustomerInSupabase,
   upsertInventoryInSupabase,
+  deleteInventoryFromSupabase,
   upsertProfileInSupabase,
   updatePinInSupabase,
   actualizarPinEnSupabase,
@@ -267,7 +258,7 @@ export default function App() {
           usuarios: updatedUsuarios,
           tareas: supaTasks && supaTasks.length > 0 ? supaTasks : prev.tareas,
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
-          inventario: supaInventory && supaInventory.length > 0 ? supaInventory : prev.inventario,
+          inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
         };
       });
@@ -333,7 +324,7 @@ export default function App() {
           usuarios: supaProfiles && supaProfiles.length > 0 ? supaProfiles : prev.usuarios,
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
           clientes: supaCustomers && supaCustomers.length > 0 ? supaCustomers : prev.clientes,
-          inventario: supaInventory && supaInventory.length > 0 ? supaInventory : prev.inventario,
+          inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
             id: f.id,
@@ -362,7 +353,7 @@ export default function App() {
       },
       async () => {
         const inv = await fetchInventoryFromSupabase();
-        if (inv) {
+        if (inv !== null) {
           setState(prev => ({ ...prev, inventario: inv }));
         }
       },
@@ -437,7 +428,18 @@ export default function App() {
     }
   }, [state.alertasPanico, soundEnabled, activeUserRole]);
 
+  // Sincronizar cambios del estado general con localStorage
+  useEffect(() => {
+  }, [state]);
 
+  // Sincronizar activeUserRole con localStorage
+  useEffect(() => {
+    if (activeUserRole) {
+      // localStorage eliminado
+    } else {
+      // localStorage eliminado
+    }
+  }, [activeUserRole]);
 
   // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario para evitar datos obsoletos en localStorage
   useEffect(() => {
@@ -1271,10 +1273,12 @@ export default function App() {
 
   // --- ACTIONS: INVENTARIO INTEGRADO ---
 
-  const handleUpdateStock = (itemId: string, newStock: number, nombreUsuario: string) => {
+  const handleUpdateStock = async (itemId: string, newStock: number, nombreUsuario: string) => {
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     
+    let targetItemToPersist: InventarioItem | null = null;
+
     setState(prev => {
       let extraIncidencia: Incidencia | null = null;
       let extraAlertaPanico: AlertaPanico | null = null;
@@ -1287,6 +1291,7 @@ export default function App() {
             ultima_actualizacion_fecha: dateStr,
             ultima_actualizacion_por: nombreUsuario
           };
+          targetItemToPersist = updated;
           
           if (updated.stock_actual <= updated.stock_minimo_alerta) {
             const hasIncidencia = prev.incidencias.some(i => i.titulo.includes(item.nombre) && i.estado === 'Pendiente');
@@ -1327,6 +1332,10 @@ export default function App() {
         alertasPanico: extraAlertaPanico ? [extraAlertaPanico, ...(prev.alertasPanico || [])] : (prev.alertasPanico || [])
       };
     });
+
+    if (targetItemToPersist) {
+      await upsertInventoryInSupabase(targetItemToPersist);
+    }
 
     const item = (state.inventario || []).find(i => i.id === itemId);
     if (item) {
@@ -1438,40 +1447,67 @@ export default function App() {
     pushNotification('Se duplicaron con éxito todos los horarios de la semana anterior para la semana activa actual.', 'success');
   };
 
-  const handleSaveInventarioItem = (item: Omit<InventarioItem, 'id'> & { id?: string }) => {
+  const handleSaveInventarioItem = async (item: Omit<InventarioItem, 'id'> & { id?: string }) => {
     let savedItem: InventarioItem;
-    setState(prev => {
-      const items = prev.inventario || [];
-      if (item.id) {
-        savedItem = { ...items.find(i => i.id === item.id), ...item } as InventarioItem;
-        const updated = items.map(i => i.id === item.id ? savedItem : i);
-        pushNotification(`Item de inventario "${item.nombre}" modificado exitosamente.`, 'success');
+    if (item.id) {
+      const items = state.inventario || [];
+      const existing = items.find(i => i.id === item.id);
+      savedItem = {
+        ...existing,
+        ...item,
+        ultima_actualizacion_fecha: new Date().toISOString().substring(0, 16).replace('T', ' '),
+        ultima_actualizacion_por: 'Administrador'
+      } as InventarioItem;
+      setState(prev => {
+        const currentItems = prev.inventario || [];
+        const updated = currentItems.map(i => i.id === item.id ? savedItem : i);
         return { ...prev, inventario: updated };
-      } else {
-        savedItem = {
-          ...item,
-          id: `inv-${Date.now()}`,
-          ultima_actualizacion_fecha: new Date().toISOString().substring(0, 16).replace('T', ' '),
-          ultima_actualizacion_por: 'Administrador'
-        } as InventarioItem;
-        pushNotification(`Nuevo item "${item.nombre}" ingresado al inventario.`, 'success');
-        return { ...prev, inventario: [...items, savedItem] };
+      });
+      pushNotification(`Item de inventario "${item.nombre}" modificado exitosamente.`, 'success');
+    } else {
+      savedItem = {
+        ...item,
+        id: `inv-${Date.now()}`,
+        ultima_actualizacion_fecha: new Date().toISOString().substring(0, 16).replace('T', ' '),
+        ultima_actualizacion_por: 'Administrador'
+      } as InventarioItem;
+      setState(prev => {
+        const currentItems = prev.inventario || [];
+        return { ...prev, inventario: [...currentItems, savedItem] };
+      });
+      pushNotification(`Nuevo item "${item.nombre}" ingresado al inventario.`, 'success');
+    }
+
+    try {
+      await upsertInventoryInSupabase(savedItem);
+      const latestInventory = await fetchInventoryFromSupabase();
+      if (latestInventory !== null) {
+        setState(prev => ({ ...prev, inventario: latestInventory }));
       }
-    });
-    if (savedItem!) {
-      upsertInventoryInSupabase(savedItem);
+    } catch (err) {
+      console.error('Error guardando inventario en Supabase:', err);
     }
   };
 
-  const handleDeleteInventarioItem = (id: string) => {
+  const handleDeleteInventarioItem = async (id: string) => {
+    const deleted = (state.inventario || []).find(i => i.id === id);
     setState(prev => {
-      const deleted = (prev.inventario || []).find(i => i.id === id);
       const filtered = (prev.inventario || []).filter(i => i.id !== id);
-      if (deleted) {
-        pushNotification(`Eliminado de inventario: "${deleted.nombre}"`, 'alert');
-      }
       return { ...prev, inventario: filtered };
     });
+    if (deleted) {
+      pushNotification(`Eliminado de inventario: "${deleted.nombre}"`, 'alert');
+    }
+
+    try {
+      await deleteInventoryFromSupabase(id);
+      const latestInventory = await fetchInventoryFromSupabase();
+      if (latestInventory !== null) {
+        setState(prev => ({ ...prev, inventario: latestInventory }));
+      }
+    } catch (err) {
+      console.error('Error eliminando inventario de Supabase:', err);
+    }
   };
 
   // --- ACTIONS: GESTIÓN DE HORARIOS Y TURNOS ---
@@ -1608,17 +1644,8 @@ export default function App() {
       clientes: updatedClientes
     }));
 
-    // Sincronizar Venta en Supabase con tolerancia a fallos offline
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      enqueueOfflineAction('insert_sale', venta);
-    } else {
-      insertSaleInSupabase(venta).then(ok => {
-        if (!ok) enqueueOfflineAction('insert_sale', venta);
-      }).catch(err => {
-        console.warn('Error al registrar venta en Supabase, encolando offline:', err);
-        enqueueOfflineAction('insert_sale', venta);
-      });
-    }
+    // Sincronizar Venta en Supabase
+    insertSaleInSupabase(venta);
 
     const rawItems = nuevaVenta.productos_vendidos || (nuevaVenta as any).productos || [];
     const articulos = rawItems.map((p: any) => ({
@@ -2150,30 +2177,26 @@ export default function App() {
               
               {/* FILA 3: Visualización de Progreso (w-full) */}
               <div id="row-progress" className="w-full">
-                <React.Suspense fallback={<SectionLoadingFallback />}>
-                  <AnalyticsPanel
-                    tareas={state.tareas}
-                    ventas={state.ventas}
-                    productos={state.productos}
-                    filtro={filtroGeneral}
-                    setFiltro={setFiltroGeneral}
-                    renderMode="progress"
-                  />
-                </React.Suspense>
+                <AnalyticsPanel
+                  tareas={state.tareas}
+                  ventas={state.ventas}
+                  productos={state.productos}
+                  filtro={filtroGeneral}
+                  setFiltro={setFiltroGeneral}
+                  renderMode="progress"
+                />
               </div>
 
               {/* FILA 4: Impulso Operativo Coccole Fit (w-full) */}
               <div id="row-impulse" className="w-full">
-                <React.Suspense fallback={<SectionLoadingFallback />}>
-                  <AnalyticsPanel
-                    tareas={state.tareas}
-                    ventas={state.ventas}
-                    productos={state.productos}
-                    filtro={filtroGeneral}
-                    setFiltro={setFiltroGeneral}
-                    renderMode="impulse"
-                  />
-                </React.Suspense>
+                <AnalyticsPanel
+                  tareas={state.tareas}
+                  ventas={state.ventas}
+                  productos={state.productos}
+                  filtro={filtroGeneral}
+                  setFiltro={setFiltroGeneral}
+                  renderMode="impulse"
+                />
               </div>
 
               {/* FILA 5: Tabla de Posiciones y Ranking (w-full) */}
@@ -2292,73 +2315,19 @@ export default function App() {
 
             {/* FILA 4: MÓDULOS DE GESTIÓN INTERACTIVOS - FULL WIDTH */}
             <div className="w-full">
-              <React.Suspense fallback={<SectionLoadingFallback />}>
-                <AdminDashboard
-                  openTabs={openTabs}
-                  activeTab={activeTab}
-                  setActiveTab={handleSelectTab}
-                  onCloseTab={handleCloseTab}
-                  rankingWeights={rankingWeights}
-                  onUpdateRankingWeights={handleUpdateRankingWeights}
-                  upsellRules={upsellRules}
-                  onUpdateUpsellRules={handleUpdateUpsellRules}
-                  usuarios={state.usuarios}
-
-                  tareas={state.tareas}
-                  productos={state.productos}
-                  fichajes={state.fichajes}
-                  incidencias={state.incidencias}
-                  anuncios={state.anuncios}
-                  feedbacks={state.feedbacks || []}
-                  inventario={state.inventario || []}
-                  horarios={state.horarios || []}
-                  productosCatalogo={state.productosCatalogo || []}
-                  ventasRegistradas={state.ventasRegistradas || []}
-                  cuadresCaja={state.cuadresCaja || []}
-                  alertasPanico={state.alertasPanico || []}
-                  clientes={state.clientes || []}
-                  onAddTarea={handleAddTarea}
-                  onAddTareasBulk={handleAddTareasBulk}
-                  onEditTarea={handleEditTarea}
-                  onDeleteTarea={handleDeleteTarea}
-                  onDeleteAllTareas={handleDeleteAllTareas}
-                  onUpdateTaskOrders={handleUpdateTaskOrders}
-                  onAddProducto={handleAddProducto}
-                  onEditProducto={handleEditProducto}
-                  onDeleteProducto={handleDeleteProducto}
-                  onAddAnuncio={handleAddAnuncio}
-                  onResolveIncidencia={handleResolveIncidencia}
-                  onAddFeedback={handleAddFeedback}
-                  onCreateUsuario={handleCreateUsuario}
-                  onEditUsuario={handleEditUsuario}
-                  onDeleteUsuario={handleDeleteUsuario}
-                  onSaveInventarioItem={handleSaveInventarioItem}
-                  onDeleteInventarioItem={handleDeleteInventarioItem}
-                  onSaveTurno={handleSaveTurno}
-                  onDeleteTurno={handleDeleteTurno}
-                  onDeleteFichaje={handleDeleteFichaje}
-                  onSaveProductoCatalogo={handleSaveProductoCatalogo}
-                  onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
-                  onDuplicarHorarios={handleDuplicarHorarios}
-                  onUpdateVenta={handleUpdateVenta}
-                  onAnularVenta={handleAnularVenta}
-                />
-              </React.Suspense>
-            </div>
-
-          </div>
-        ) : (
-          /* ========================================================= */
-          /* VISTA EMPLEADO (ESTACIÓN DE TRABAJO PC DE NUTRIFIT)       */
-          /* ========================================================= */
-          <div className="space-y-6 max-w-7xl mx-auto py-4">
-            <React.Suspense fallback={<SectionLoadingFallback />}>
-              <EmployeeWorkspace
-                empleado={currentUser}
+              <AdminDashboard
+                openTabs={openTabs}
+                activeTab={activeTab}
+                setActiveTab={handleSelectTab}
+                onCloseTab={handleCloseTab}
+                rankingWeights={rankingWeights}
+                onUpdateRankingWeights={handleUpdateRankingWeights}
+                upsellRules={upsellRules}
+                onUpdateUpsellRules={handleUpdateUpsellRules}
                 usuarios={state.usuarios}
+
                 tareas={state.tareas}
                 productos={state.productos}
-                ventas={state.ventas}
                 fichajes={state.fichajes}
                 incidencias={state.incidencias}
                 anuncios={state.anuncios}
@@ -2368,22 +2337,73 @@ export default function App() {
                 productosCatalogo={state.productosCatalogo || []}
                 ventasRegistradas={state.ventasRegistradas || []}
                 cuadresCaja={state.cuadresCaja || []}
+                alertasPanico={state.alertasPanico || []}
                 clientes={state.clientes || []}
-                posVentas={state.ventasRegistradas}
-                rankingWeights={rankingWeights}
-                upsellRules={upsellRules}
-                onUpdateTareaEstado={handleUpdateTareaEstado}
+                onAddTarea={handleAddTarea}
+                onAddTareasBulk={handleAddTareasBulk}
+                onEditTarea={handleEditTarea}
+                onDeleteTarea={handleDeleteTarea}
+                onDeleteAllTareas={handleDeleteAllTareas}
                 onUpdateTaskOrders={handleUpdateTaskOrders}
-
-                onAddVentaSugerida={handleAddVentaSugerida}
-                onRegistrarFichaje={handleRegistrarFichaje}
-                onAddIncidencia={handleAddIncidencia}
-                onUpdateStock={handleUpdateStock}
-                onRegistrarVenta={handleRegistrarVenta}
-                onRegistrarCuadreCaja={handleRegistrarCuadreCaja}
-                onConfirmarLecturaAnuncio={handleConfirmarLecturaAnuncio}
+                onAddProducto={handleAddProducto}
+                onEditProducto={handleEditProducto}
+                onDeleteProducto={handleDeleteProducto}
+                onAddAnuncio={handleAddAnuncio}
+                onResolveIncidencia={handleResolveIncidencia}
+                onAddFeedback={handleAddFeedback}
+                onCreateUsuario={handleCreateUsuario}
+                onEditUsuario={handleEditUsuario}
+                onDeleteUsuario={handleDeleteUsuario}
+                onSaveInventarioItem={handleSaveInventarioItem}
+                onDeleteInventarioItem={handleDeleteInventarioItem}
+                onSaveTurno={handleSaveTurno}
+                onDeleteTurno={handleDeleteTurno}
+                onDeleteFichaje={handleDeleteFichaje}
+                onSaveProductoCatalogo={handleSaveProductoCatalogo}
+                onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
+                onDuplicarHorarios={handleDuplicarHorarios}
+                onUpdateVenta={handleUpdateVenta}
+                onAnularVenta={handleAnularVenta}
               />
-            </React.Suspense>
+            </div>
+
+          </div>
+        ) : (
+          /* ========================================================= */
+          /* VISTA EMPLEADO (ESTACIÓN DE TRABAJO PC DE NUTRIFIT)       */
+          /* ========================================================= */
+          <div className="space-y-6 max-w-7xl mx-auto py-4">
+            <EmployeeWorkspace
+              empleado={currentUser}
+              usuarios={state.usuarios}
+              tareas={state.tareas}
+              productos={state.productos}
+              ventas={state.ventas}
+              fichajes={state.fichajes}
+              incidencias={state.incidencias}
+              anuncios={state.anuncios}
+              feedbacks={state.feedbacks || []}
+              inventario={state.inventario || []}
+              horarios={state.horarios || []}
+              productosCatalogo={state.productosCatalogo || []}
+              ventasRegistradas={state.ventasRegistradas || []}
+              cuadresCaja={state.cuadresCaja || []}
+              clientes={state.clientes || []}
+              posVentas={state.ventasRegistradas}
+              rankingWeights={rankingWeights}
+              upsellRules={upsellRules}
+              onUpdateTareaEstado={handleUpdateTareaEstado}
+              onUpdateTaskOrders={handleUpdateTaskOrders}
+
+              onAddVentaSugerida={handleAddVentaSugerida}
+              onRegistrarFichaje={handleRegistrarFichaje}
+              onAddIncidencia={handleAddIncidencia}
+              onUpdateStock={handleUpdateStock}
+              onRegistrarVenta={handleRegistrarVenta}
+              onRegistrarCuadreCaja={handleRegistrarCuadreCaja}
+              onConfirmarLecturaAnuncio={handleConfirmarLecturaAnuncio}
+            />
+
           </div>
         )}
 

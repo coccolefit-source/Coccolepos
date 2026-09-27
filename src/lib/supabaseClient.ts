@@ -957,7 +957,7 @@ export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolea
 export async function fetchInventoryFromSupabase(): Promise<InsumoInventario[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
-  const { data, error } = await client.from('inventory').select('*');
+  const { data, error } = await client.from('inventory').select('*').order('created_at', { ascending: false });
   if (error) {
     console.warn('Supabase fetchInventory error:', error.message);
     return null;
@@ -971,7 +971,9 @@ export async function fetchInventoryFromSupabase(): Promise<InsumoInventario[] |
     stock_minimo_alerta: Number(i.min_stock ?? i.stock_minimo ?? 0),
     unidad: i.unidad_medida || i.unidad || 'Unidades',
     estado_alerta: i.estado_alerta || (Number(i.current_stock ?? i.stock_actual ?? 0) <= Number(i.min_stock ?? i.stock_minimo ?? 0) ? 'bajo' : 'normal'),
-    costo_unitario: Number(i.costo_unitario || 0)
+    costo_unitario: Number(i.costo_unitario || 0),
+    ultima_actualizacion_fecha: i.updated_at ? new Date(i.updated_at).toISOString().substring(0, 16).replace('T', ' ') : (i.ultima_actualizacion_fecha || undefined),
+    ultima_actualizacion_por: i.ultima_actualizacion_por || 'Administrador'
   })) as InsumoInventario[];
 }
 
@@ -979,8 +981,9 @@ export async function upsertInventoryInSupabase(insumo: InsumoInventario): Promi
   const client = getSupabaseClient();
   if (!client) return false;
   const raw = insumo as any;
+  const id = insumo.id || `inv-${Date.now()}`;
   const { error } = await client.from('inventory').upsert({
-    id: insumo.id,
+    id: id,
     item_name: insumo.nombre,
     nombre: insumo.nombre,
     categoria: insumo.categoria || 'General',
@@ -995,6 +998,17 @@ export async function upsertInventoryInSupabase(insumo: InsumoInventario): Promi
   });
   if (error) {
     console.error('Supabase upsertInventory error:', error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function deleteInventoryFromSupabase(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { error } = await client.from('inventory').delete().eq('id', id);
+  if (error) {
+    console.error('Supabase deleteInventory error:', error.message);
     return false;
   }
   return true;

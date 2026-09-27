@@ -12,28 +12,6 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Security Headers Middleware
-  app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    next();
-  });
-
-  // Rate Limiter en memoria para el endpoint de IA (15 peticiones por minuto por IP)
-  const rateLimitMap = new Map<string, number[]>();
-  const isRateLimited = (ip: string, limit = 15, windowMs = 60000): boolean => {
-    const now = Date.now();
-    const timestamps = (rateLimitMap.get(ip) || []).filter(t => now - t < windowMs);
-    if (timestamps.length >= limit) {
-      rateLimitMap.set(ip, timestamps);
-      return true;
-    }
-    timestamps.push(now);
-    rateLimitMap.set(ip, timestamps);
-    return false;
-  };
-
   let aiClient: GoogleGenAI | null = null;
   const getAi = () => {
     if (!aiClient) {
@@ -55,15 +33,10 @@ async function startServer() {
 
   // API endpoint for worker performance analysis
   app.post('/api/worker-performance', async (req, res) => {
-    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-    if (isRateLimited(clientIp, 15, 60000)) {
-      return res.status(429).json({ error: 'Demasiadas solicitudes de análisis. Por favor espera un minuto.' });
-    }
-
     try {
       const { worker } = req.body;
-      if (!worker || typeof worker !== 'object' || !worker.nombre) {
-        return res.status(400).json({ error: 'Worker data con nombre válido es requerido' });
+      if (!worker) {
+        return res.status(400).json({ error: 'Worker data is required' });
       }
 
       const ai = getAi();
@@ -137,22 +110,15 @@ Productos de Baja Rotación: ${worker.productosBajos ? worker.productosBajos.joi
 
 Asegúrate de llenar cada sección del JSON con datos analíticos realistas inspirados en las métricas provistas. Recuerda: CERO EMOJIS, CERO ÍCONOS DECORATIVOS.`;
 
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Tiempo de espera agotado al consultar modelo de IA (25s timeout)')), 25000)
-      );
-
-      const response: any = await Promise.race([
-        ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: prompt,
-          config: {
-            systemInstruction,
-            responseMimeType: 'application/json',
-            responseSchema
-          }
-        }),
-        timeoutPromise
-      ]);
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: prompt,
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema
+        }
+      });
 
       const responseText = response.text;
       if (!responseText) {
