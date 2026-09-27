@@ -9,8 +9,8 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { calculateLeaderboard, getGlobalMetrics } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase, fetchCampaignProductsFromSupabase, getLocalDateString } from '../lib/supabaseClient';
-import { CheckCircle2, CheckCircle, Clock, AlertTriangle, AlertCircle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera, GripVertical, Bell, ClipboardList } from 'lucide-react';
+import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase, fetchCampaignProductsFromSupabase, getLocalDateString, fetchActiveAnnouncementsFromSupabase, subscribeToAnnouncementsRealtime, formatFechaLegible } from '../lib/supabaseClient';
+import { CheckCircle2, CheckCircle, Clock, AlertTriangle, AlertCircle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera, GripVertical, Bell, ClipboardList, Megaphone } from 'lucide-react';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
 
@@ -123,6 +123,51 @@ export default function EmployeeWorkspace({
   const [fechaFiltroTareas, setFechaFiltroTareas] = useState<string>(hoyFormatted);
   const [tareasFechaSupabase, setTareasFechaSupabase] = useState<Tarea[] | null>(null);
   const [cargandoTareasFecha, setCargandoTareasFecha] = useState<boolean>(false);
+
+  // Estados y Sincronización en Tiempo Real de Comunicados de Supabase
+  const [liveAnnouncements, setLiveAnnouncements] = useState<Anuncio[]>(() => {
+    return (anuncios || []).filter(a => a.activo !== false);
+  });
+  const [cargandoComunicados, setCargandoComunicados] = useState<boolean>(false);
+
+  const cargarComunicadosActivos = async () => {
+    try {
+      setCargandoComunicados(true);
+      const data = await fetchActiveAnnouncementsFromSupabase();
+      if (data !== null) {
+        setLiveAnnouncements(data);
+      }
+    } catch (err) {
+      console.error('Error al consultar tabla announcements en Supabase:', err);
+    } finally {
+      setCargandoComunicados(false);
+    }
+  };
+
+  useEffect(() => {
+    // 1. Carga inicial de comunicados activos desde Supabase
+    cargarComunicadosActivos();
+
+    // 2. Suscripción a cambios en tiempo real en la tabla announcements
+    const unsubscribe = subscribeToAnnouncementsRealtime(() => {
+      cargarComunicadosActivos();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (anuncios && anuncios.length > 0) {
+      setLiveAnnouncements(prev => {
+        if (prev.length === 0) {
+          return anuncios.filter(a => a.activo !== false);
+        }
+        return prev;
+      });
+    }
+  }, [anuncios]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1123,41 +1168,72 @@ export default function EmployeeWorkspace({
         {/* COLUMNA LATERAL IZQUIERDA (CONTROLES, VENTAS Y AVISOS) - SPAN 5 */}
         <div className="w-full space-y-6">
 
-        {/* TABLERO DE COMUNICADOS E ANUNCIOS */}
-        <div className="w-full bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-xs space-y-4">
-          <div className="border-b border-[#FFFDF6] pb-2">
-            <h4 className="font-extrabold text-xs text-[#2C3E50] uppercase tracking-wider">Tablero de Comunicados</h4>
-            <p className="text-[10px] text-slate-500">Mantente al tanto de las novedades publicadas por administración.</p>
+        {/* TABLERO DE COMUNICADOS */}
+        <div id="tablero-comunicados-empleado" className="w-full bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-xs space-y-4">
+          <div className="border-b border-slate-100 pb-2 flex justify-between items-center">
+            <div>
+              <h4 className="font-extrabold text-xs text-[#2C3E50] uppercase tracking-wider flex items-center gap-1.5">
+                <Megaphone className="w-4 h-4 text-[#4B9CD3]" />
+                Tablero de Comunicados
+              </h4>
+              <p className="text-[10px] text-slate-500">Mantente al tanto de las novedades y directrices de administración.</p>
+            </div>
+            {liveAnnouncements.length > 0 && (
+              <span className="text-[10px] bg-[#EBF5FB] text-[#4B9CD3] font-bold px-2 py-0.5 rounded-md">
+                {liveAnnouncements.length} {liveAnnouncements.length === 1 ? 'comunicado activo' : 'comunicados activos'}
+              </span>
+            )}
           </div>
 
-          {anuncios.length === 0 ? (
-            <p className="text-xs text-slate-400 italic text-center py-4">No hay comunicados activos.</p>
+          {liveAnnouncements.length === 0 ? (
+            <div className="py-6 text-center">
+              <p className="text-xs text-slate-400 italic">No hay comunicados activos.</p>
+            </div>
           ) : (
             <div className="space-y-3">
-              {anuncios.map(an => {
+              {liveAnnouncements.map(an => {
                 const yaLeido = (an.lecturas_confirmadas || []).includes(empleado.id);
+                const fechaLegible = formatFechaLegible(an.fecha_creacion || an.fecha);
                 return (
-                  <div key={an.id} className="bg-[#EBF5FB]/40 border border-[#AED6F1]/80 p-3 rounded-lg relative">
-                    <p className="text-[9px] font-bold text-[#4B9CD3] uppercase tracking-wider">De: {an.creador_nombre} | {an.fecha}</p>
+                  <div key={an.id} className="bg-[#EBF5FB]/40 border border-[#AED6F1]/80 p-3.5 rounded-xl relative shadow-3xs hover:border-[#4B9CD3] transition-all">
+                    <div className="flex justify-between items-start gap-2">
+                      <p className="text-[9px] font-bold text-[#4B9CD3] uppercase tracking-wider">
+                        De: {an.creador_nombre || 'Mariana Silva (Admin)'}
+                      </p>
+                      <span className="text-[9px] text-slate-400 font-semibold shrink-0">
+                        {fechaLegible}
+                      </span>
+                    </div>
+
                     <h5 className="font-extrabold text-xs text-[#2C3E50] mt-1">{an.titulo}</h5>
-                    <p className="text-[10px] text-slate-700 mt-1 whitespace-pre-line leading-relaxed">
+                    <p className="text-[11px] text-slate-700 mt-1.5 whitespace-pre-line leading-relaxed">
                       {an.contenido}
                     </p>
                     
-                    <div className="mt-3 pt-2 border-t border-[#AED6F1]/40 flex justify-between items-center">
-                      <span className="text-[9px] text-[#4B9CD3] font-semibold">
-                        Lectura del Anuncio
+                    <div className="mt-3 pt-2.5 border-t border-[#AED6F1]/40 flex justify-between items-center">
+                      <span className="text-[9px] text-[#4B9CD3] font-semibold flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3 text-[#4B9CD3]" />
+                        Confirmación de Lectura
                       </span>
                       {yaLeido ? (
-                        <span className="text-[10px] font-bold text-[#4B9CD3]">
-                          Leído
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          ✓ Leído
                         </span>
                       ) : (
                         <button
                           type="button"
                           id={`read-btn-${an.id}`}
-                          onClick={() => onConfirmarLecturaAnuncio(an.id, empleado.id)}
-                          className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold text-[9px] px-2.5 py-1 rounded-md transition-all cursor-pointer uppercase tracking-wider"
+                          onClick={() => {
+                            onConfirmarLecturaAnuncio(an.id, empleado.id);
+                            setLiveAnnouncements(prev => prev.map(item => {
+                              if (item.id === an.id) {
+                                const currentReads = item.lecturas_confirmadas || [];
+                                return { ...item, lecturas_confirmadas: [...currentReads, empleado.id] };
+                              }
+                              return item;
+                            }));
+                          }}
+                          className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold text-[9px] px-2.5 py-1 rounded-md transition-all cursor-pointer uppercase tracking-wider shadow-3xs"
                         >
                           Marcar como Leído
                         </button>

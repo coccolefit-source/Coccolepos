@@ -4,12 +4,15 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Usuario, Tarea, ProductoPromocion, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule } from '../types';
+import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule } from '../types';
 
-import { Plus, Trash2, Edit2, CheckCircle, AlertTriangle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical } from 'lucide-react';
+import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase } from '../lib/supabaseClient';
+import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase, formatFechaLegible, insertAnnouncementInSupabase, updateAnnouncementInSupabase, deleteAnnouncementFromSupabase } from '../lib/supabaseClient';
+import { getGlobalMetrics } from '../utils/metrics';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
+import AnalyticsPanel from './AnalyticsPanel';
+import Leaderboard from './Leaderboard';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
 
@@ -17,6 +20,7 @@ export interface AdminDashboardProps {
   usuarios: Usuario[];
   tareas: Tarea[];
   productos: ProductoPromocion[];
+  ventas?: RegistroVenta[];
   fichajes: Fichaje[];
   incidencias: Incidencia[];
   anuncios: Anuncio[];
@@ -43,6 +47,8 @@ export interface AdminDashboardProps {
   onEditProducto?: (producto: ProductoPromocion) => void;
   onDeleteProducto?: (id: string) => void;
   onAddAnuncio: (anuncio: Omit<Anuncio, 'id'>) => void;
+  onDeleteAnuncio?: (id: string) => void;
+  onToggleAnuncioActivo?: (id: string, activo: boolean) => void;
   onResolveIncidencia: (id: string) => void;
   onAddFeedback: (feedback: Omit<Feedback, 'id' | 'fecha'>) => void;
   onCreateUsuario: (usuario: Omit<Usuario, 'id'>) => Promise<boolean> | boolean | void;
@@ -97,6 +103,8 @@ export default function AdminDashboard({
   onEditProducto,
   onDeleteProducto,
   onAddAnuncio,
+  onDeleteAnuncio,
+  onToggleAnuncioActivo,
   onResolveIncidencia,
   onAddFeedback,
   onCreateUsuario,
@@ -112,7 +120,11 @@ export default function AdminDashboard({
   onDuplicarHorarios,
   onUpdateVenta,
   onAnularVenta,
+  ventas = [],
 }: AdminDashboardProps) {
+  const [filtroGeneral, setFiltroGeneral] = useState<'diario' | 'semanal' | 'mensual'>('diario');
+  const metrics = getGlobalMetrics(tareas, ventas, productos, filtroGeneral);
+
   // Tabs internas con fallback por si no se proveen por props
   const [localActiveTab, setLocalActiveTab] = useState<'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas'>('tareas');
   const activeTab = propActiveTab || localActiveTab;
@@ -1150,19 +1162,69 @@ export default function AdminDashboard({
     }
   };
 
-  const handleAnuncioSubmit = (e: React.FormEvent) => {
+  const [isSubmittingAnuncio, setIsSubmittingAnuncio] = useState(false);
+
+  const handleAnuncioSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!anuncioTitulo.trim() || !anuncioContenido.trim()) return;
 
-    onAddAnuncio({
-      titulo: anuncioTitulo,
-      contenido: anuncioContenido,
-      fecha: new Date().toISOString().split('T')[0],
-      creador_nombre: 'Mariana Silva (Admin)',
-    });
+    setIsSubmittingAnuncio(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const res = await insertAnnouncementInSupabase({
+        titulo: anuncioTitulo.trim(),
+        contenido: anuncioContenido.trim(),
+        activo: true,
+        fecha_creacion: nowIso,
+        creador_nombre: 'Mariana Silva (Admin)',
+      });
 
-    setAnuncioTitulo('');
-    setAnuncioContenido('');
+      if (res.success && res.data) {
+        onAddAnuncio(res.data);
+      } else {
+        onAddAnuncio({
+          titulo: anuncioTitulo.trim(),
+          contenido: anuncioContenido.trim(),
+          fecha: nowIso.split('T')[0],
+          fecha_creacion: nowIso,
+          activo: true,
+          creador_nombre: 'Mariana Silva (Admin)',
+        });
+      }
+
+      setAnuncioTitulo('');
+      setAnuncioContenido('');
+    } catch (err: any) {
+      console.error('Error al publicar anuncio en Supabase:', err);
+      alert('Error al publicar el comunicado: ' + (err?.message || err));
+    } finally {
+      setIsSubmittingAnuncio(false);
+    }
+  };
+
+  const handleToggleAnuncio = async (an: Anuncio) => {
+    const nuevoEstado = an.activo === false ? true : false;
+    try {
+      await updateAnnouncementInSupabase(an.id, { activo: nuevoEstado });
+      if (onToggleAnuncioActivo) {
+        onToggleAnuncioActivo(an.id, nuevoEstado);
+      }
+    } catch (err: any) {
+      console.error('Error al cambiar estado del comunicado:', err);
+    }
+  };
+
+  const handleDeleteAnuncioClick = async (an: Anuncio) => {
+    if (confirm(`¿Estás seguro de que deseas eliminar permanentemente el comunicado "${an.titulo}"?`)) {
+      try {
+        await deleteAnnouncementFromSupabase(an.id);
+        if (onDeleteAnuncio) {
+          onDeleteAnuncio(an.id);
+        }
+      } catch (err: any) {
+        console.error('Error al eliminar comunicado:', err);
+      }
+    }
   };
 
   const handleEmpSubmit = async (e: React.FormEvent) => {
@@ -2318,7 +2380,7 @@ export default function AdminDashboard({
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
             <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
               <Megaphone className="w-4 h-4 text-[#4B9CD3]" />
-              Publicar Anuncio del Día
+              Publicar Comunicado del Día
             </h3>
             
             <form onSubmit={handleAnuncioSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
@@ -2349,9 +2411,10 @@ export default function AdminDashboard({
               <div className="md:col-span-2">
                 <button
                   type="submit"
-                  className="w-full bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer"
+                  disabled={isSubmittingAnuncio}
+                  className="w-full bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer disabled:opacity-50"
                 >
-                  Publicar Anuncio
+                  {isSubmittingAnuncio ? 'Publicando...' : 'Publicar Anuncio'}
                 </button>
               </div>
             </form>
@@ -2359,28 +2422,76 @@ export default function AdminDashboard({
 
           {/* Listado de Anuncios Publicados */}
           <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
-              <Megaphone className="w-4.5 h-4.5 text-[#4B9CD3]" />
-              Tablero de Anuncios
-            </h3>
+            <div className="flex justify-between items-center mb-4 border-b border-slate-50 pb-2">
+              <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
+                <Megaphone className="w-4.5 h-4.5 text-[#4B9CD3]" />
+                Tablero de Comunicados y Anuncios
+              </h3>
+              <span className="text-xs text-[#4B9CD3] font-bold bg-[#EBF5FB] px-2.5 py-1 rounded-md">
+                {anuncios.filter(a => a.activo !== false).length} Activos / {anuncios.length} Totales
+              </span>
+            </div>
 
             {anuncios.length === 0 ? (
-              <p className="text-center py-12 text-slate-400 text-xs">No hay anuncios publicados.</p>
+              <p className="text-center py-12 text-slate-400 text-xs">No hay comunicados publicados en el sistema.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {anuncios.map(an => (
-                  <div key={an.id} className="border border-[#E2E8F0] hover:border-[#4B9CD3] p-4 rounded-xl bg-[#FFFDF6]/30 relative flex flex-col justify-between">
-                    <div>
-                      <h4 className="font-extrabold text-[#2C3E50] text-xs pr-14">{an.titulo}</h4>
-                      <p className="text-[11px] text-slate-600 mt-2 whitespace-pre-line">{an.contenido}</p>
+                {anuncios.map(an => {
+                  const esActivo = an.activo !== false;
+                  return (
+                    <div 
+                      key={an.id} 
+                      className={`border p-4 rounded-xl relative flex flex-col justify-between transition-all ${
+                        esActivo 
+                          ? 'border-[#AED6F1] bg-[#FFFDF6]/40 hover:border-[#4B9CD3] shadow-xs' 
+                          : 'border-slate-200 bg-slate-50/70 opacity-75'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            esActivo 
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                              : 'bg-slate-200 text-slate-600 border border-slate-300'
+                          }`}>
+                            {esActivo ? '● Activo' : '○ Inactivo'}
+                          </span>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAnuncio(an)}
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                                esActivo 
+                                  ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/60' 
+                                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60'
+                              }`}
+                              title={esActivo ? 'Desactivar comunicado para empleados' : 'Activar comunicado'}
+                            >
+                              {esActivo ? 'Desactivar' : 'Activar'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAnuncioClick(an)}
+                              className="p-1 hover:bg-rose-100 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                              title="Eliminar comunicado permanentemente"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <h4 className="font-extrabold text-[#2C3E50] text-xs pr-2">{an.titulo}</h4>
+                        <p className="text-[11px] text-slate-600 mt-2 whitespace-pre-line leading-relaxed">{an.contenido}</p>
+                      </div>
+                      
+                      <div className="mt-3.5 pt-2 border-t border-[#E2E8F0]/50 flex justify-between text-[10px] text-slate-400">
+                        <span>Por {an.creador_nombre || 'Mariana Silva (Admin)'}</span>
+                        <span>{formatFechaLegible(an.fecha_creacion || an.fecha)}</span>
+                      </div>
                     </div>
-                    
-                    <div className="mt-3.5 pt-2 border-t border-[#E2E8F0]/50 flex justify-between text-[10px] text-slate-400">
-                      <span>Por {an.creador_nombre}</span>
-                      <span>{an.fecha}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2390,6 +2501,145 @@ export default function AdminDashboard({
       {/* 5. SECCIÓN DE PERSONAL Y CONFIGURACIÓN DE PONDERACIÓN DEL RANKING */}
       {isTabOpen('empleados') && (
         <div className={activeTab === 'empleados' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
+          {/* BARRA DE MÉTRICAS RÁPIDAS Y FILTRO DE TIEMPO (RESUMEN OPERATIVO DEL PERSONAL) */}
+          <div id="admin-worker-kpi-bar" className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-2.5 mb-3">
+              <div>
+                <h3 className="font-extrabold text-xs text-[#4B9CD3] uppercase tracking-wider flex items-center gap-1.5">
+                  <TrendingUp className="w-4 h-4 text-[#4B9CD3]" />
+                  Resumen Operativo del Personal
+                </h3>
+                <p className="text-[10px] text-slate-500">Métricas consolidadas de rendimiento del equipo</p>
+              </div>
+
+              {/* Selector de Periodo de tiempo global */}
+              <div className="flex bg-[#EBF5FB] p-0.5 rounded-lg border border-[#AED6F1]/70">
+                {(['diario', 'semanal', 'mensual'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    id={`admin-worker-filter-btn-${mode}`}
+                    onClick={() => setFiltroGeneral(mode)}
+                    className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all capitalize cursor-pointer ${
+                      filtroGeneral === mode
+                        ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-[#2C3E50]'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Grid de KPIs - Compacto grid-cols-4 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {/* KPI 1: Cumplimiento de tareas */}
+              <div id="kpi-task-completion" className="bg-[#EBF5FB] border border-[#AED6F1] p-3 rounded-lg flex items-center gap-2.5">
+                <div className="p-2 bg-[#4B9CD3] text-white rounded-lg shrink-0">
+                  <CheckCircle className="w-4.5 h-4.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[9px] font-bold text-[#4B9CD3] uppercase tracking-wider truncate">Cumplimiento Tareas</p>
+                  <h3 className="text-lg font-black text-[#2C3E50] leading-none mt-0.5">
+                    {metrics.porcentajeTareasCompletadas}%
+                  </h3>
+                  <p className="text-[9px] text-[#4B9CD3] font-semibold mt-0.5 truncate">
+                    {metrics.tareasCompletadas}/{metrics.tareasTotales} listas
+                  </p>
+                </div>
+              </div>
+
+              {/* KPI 2: Ventas Sugeridas */}
+              <div id="kpi-suggested-sales" className="bg-orange-50 border border-orange-100/80 p-3 rounded-lg flex items-center gap-2.5">
+                <div className="p-2 bg-orange-100 text-orange-700 rounded-lg shrink-0">
+                  <Sparkles className="w-4.5 h-4.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[9px] font-bold text-orange-800 uppercase tracking-wider truncate">Ventas Sugeridas</p>
+                  <h3 className="text-lg font-black text-orange-950 leading-none mt-0.5">
+                    {metrics.totalVentasSugeridas}
+                  </h3>
+                  <p className="text-[9px] text-orange-700 font-semibold mt-0.5 truncate">
+                    Meta: {metrics.metaVentasAcumulada}
+                  </p>
+                </div>
+              </div>
+
+              {/* KPI 3: Eficiencia de Tiempo */}
+              <div id="kpi-time-efficiency" className="bg-white border border-[#E2E8F0] p-3 rounded-lg flex items-center gap-2.5 shadow-2xs">
+                <div className="p-2 bg-[#85C1E9] text-white rounded-lg shrink-0">
+                  <Clock className="w-4.5 h-4.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider truncate">Eficiencia Tiempo</p>
+                  <h3 className="text-lg font-black text-[#2C3E50] leading-none mt-0.5">
+                    {metrics.eficienciaTiempoGlobal}%
+                  </h3>
+                  <p className="text-[9px] text-[#4B9CD3] font-semibold mt-0.5 truncate">
+                    A tiempo
+                  </p>
+                </div>
+              </div>
+
+              {/* KPI 4: Estado Operativo */}
+              <div id="kpi-operational-status" className="bg-[#FFFDF6] border border-[#E2E8F0] p-3 rounded-lg flex items-center gap-2.5">
+                <div className="p-2 bg-[#E2E8F0] text-[#2C3E50] rounded-lg shrink-0">
+                  <AlertCircle className="w-4.5 h-4.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider truncate">En Cola de Espera</p>
+                  <h3 className="text-lg font-black text-[#2C3E50] leading-none mt-0.5">
+                    {metrics.tareasEnProgreso + metrics.tareasPendientes}
+                  </h3>
+                  <p className="text-[9px] text-slate-600 font-semibold mt-0.5 truncate">
+                    {metrics.tareasEnProgreso} act · {metrics.tareasPendientes} pte
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SECUENCIA DE FILAS (Visualización de Progreso, Impulso y Leaderboard) */}
+          <div className="flex flex-col gap-6 w-full">
+            {/* Visualización de Progreso */}
+            <div id="row-progress-admin" className="w-full">
+              <AnalyticsPanel
+                tareas={tareas}
+                ventas={ventas}
+                productos={productos}
+                filtro={filtroGeneral}
+                setFiltro={setFiltroGeneral}
+                renderMode="progress"
+              />
+            </div>
+
+            {/* Impulso Operativo */}
+            <div id="row-impulse-admin" className="w-full">
+              <AnalyticsPanel
+                tareas={tareas}
+                ventas={ventas}
+                productos={productos}
+                filtro={filtroGeneral}
+                setFiltro={setFiltroGeneral}
+                renderMode="impulse"
+              />
+            </div>
+
+            {/* Tabla de Posiciones y Ranking */}
+            <div id="row-leaderboard-admin" className="w-full">
+              <Leaderboard
+                usuarios={usuarios}
+                tareas={tareas}
+                ventas={ventas}
+                fichajes={fichajes}
+                productos={productos}
+                filtro={filtroGeneral}
+                posVentas={ventasRegistradas}
+                rankingWeights={rankingWeights}
+              />
+            </div>
+          </div>
+
           {/* Configuración de Ponderación del Ranking de Colaboradores & Ventas Sugeridas */}
           <RankingWeightsConfig
             currentWeights={rankingWeights}

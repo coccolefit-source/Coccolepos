@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal } from '../types';
+import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio } from '../types';
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
@@ -220,6 +220,17 @@ CREATE TABLE IF NOT EXISTS public.daily_tasks (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 7. Tabla: announcements (Tablero de Comunicados)
+CREATE TABLE IF NOT EXISTS public.announcements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  titulo TEXT NOT NULL,
+  contenido TEXT NOT NULL,
+  activo BOOLEAN DEFAULT true,
+  fecha_creacion TIMESTAMPTZ DEFAULT NOW(),
+  creador_nombre TEXT DEFAULT 'Mariana Silva (Admin)',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Habilitar publicaciones para Realtime Subscriptions
 DO $$
 BEGIN
@@ -234,6 +245,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'daily_tasks') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.daily_tasks;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'announcements') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.announcements;
   END IF;
 END $$;
 `;
@@ -1073,7 +1087,8 @@ export async function insertTimeEntryInSupabase(fichaje: any): Promise<boolean> 
 export function subscribeToRealtimeUpdates(
   onSalesUpdate?: () => void,
   onInventoryUpdate?: () => void,
-  onCampaignUpdate?: () => void
+  onCampaignUpdate?: () => void,
+  onAnnouncementsUpdate?: () => void
 ) {
   const client = getSupabaseClient();
   if (!client) return () => {};
@@ -1094,6 +1109,221 @@ export function subscribeToRealtimeUpdates(
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'upsell_rules' }, () => {
       if (onCampaignUpdate) onCampaignUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+      if (onAnnouncementsUpdate) onAnnouncementsUpdate();
+    })
+    .subscribe();
+
+  return () => {
+    client.removeChannel(channel);
+  };
+}
+
+// ------------------------------------------------------------------
+// ANNOUNCEMENTS / COMUNICADOS QUERIES & REALTIME
+// ------------------------------------------------------------------
+export function formatFechaLegible(fechaInput?: string): string {
+  if (!fechaInput) return 'Fecha no disponible';
+  try {
+    const date = new Date(fechaInput);
+    if (isNaN(date.getTime())) return fechaInput;
+    
+    return new Intl.DateTimeFormat('es-CO', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    }).format(date);
+  } catch (e) {
+    return fechaInput;
+  }
+}
+
+export async function fetchActiveAnnouncementsFromSupabase(): Promise<Anuncio[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('announcements')
+      .select('*')
+      .eq('activo', true)
+      .order('fecha_creacion', { ascending: false });
+
+    if (error) {
+      console.warn('Supabase fetchActiveAnnouncements error:', error.message);
+      return null;
+    }
+    if (!data) return [];
+    return data.map((a: any) => ({
+      id: String(a.id),
+      titulo: a.titulo || a.title || 'Comunicado',
+      contenido: a.contenido || a.content || '',
+      fecha_creacion: a.fecha_creacion || a.created_at || new Date().toISOString(),
+      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || new Date().toISOString().split('T')[0]),
+      activo: a.activo !== false,
+      creador_nombre: a.creador_nombre || a.author || 'Mariana Silva (Admin)',
+      lecturas_confirmadas: a.lecturas_confirmadas || []
+    }));
+  } catch (err) {
+    console.error('Exception in fetchActiveAnnouncementsFromSupabase:', err);
+    return null;
+  }
+}
+
+export async function fetchAllAnnouncementsFromSupabase(): Promise<Anuncio[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('announcements')
+      .select('*')
+      .order('fecha_creacion', { ascending: false });
+
+    if (error) {
+      console.warn('Supabase fetchAllAnnouncements error:', error.message);
+      return null;
+    }
+    if (!data) return [];
+    return data.map((a: any) => ({
+      id: String(a.id),
+      titulo: a.titulo || a.title || 'Comunicado',
+      contenido: a.contenido || a.content || '',
+      fecha_creacion: a.fecha_creacion || a.created_at || new Date().toISOString(),
+      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || new Date().toISOString().split('T')[0]),
+      activo: a.activo !== false,
+      creador_nombre: a.creador_nombre || a.author || 'Mariana Silva (Admin)',
+      lecturas_confirmadas: a.lecturas_confirmadas || []
+    }));
+  } catch (err) {
+    console.error('Exception in fetchAllAnnouncementsFromSupabase:', err);
+    return null;
+  }
+}
+
+export async function insertAnnouncementInSupabase(anuncio: {
+  titulo: string;
+  contenido: string;
+  activo?: boolean;
+  fecha_creacion?: string;
+  creador_nombre?: string;
+  id?: string;
+}): Promise<{ success: boolean; data?: Anuncio; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'No hay conexión a Supabase' };
+
+  try {
+    const nowIso = new Date().toISOString();
+    const payload: any = {
+      titulo: anuncio.titulo.trim(),
+      contenido: anuncio.contenido.trim(),
+      activo: anuncio.activo !== undefined ? anuncio.activo : true,
+      fecha_creacion: anuncio.fecha_creacion || nowIso
+    };
+    if (anuncio.creador_nombre) {
+      payload.creador_nombre = anuncio.creador_nombre;
+    }
+
+    const { data, error } = await client.from('announcements').insert(payload).select().single();
+    if (error) {
+      console.warn('Error inserting announcement in Supabase with full payload, trying standard payload:', error.message);
+      // Minimal payload in case extra columns aren't in user's table
+      const minPayload = {
+        titulo: anuncio.titulo.trim(),
+        contenido: anuncio.contenido.trim(),
+        activo: true,
+        fecha_creacion: nowIso
+      };
+      const { data: minData, error: minErr } = await client.from('announcements').insert(minPayload).select().single();
+      if (minErr) {
+        console.error('Supabase insert announcement failed:', minErr);
+        return { success: false, error: minErr.message };
+      }
+      return { 
+        success: true, 
+        data: {
+          id: String(minData.id),
+          titulo: minData.titulo,
+          contenido: minData.contenido,
+          activo: minData.activo !== false,
+          fecha_creacion: minData.fecha_creacion || nowIso,
+          creador_nombre: minData.creador_nombre || 'Mariana Silva (Admin)'
+        }
+      };
+    }
+
+    return { 
+      success: true, 
+      data: {
+        id: String(data.id),
+        titulo: data.titulo,
+        contenido: data.contenido,
+        activo: data.activo !== false,
+        fecha_creacion: data.fecha_creacion || nowIso,
+        creador_nombre: data.creador_nombre || 'Mariana Silva (Admin)'
+      }
+    };
+  } catch (err: any) {
+    console.error('Exception in insertAnnouncementInSupabase:', err);
+    return { success: false, error: err?.message || 'Error al crear comunicado' };
+  }
+}
+
+export async function updateAnnouncementInSupabase(
+  id: string,
+  updates: Partial<Anuncio>
+): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const payload: any = {};
+    if (updates.activo !== undefined) payload.activo = updates.activo;
+    if (updates.titulo !== undefined) payload.titulo = updates.titulo.trim();
+    if (updates.contenido !== undefined) payload.contenido = updates.contenido.trim();
+    if (updates.lecturas_confirmadas !== undefined) payload.lecturas_confirmadas = updates.lecturas_confirmadas;
+
+    const { error } = await client.from('announcements').update(payload).eq('id', id);
+    if (error) {
+      console.error('Supabase updateAnnouncement error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in updateAnnouncementInSupabase:', err);
+    return false;
+  }
+}
+
+export async function deleteAnnouncementFromSupabase(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('announcements').delete().eq('id', id);
+    if (error) {
+      console.error('Supabase deleteAnnouncement error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Exception in deleteAnnouncementFromSupabase:', err);
+    return false;
+  }
+}
+
+export function subscribeToAnnouncementsRealtime(onAnnouncementChange: () => void) {
+  const client = getSupabaseClient();
+  if (!client) return () => {};
+
+  const channel = client
+    .channel('announcements_realtime_stream')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+      try {
+        onAnnouncementChange();
+      } catch (err) {
+        console.error('Error handling announcements realtime event:', err);
+      }
     })
     .subscribe();
 

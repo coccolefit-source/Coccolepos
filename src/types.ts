@@ -113,8 +113,10 @@ export interface Anuncio {
   id: string;
   titulo: string;
   contenido: string;
-  fecha: string; // YYYY-MM-DD
-  creador_nombre: string;
+  fecha?: string; // YYYY-MM-DD
+  fecha_creacion?: string; // TIMESTAMPTZ / ISO String
+  activo?: boolean; // Default true
+  creador_nombre?: string;
   lecturas_confirmadas?: string[]; // IDs de empleados que marcaron como leído
 }
 

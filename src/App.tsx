@@ -52,7 +52,12 @@ import {
   getSupabaseClient,
   updateTaskOrdersInSupabase,
   getLocalDateString,
-  deleteAllDailyTasksFromSupabase
+  deleteAllDailyTasksFromSupabase,
+  fetchAllAnnouncementsFromSupabase,
+  fetchActiveAnnouncementsFromSupabase,
+  insertAnnouncementInSupabase,
+  updateAnnouncementInSupabase,
+  deleteAnnouncementFromSupabase
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -229,14 +234,15 @@ export default function App() {
 
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
-      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds] = await Promise.all([
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements] = await Promise.all([
         fetchDailyTasksFromSupabase(getLocalDateString()),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
         fetchProfilesFromSupabase(),
         fetchRankingWeightsFromSupabase(),
         fetchUpsellRulesFromSupabase(),
-        fetchCampaignProductsFromSupabase()
+        fetchCampaignProductsFromSupabase(),
+        fetchAllAnnouncementsFromSupabase()
       ]);
 
       setState(prev => {
@@ -260,6 +266,7 @@ export default function App() {
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
+          anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
         };
       });
 
@@ -310,13 +317,14 @@ export default function App() {
 
     async function syncFromSupabase() {
       try {
-        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds] = await Promise.all([
+        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements] = await Promise.all([
           fetchProfilesFromSupabase(),
           fetchSalesFromSupabase(),
           fetchCustomersFromSupabase(),
           fetchInventoryFromSupabase(),
           fetchTimeEntriesFromSupabase(),
-          fetchCampaignProductsFromSupabase()
+          fetchCampaignProductsFromSupabase(),
+          fetchAllAnnouncementsFromSupabase()
         ]);
 
         setState(prev => ({
@@ -326,6 +334,7 @@ export default function App() {
           clientes: supaCustomers && supaCustomers.length > 0 ? supaCustomers : prev.clientes,
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
+          anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
             id: f.id,
             usuario_id: f.empleado_id,
@@ -343,7 +352,7 @@ export default function App() {
 
     syncFromSupabase();
 
-    // Suscripción Realtime en tablas sales e inventory para actualización en vivo
+    // Suscripción Realtime en tablas sales, inventory, campaign_products y announcements para actualización en vivo
     const unsubscribe = subscribeToRealtimeUpdates(
       async () => {
         const sales = await fetchSalesFromSupabase();
@@ -361,6 +370,12 @@ export default function App() {
         const campaignProds = await fetchCampaignProductsFromSupabase();
         if (campaignProds && campaignProds.length > 0) {
           setState(prev => ({ ...prev, productos: campaignProds }));
+        }
+      },
+      async () => {
+        const announcements = await fetchAllAnnouncementsFromSupabase();
+        if (announcements) {
+          setState(prev => ({ ...prev, anuncios: announcements }));
         }
       }
     );
@@ -1556,16 +1571,66 @@ export default function App() {
 
   // --- ACTIONS: ANUNCIOS ---
 
-  const handleAddAnuncio = (newAn: Omit<Anuncio, 'id'>) => {
+  const handleAddAnuncio = async (newAn: Omit<Anuncio, 'id'>) => {
+    const anId = (newAn as any).id || `an-${Date.now()}`;
     const an: Anuncio = {
       ...newAn,
-      id: `an-${Date.now()}`
+      id: anId,
+      activo: newAn.activo !== undefined ? newAn.activo : true,
+      fecha_creacion: newAn.fecha_creacion || new Date().toISOString()
     };
+
     setState(prev => ({
       ...prev,
-      anuncios: [an, ...prev.anuncios]
+      anuncios: [an, ...prev.anuncios.filter(a => a.id !== anId)]
     }));
-    pushNotification('Nuevo anuncio general publicado en el tablero.', 'success');
+    pushNotification('Nuevo comunicado publicado en el tablero.', 'success');
+
+    if (isSupabaseConfigured()) {
+      try {
+        await insertAnnouncementInSupabase({
+          titulo: an.titulo,
+          contenido: an.contenido,
+          activo: an.activo !== false,
+          fecha_creacion: an.fecha_creacion,
+          creador_nombre: an.creador_nombre
+        });
+      } catch (err) {
+        console.error('Error al insertar comunicado en Supabase:', err);
+      }
+    }
+  };
+
+  const handleDeleteAnuncio = async (id: string) => {
+    setState(prev => ({
+      ...prev,
+      anuncios: prev.anuncios.filter(an => an.id !== id)
+    }));
+    pushNotification('Comunicado eliminado del sistema.', 'alert');
+
+    if (isSupabaseConfigured()) {
+      try {
+        await deleteAnnouncementFromSupabase(id);
+      } catch (err) {
+        console.error('Error al eliminar comunicado en Supabase:', err);
+      }
+    }
+  };
+
+  const handleToggleAnuncioActivo = async (id: string, activo: boolean) => {
+    setState(prev => ({
+      ...prev,
+      anuncios: prev.anuncios.map(an => an.id === id ? { ...an, activo } : an)
+    }));
+    pushNotification(activo ? 'Comunicado activado.' : 'Comunicado desactivado.', 'info');
+
+    if (isSupabaseConfigured()) {
+      try {
+        await updateAnnouncementInSupabase(id, { activo });
+      } catch (err) {
+        console.error('Error al actualizar estado del comunicado en Supabase:', err);
+      }
+    }
   };
 
   // --- ACTIONS: CATÁLOGO DE PRODUCTOS (CÓDIGOS Y PRECIOS) ---
@@ -2086,6 +2151,7 @@ export default function App() {
 
               tareas={state.tareas}
               productos={state.productos}
+              ventas={state.ventas}
               fichajes={state.fichajes}
               incidencias={state.incidencias}
               anuncios={state.anuncios}
@@ -2107,6 +2173,8 @@ export default function App() {
               onEditProducto={handleEditProducto}
               onDeleteProducto={handleDeleteProducto}
               onAddAnuncio={handleAddAnuncio}
+              onDeleteAnuncio={handleDeleteAnuncio}
+              onToggleAnuncioActivo={handleToggleAnuncioActivo}
               onResolveIncidencia={handleResolveIncidencia}
               onAddFeedback={handleAddFeedback}
               onCreateUsuario={handleCreateUsuario}
