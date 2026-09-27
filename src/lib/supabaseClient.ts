@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio } from '../types';
+import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio, Producto } from '../types';
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
@@ -241,6 +241,47 @@ CREATE TABLE IF NOT EXISTS public.announcements (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 8. Tabla: products_catalog (Catálogo Financiero Oficial de Productos)
+CREATE TABLE IF NOT EXISTS public.products_catalog (
+  id TEXT PRIMARY KEY,
+  codigo TEXT UNIQUE NOT NULL,
+  nombre TEXT NOT NULL,
+  categoria TEXT DEFAULT 'General',
+  valor_bruto NUMERIC DEFAULT 0,
+  descuento NUMERIC DEFAULT 0,
+  subtotal NUMERIC DEFAULT 0,
+  impuesto_cargo NUMERIC DEFAULT 0,
+  total NUMERIC NOT NULL DEFAULT 0,
+  precio NUMERIC NOT NULL DEFAULT 0,
+  precio_costo NUMERIC DEFAULT 0,
+  margen_ganancia NUMERIC DEFAULT 0,
+  stock NUMERIC DEFAULT 0,
+  activo BOOLEAN DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Políticas RLS para products_catalog
+ALTER TABLE public.products_catalog ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'products_catalog' AND policyname = 'Permitir acceso publico total a products_catalog'
+  ) THEN
+    CREATE POLICY "Permitir acceso publico total a products_catalog" 
+    ON public.products_catalog 
+    FOR ALL 
+    TO public 
+    USING (true) 
+    WITH CHECK (true);
+  END IF;
+END $$;
+
+-- Habilitar réplica para que Realtime transmita todo el registro
+ALTER TABLE public.products_catalog REPLICA IDENTITY FULL;
+
 -- Habilitar publicaciones para Realtime Subscriptions
 DO $$
 BEGIN
@@ -258,6 +299,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'announcements') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.announcements;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'products_catalog') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.products_catalog;
   END IF;
 END $$;
 `;
@@ -1098,7 +1142,8 @@ export function subscribeToRealtimeUpdates(
   onSalesUpdate?: () => void,
   onInventoryUpdate?: () => void,
   onCampaignUpdate?: () => void,
-  onAnnouncementsUpdate?: () => void
+  onAnnouncementsUpdate?: () => void,
+  onCatalogUpdate?: () => void
 ) {
   const client = getSupabaseClient();
   if (!client) return () => {};
@@ -1122,6 +1167,12 @@ export function subscribeToRealtimeUpdates(
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
       if (onAnnouncementsUpdate) onAnnouncementsUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'products_catalog' }, () => {
+      if (onCatalogUpdate) onCatalogUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'productos_catalogo' }, () => {
+      if (onCatalogUpdate) onCatalogUpdate();
     })
     .subscribe();
 
@@ -3026,4 +3077,95 @@ export async function updateTaskOrdersInSupabase(orders: {id: string; orden: num
     console.error('Exception in updateTaskOrdersInSupabase:', err);
     return false;
   }
+}
+
+// ------------------------------------------------------------------
+// GESTIÓN DEL CATÁLOGO DE PRODUCTOS EN SUPABASE (products_catalog)
+// ------------------------------------------------------------------
+
+export async function fetchCatalogFromSupabase(): Promise<Producto[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const candidateTables = ['products_catalog', 'productos_catalogo'];
+    for (const table of candidateTables) {
+      try {
+        const { data, error } = await client.from(table).select('*').order('created_at', { ascending: true });
+        if (!error && data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id,
+            codigo: d.codigo || d.code || 'PROD',
+            nombre: d.nombre || d.name || 'Producto',
+            categoria: d.categoria || d.category || 'General',
+            valor_bruto: Number(d.valor_bruto != null ? d.valor_bruto : (d.precio || 0)),
+            descuento: Number(d.descuento || 0),
+            subtotal: Number(d.subtotal != null ? d.subtotal : (d.valor_bruto || d.precio || 0)),
+            impuesto_cargo: Number(d.impuesto_cargo || 0),
+            total: Number(d.total != null ? d.total : (d.precio || 0)),
+            precio: Number(d.precio != null ? d.precio : (d.total || 0)),
+            precio_costo: Number(d.precio_costo || 0),
+            margen_ganancia: Number(d.margen_ganancia || 0),
+            stock: Number(d.stock || 0)
+          }));
+        }
+      } catch (err) {
+        // try next
+      }
+    }
+    return null;
+  } catch (e) {
+    console.error('Error fetching catalog from Supabase:', e);
+    return null;
+  }
+}
+
+export async function upsertCatalogProductInSupabase(prod: Producto): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  const payload = {
+    id: prod.id,
+    codigo: prod.codigo.toUpperCase().trim(),
+    nombre: prod.nombre.trim(),
+    categoria: prod.categoria || 'General',
+    valor_bruto: prod.valor_bruto != null ? prod.valor_bruto : prod.precio,
+    descuento: prod.descuento || 0,
+    subtotal: prod.subtotal != null ? prod.subtotal : (prod.valor_bruto || prod.precio),
+    impuesto_cargo: prod.impuesto_cargo || 0,
+    total: prod.total != null ? prod.total : prod.precio,
+    precio: prod.precio != null ? prod.precio : (prod.total || 0),
+    precio_costo: prod.precio_costo || 0,
+    margen_ganancia: prod.margen_ganancia || 0,
+    stock: prod.stock || 0,
+    activo: true,
+    updated_at: new Date().toISOString()
+  };
+
+  const candidateTables = ['products_catalog', 'productos_catalogo'];
+  for (const table of candidateTables) {
+    try {
+      const { error } = await client.from(table).upsert(payload);
+      if (!error) return true;
+    } catch (e) {
+      // try next
+    }
+  }
+  return false;
+}
+
+export async function deleteCatalogProductFromSupabase(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  const candidateTables = ['products_catalog', 'productos_catalogo'];
+  for (const table of candidateTables) {
+    try {
+      const { error } = await client.from(table).delete().eq('id', id);
+      if (!error) return true;
+    } catch (e) {
+      // try next
+    }
+  }
+  return false;
 }

@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule } from '../types';
 
-import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell } from 'lucide-react';
+import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell, Download, Search, Percent, Tag, ArrowRight } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase, formatFechaLegible, insertAnnouncementInSupabase, updateAnnouncementInSupabase, deleteAnnouncementFromSupabase } from '../lib/supabaseClient';
 import { getGlobalMetrics } from '../utils/metrics';
@@ -416,6 +416,14 @@ export default function AdminDashboard({
   const [catProdNombre, setCatProdNombre] = useState('');
   const [catProdPrecio, setCatProdPrecio] = useState('');
   const [catProdCategoria, setCatProdCategoria] = useState('Parfaits');
+  const [catProdValorBruto, setCatProdValorBruto] = useState('');
+  const [catProdDescuento, setCatProdDescuento] = useState('0');
+  const [catProdSubtotal, setCatProdSubtotal] = useState('');
+  const [catProdImpuestoTipo, setCatProdImpuestoTipo] = useState('0');
+  const [catProdImpuestoCargo, setCatProdImpuestoCargo] = useState('0');
+  const [catProdTotal, setCatProdTotal] = useState('');
+  const [catProdPrecioCosto, setCatProdPrecioCosto] = useState('');
+  const [catCatalogSearch, setCatCatalogSearch] = useState('');
   const [editingCatProdId, setEditingCatProdId] = useState<string | null>(null);
 
   const [salesStartDate, setSalesStartDate] = useState(() => {
@@ -1511,23 +1519,167 @@ export default function AdminDashboard({
     setSchNota(t.nota || '');
   };
 
-  // --- HANDLER PARA EL CATÁLOGO DE PRODUCTOS (ADMINISTRADOR) ---
+  // --- HELPERS Y HANDLERS PARA EL CATÁLOGO DE PRODUCTOS (ADMINISTRADOR) ---
+  const handleCatProdValorBrutoChange = (valStr: string) => {
+    setCatProdValorBruto(valStr);
+    const vb = parseFloat(valStr) || 0;
+    const desc = parseFloat(catProdDescuento) || 0;
+    const sub = Math.max(0, vb - desc);
+    setCatProdSubtotal(sub > 0 ? sub.toString() : (valStr === '' ? '' : '0'));
+
+    let imp = 0;
+    if (catProdImpuestoTipo === '19') imp = Math.round(sub * 0.19);
+    else if (catProdImpuestoTipo === '8') imp = Math.round(sub * 0.08);
+    else if (catProdImpuestoTipo === 'personalizado') imp = parseFloat(catProdImpuestoCargo) || 0;
+    else imp = 0;
+
+    if (catProdImpuestoTipo !== 'personalizado') {
+      setCatProdImpuestoCargo(imp.toString());
+    }
+    const tot = sub + imp;
+    setCatProdTotal(tot > 0 ? tot.toString() : '');
+    setCatProdPrecio(tot > 0 ? tot.toString() : '');
+  };
+
+  const handleCatProdDescuentoChange = (valStr: string) => {
+    setCatProdDescuento(valStr);
+    const vb = parseFloat(catProdValorBruto) || 0;
+    const desc = parseFloat(valStr) || 0;
+    const sub = Math.max(0, vb - desc);
+    setCatProdSubtotal(sub > 0 ? sub.toString() : '0');
+
+    let imp = 0;
+    if (catProdImpuestoTipo === '19') imp = Math.round(sub * 0.19);
+    else if (catProdImpuestoTipo === '8') imp = Math.round(sub * 0.08);
+    else if (catProdImpuestoTipo === 'personalizado') imp = parseFloat(catProdImpuestoCargo) || 0;
+    else imp = 0;
+
+    if (catProdImpuestoTipo !== 'personalizado') {
+      setCatProdImpuestoCargo(imp.toString());
+    }
+    const tot = sub + imp;
+    setCatProdTotal(tot > 0 ? tot.toString() : '');
+    setCatProdPrecio(tot > 0 ? tot.toString() : '');
+  };
+
+  const handleCatProdSubtotalChange = (valStr: string) => {
+    setCatProdSubtotal(valStr);
+    const sub = parseFloat(valStr) || 0;
+    let imp = 0;
+    if (catProdImpuestoTipo === '19') imp = Math.round(sub * 0.19);
+    else if (catProdImpuestoTipo === '8') imp = Math.round(sub * 0.08);
+    else if (catProdImpuestoTipo === 'personalizado') imp = parseFloat(catProdImpuestoCargo) || 0;
+    else imp = 0;
+
+    if (catProdImpuestoTipo !== 'personalizado') {
+      setCatProdImpuestoCargo(imp.toString());
+    }
+    const tot = sub + imp;
+    setCatProdTotal(tot > 0 ? tot.toString() : '');
+    setCatProdPrecio(tot > 0 ? tot.toString() : '');
+  };
+
+  const handleCatProdImpuestoTipoSelect = (tipo: string) => {
+    setCatProdImpuestoTipo(tipo);
+    const sub = parseFloat(catProdSubtotal) || Math.max(0, (parseFloat(catProdValorBruto) || 0) - (parseFloat(catProdDescuento) || 0));
+    let imp = 0;
+    if (tipo === '19') imp = Math.round(sub * 0.19);
+    else if (tipo === '8') imp = Math.round(sub * 0.08);
+    else if (tipo === '0') imp = 0;
+    else imp = parseFloat(catProdImpuestoCargo) || 0;
+
+    if (tipo !== 'personalizado') {
+      setCatProdImpuestoCargo(imp.toString());
+    }
+    const tot = sub + imp;
+    setCatProdTotal(tot > 0 ? tot.toString() : '');
+    setCatProdPrecio(tot > 0 ? tot.toString() : '');
+  };
+
+  const handleCatProdImpuestoCargoChange = (valStr: string) => {
+    setCatProdImpuestoCargo(valStr);
+    setCatProdImpuestoTipo('personalizado');
+    const sub = parseFloat(catProdSubtotal) || Math.max(0, (parseFloat(catProdValorBruto) || 0) - (parseFloat(catProdDescuento) || 0));
+    const imp = parseFloat(valStr) || 0;
+    const tot = sub + imp;
+    setCatProdTotal(tot > 0 ? tot.toString() : '');
+    setCatProdPrecio(tot > 0 ? tot.toString() : '');
+  };
+
+  const handleCatProdTotalChange = (valStr: string) => {
+    setCatProdTotal(valStr);
+    setCatProdPrecio(valStr);
+    if (!catProdValorBruto || catProdValorBruto === '0') {
+      setCatProdValorBruto(valStr);
+      setCatProdSubtotal(valStr);
+    }
+  };
+
+  const handleEditCatProd = (p: Producto) => {
+    setEditingCatProdId(p.id);
+    setCatProdCodigo(p.codigo);
+    setCatProdNombre(p.nombre);
+    setCatProdCategoria(p.categoria || 'Parfaits');
+    const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
+    const desc = p.descuento != null ? p.descuento : 0;
+    const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
+    const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
+    const tot = p.total != null ? p.total : p.precio;
+    const costo = p.precio_costo != null ? p.precio_costo : 0;
+
+    setCatProdValorBruto(vb ? vb.toString() : '');
+    setCatProdDescuento(desc.toString());
+    setCatProdSubtotal(subt ? subt.toString() : '');
+    setCatProdImpuestoCargo(imp.toString());
+    setCatProdImpuestoTipo(imp === 0 ? '0' : 'personalizado');
+    setCatProdTotal(tot ? tot.toString() : '');
+    setCatProdPrecio(tot ? tot.toString() : '');
+    setCatProdPrecioCosto(costo ? costo.toString() : '');
+
+    const el = document.getElementById('form-registro-producto');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  };
+
   const handleCatProdSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!catProdCodigo.trim() || !catProdNombre.trim() || !catProdPrecio) return;
+    if (!catProdCodigo.trim() || !catProdNombre.trim()) return;
+
+    const vb = parseFloat(catProdValorBruto) || parseFloat(catProdTotal) || parseFloat(catProdPrecio) || 0;
+    const desc = parseFloat(catProdDescuento) || 0;
+    const subt = parseFloat(catProdSubtotal) || Math.max(0, vb - desc);
+    const imp = parseFloat(catProdImpuestoCargo) || 0;
+    const tot = parseFloat(catProdTotal) || parseFloat(catProdPrecio) || (subt + imp);
+    const costo = parseFloat(catProdPrecioCosto) || 0;
+    const ganancia = tot - costo;
+
+    if (tot <= 0 && vb <= 0) return;
 
     onSaveProductoCatalogo({
       id: editingCatProdId || undefined,
       codigo: catProdCodigo.toUpperCase().trim(),
       nombre: catProdNombre.trim(),
-      precio: parseFloat(catProdPrecio as string),
       categoria: catProdCategoria,
+      valor_bruto: vb,
+      descuento: desc,
+      subtotal: subt,
+      impuesto_cargo: imp,
+      total: tot,
+      precio: tot,
+      precio_costo: costo,
+      margen_ganancia: ganancia
     });
 
     // Reset Form
     setCatProdCodigo('');
     setCatProdNombre('');
     setCatProdPrecio('');
+    setCatProdValorBruto('');
+    setCatProdDescuento('0');
+    setCatProdSubtotal('');
+    setCatProdImpuestoTipo('0');
+    setCatProdImpuestoCargo('0');
+    setCatProdTotal('');
+    setCatProdPrecioCosto('');
     setCatProdCategoria('Parfaits');
     setEditingCatProdId(null);
   };
@@ -4137,20 +4289,32 @@ export default function AdminDashboard({
             {/* SECCIÓN DOBLE REORGANIZADA A FILAS 100% HORIZONTALES */}
             <div className="flex flex-col gap-6 w-full">
               
-              {/* FILA A: REGISTRO Y EDICIÓN DE PRODUCTOS DEL CATÁLOGO (ANCHO COMPLETO) */}
-              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-5">
-                <div>
-                  <h3 className="text-sm font-bold text-[#2C3E50] flex items-center gap-1.5 uppercase tracking-wide text-[#4B9CD3]">
-                    <Plus className="w-4.5 h-4.5" />
-                    {editingCatProdId ? 'Editar Producto del Catálogo' : 'Registrar Nuevo Producto'}
-                  </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Define los productos que los empleados podrán vender en la tienda.</p>
+              {/* FILA A: REGISTRO Y EDICIÓN DE PRODUCTOS DEL CATÁLOGO (ESTRUCTURA FINANCIERA COMPLETA) */}
+              <div id="form-registro-producto" className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#2C3E50] flex items-center gap-1.5 uppercase tracking-wide text-[#4B9CD3]">
+                      <Plus className="w-4.5 h-4.5" />
+                      {editingCatProdId ? 'Editar Producto del Catálogo' : 'Registrar Nuevo Producto'}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Estructura financiera y fiscal: Código producto, Nombre, Valor bruto, Descuento, Subtotal, Impuesto cargo, Total y Precio Costo.
+                    </p>
+                  </div>
+                  {editingCatProdId && (
+                    <span className="self-start sm:self-auto text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-full flex items-center gap-1">
+                      <Edit2 className="w-3 h-3" /> Editando: {catProdCodigo}
+                    </span>
+                  )}
                 </div>
 
-                <form onSubmit={handleCatProdSubmit}>
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                <form onSubmit={handleCatProdSubmit} className="space-y-4">
+                  {/* SECCIÓN 1: IDENTIFICACIÓN Y CATEGORÍA */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Código</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        Código Producto <span className="text-red-500">*</span>
+                      </label>
                       <div className="flex gap-1.5 font-mono">
                         <input
                           type="text"
@@ -4167,7 +4331,7 @@ export default function AdminDashboard({
                               const rand = Math.floor(10 + Math.random() * 90);
                               setCatProdCodigo(`PROD-${rand}`);
                             }}
-                            className="bg-[#EBF5FB] hover:bg-[#cbe2ca] border border-[#AED6F1] text-[#4B9CD3] text-[10px] font-extrabold px-2 rounded-lg transition-colors whitespace-nowrap h-9 cursor-pointer"
+                            className="bg-[#EBF5FB] hover:bg-[#cbe2ca] border border-[#AED6F1] text-[#4B9CD3] text-[10px] font-extrabold px-2.5 rounded-lg transition-colors whitespace-nowrap h-9 cursor-pointer"
                             title="Generar código aleatorio"
                           >
                             Auto
@@ -4177,26 +4341,15 @@ export default function AdminDashboard({
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nombre Comercial</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        Nombre Producto <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text"
                         placeholder="Ej. Parfait Berry Chía Slim"
                         value={catProdNombre}
                         onChange={(e) => setCatProdNombre(e.target.value)}
-                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Precio ($)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Ej. 110.00"
-                        value={catProdPrecio}
-                        onChange={(e) => setCatProdPrecio(e.target.value)}
-                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9 font-medium"
                         required
                       />
                     </div>
@@ -4213,7 +4366,7 @@ export default function AdminDashboard({
                             setCatProdCategoria(e.target.value);
                           }
                         }}
-                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9 font-medium"
                       >
                         {categorias.productosFit.map(cat => (
                           <option key={cat} value={cat}>{cat}</option>
@@ -4221,8 +4374,191 @@ export default function AdminDashboard({
                         <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
                       </select>
                     </div>
+                  </div>
 
-                    <div className="flex gap-2">
+                  {/* SECCIÓN 2: DESGLOSE FINANCIERO Y TRIBUTARIO */}
+                  <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] rounded-xl p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                        <DollarSign className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        Estructura de Precios e Impuestos
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                        Subtotal = Valor bruto - Descuento | Total = Subtotal + Impuesto cargo
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+                      {/* 1. Valor bruto */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Valor Bruto ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdValorBruto}
+                          onChange={(e) => handleCatProdValorBrutoChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-semibold"
+                        />
+                      </div>
+
+                      {/* 2. Descuento */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Descuento ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdDescuento}
+                          onChange={(e) => handleCatProdDescuentoChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                        />
+                      </div>
+
+                      {/* 3. Subtotal */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Subtotal ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdSubtotal}
+                          onChange={(e) => handleCatProdSubtotalChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-slate-50 font-bold h-9 text-slate-700"
+                        />
+                      </div>
+
+                      {/* 4. Impuesto cargo */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase">
+                            Impuesto Cargo ($)
+                          </label>
+                          <div className="flex gap-0.5 text-[9px]">
+                            <button
+                              type="button"
+                              onClick={() => handleCatProdImpuestoTipoSelect('0')}
+                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '0' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                              title="0% Exento"
+                            >
+                              0%
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCatProdImpuestoTipoSelect('8')}
+                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '8' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                              title="8% Impoconsumo"
+                            >
+                              8%
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCatProdImpuestoTipoSelect('19')}
+                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '19' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                              title="19% IVA"
+                            >
+                              19%
+                            </button>
+                          </div>
+                        </div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdImpuestoCargo}
+                          onChange={(e) => handleCatProdImpuestoCargoChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                        />
+                      </div>
+
+                      {/* 5. Total (Precio Venta Final) */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#4B9CD3] uppercase mb-1 flex items-center justify-between">
+                          <span>Total Venta ($)</span>
+                          <span className="text-[9px] font-black text-white bg-[#4B9CD3] px-1 rounded">P. Venta</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdTotal || catProdPrecio}
+                          onChange={(e) => handleCatProdTotalChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border-2 border-[#AED6F1] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-black text-[#2C3E50]"
+                          required
+                        />
+                      </div>
+
+                      {/* 6. Precio Costo */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Precio Costo ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdPrecioCosto}
+                          onChange={(e) => setCatProdPrecioCosto(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-semibold text-slate-700"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN 3: RESUMEN FINANCIERO EN TIEMPO REAL & BOTONES */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                    {/* Live Financial Badges */}
+                    {(() => {
+                      const vb = parseFloat(catProdValorBruto) || 0;
+                      const desc = parseFloat(catProdDescuento) || 0;
+                      const subt = parseFloat(catProdSubtotal) || Math.max(0, vb - desc);
+                      const imp = parseFloat(catProdImpuestoCargo) || 0;
+                      const tot = parseFloat(catProdTotal) || parseFloat(catProdPrecio) || (subt + imp);
+                      const costo = parseFloat(catProdPrecioCosto) || 0;
+                      const ganancia = tot - costo;
+                      const margenPct = tot > 0 && costo > 0 ? Math.round((ganancia / tot) * 100) : 0;
+
+                      return (
+                        <div className="flex flex-wrap items-center gap-2 text-xs w-full sm:w-auto">
+                          <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Subtotal:</span>
+                            <span className="font-extrabold text-slate-800">${subt.toFixed(2)}</span>
+                          </div>
+                          <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Impuesto:</span>
+                            <span className="font-extrabold text-slate-800">${imp.toFixed(2)}</span>
+                          </div>
+                          <div className="bg-[#EBF5FB] border border-[#AED6F1] px-2.5 py-1 rounded-lg">
+                            <span className="text-[10px] text-[#4B9CD3] font-bold uppercase mr-1">Total:</span>
+                            <span className="font-black text-[#2C3E50]">${tot.toFixed(2)}</span>
+                          </div>
+                          {costo > 0 && (
+                            <div className={`border px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${ganancia >= 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                              <span className="text-[10px] font-bold uppercase">Utilidad:</span>
+                              <span className="font-black">${ganancia.toFixed(2)}</span>
+                              <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-white/70">
+                                {margenPct}% margen
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Botones de Acción */}
+                    <div className="flex gap-2 w-full sm:w-auto justify-end">
                       {editingCatProdId && (
                         <button
                           type="button"
@@ -4230,83 +4566,297 @@ export default function AdminDashboard({
                             setCatProdCodigo('');
                             setCatProdNombre('');
                             setCatProdPrecio('');
+                            setCatProdValorBruto('');
+                            setCatProdDescuento('0');
+                            setCatProdSubtotal('');
+                            setCatProdImpuestoTipo('0');
+                            setCatProdImpuestoCargo('0');
+                            setCatProdTotal('');
+                            setCatProdPrecioCosto('');
                             setCatProdCategoria('Parfaits');
                             setEditingCatProdId(null);
                           }}
-                          className="flex-1 border border-[#E2E8F0] text-slate-600 text-xs font-bold py-2 rounded-lg hover:bg-slate-50 transition-colors h-9 cursor-pointer"
+                          className="border border-[#E2E8F0] text-slate-600 hover:bg-slate-100 text-xs font-bold px-3 py-2 rounded-lg transition-colors h-9 cursor-pointer whitespace-nowrap"
                         >
-                          X
+                          Cancelar Edición
                         </button>
                       )}
                       <button
                         type="submit"
-                        className="flex-1 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-bold py-2 rounded-lg transition-colors shadow-xs h-9 cursor-pointer"
+                        className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-bold px-5 py-2 rounded-lg transition-colors shadow-xs h-9 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
                       >
-                        {editingCatProdId ? 'Guardar' : 'Registrar'}
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        {editingCatProdId ? 'Guardar Cambios' : 'Registrar Producto'}
                       </button>
                     </div>
                   </div>
                 </form>
 
-                {/* LISTADO DE PRODUCTOS EXISTENTES EN EL CATÁLOGO (GRID HORIZONTAL DE 3 COLUMNAS) */}
-                <div className="border-t border-slate-100 pt-4">
-                  <h4 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider flex items-center gap-1.5">
-                    <Database className="w-3.5 h-3.5 text-slate-400" />
-                    Productos Registrados ({productosCatalogo.length})
-                  </h4>
-
-                  {productosCatalogo.length === 0 ? (
-                    <p className="text-center py-6 text-slate-400 text-xs">No hay productos en el catálogo de ventas.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
-                      {productosCatalogo.map(p => (
-                        <div key={p.id} className="flex justify-between items-center p-2.5 rounded-lg border border-slate-100 hover:bg-slate-50/60 transition-colors text-xs bg-[#FFFDF6]/25">
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded-md font-semibold">
-                                {p.codigo}
-                              </span>
-                              <span className="font-bold text-slate-800">{p.nombre}</span>
-                            </div>
-                            <div className="flex gap-2 text-[10px] text-slate-400 font-medium">
-                              <span>Cat: {p.categoria}</span>
-                              <span>•</span>
-                              <span className="text-[#4B9CD3] font-semibold">${p.precio.toFixed(2)}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingCatProdId(p.id);
-                                setCatProdCodigo(p.codigo);
-                                setCatProdNombre(p.nombre);
-                                setCatProdPrecio(p.precio.toString());
-                                setCatProdCategoria(p.categoria);
-                              }}
-                              className="p-1.5 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors border border-transparent hover:border-slate-100"
-                              title="Editar producto"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (window.confirm(`¿Seguro que deseas eliminar el producto "${p.nombre}"?`)) {
-                                  onDeleteProductoCatalogo(p.id);
-                                }
-                              }}
-                              className="p-1.5 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors border border-transparent hover:border-red-100"
-                              title="Eliminar producto"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                {/* TABLA DE PRODUCTOS REGISTRADOS EN EL CATÁLOGO (ESTRUCTURA DE COLUMNAS SOLICITADA) */}
+                <div className="border-t border-slate-100 pt-5 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <Database className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        Catálogo de Productos ({productosCatalogo.length})
+                      </h4>
+                      <span className="text-[10px] font-bold bg-[#EBF5FB] text-[#4B9CD3] px-2 py-0.5 rounded-full border border-[#AED6F1]">
+                        Activos en Tienda
+                      </span>
                     </div>
-                  )}
+
+                    {/* Buscador y Exportador */}
+                    <div className="flex gap-2 items-center">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Buscar código, nombre o categoría..."
+                          value={catCatalogSearch}
+                          onChange={(e) => setCatCatalogSearch(e.target.value)}
+                          className="text-xs pl-7 pr-3 py-1.5 border border-[#E2E8F0] rounded-lg bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] w-56 sm:w-64"
+                        />
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" />
+                        {catCatalogSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setCatCatalogSearch('')}
+                            className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (productosCatalogo.length === 0) return;
+                          const headers = ['Código producto', 'Nombre producto', 'Categoría', 'Valor bruto', 'Descuento', 'Subtotal', 'Impuesto cargo', 'Total', 'Precio Costo', 'Margen Ganancia ($)', 'Margen (%)'];
+                          const rows = productosCatalogo.map(p => {
+                            const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
+                            const desc = p.descuento != null ? p.descuento : 0;
+                            const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
+                            const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
+                            const tot = p.total != null ? p.total : p.precio;
+                            const costo = p.precio_costo != null ? p.precio_costo : 0;
+                            const ganancia = tot - costo;
+                            const pct = tot > 0 && costo > 0 ? ((tot - costo) / tot * 100).toFixed(1) + '%' : '0%';
+                            return [
+                              `"${p.codigo}"`,
+                              `"${p.nombre.replace(/"/g, '""')}"`,
+                              `"${p.categoria || ''}"`,
+                              vb.toFixed(2),
+                              desc.toFixed(2),
+                              subt.toFixed(2),
+                              imp.toFixed(2),
+                              tot.toFixed(2),
+                              costo.toFixed(2),
+                              ganancia.toFixed(2),
+                              `"${pct}"`
+                            ].join(',');
+                          });
+                          const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows].join('\n');
+                          const encodedUri = encodeURI(csvContent);
+                          const link = document.createElement('a');
+                          link.setAttribute('href', encodedUri);
+                          link.setAttribute('download', `catalogo_productos_${new Date().toISOString().split('T')[0]}.csv`);
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }}
+                        className="border border-[#E2E8F0] hover:bg-slate-50 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                        title="Exportar a archivo CSV"
+                      >
+                        <Download className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        <span className="hidden sm:inline">Exportar CSV</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Resumen Financiero Rápido del Catálogo */}
+                  {(() => {
+                    const totalVenta = productosCatalogo.reduce((acc, p) => acc + (p.total != null ? p.total : p.precio), 0);
+                    const totalCosto = productosCatalogo.reduce((acc, p) => acc + (p.precio_costo || 0), 0);
+                    const avgVenta = productosCatalogo.length > 0 ? totalVenta / productosCatalogo.length : 0;
+                    const avgCosto = productosCatalogo.length > 0 ? totalCosto / productosCatalogo.length : 0;
+                    const totalGanancia = totalVenta - totalCosto;
+                    const avgMargen = totalVenta > 0 ? Math.round((totalGanancia / totalVenta) * 100) : 0;
+
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 bg-[#FFFDF6]/50 p-2.5 rounded-lg border border-slate-200/60 text-xs">
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Referencias</span>
+                          <span className="text-xs font-black text-slate-800">{productosCatalogo.length} productos</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">P. Venta Promedio</span>
+                          <span className="text-xs font-black text-[#4B9CD3]">${avgVenta.toFixed(2)}</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Costo Promedio</span>
+                          <span className="text-xs font-black text-slate-700">${avgCosto.toFixed(2)}</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Margen Promedio</span>
+                          <span className="text-xs font-black text-emerald-600">~{avgMargen}% rentabilidad</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* TABLA PRINCIPAL */}
+                  {(() => {
+                    const filtered = productosCatalogo.filter(p => {
+                      if (!catCatalogSearch.trim()) return true;
+                      const q = catCatalogSearch.toLowerCase().trim();
+                      return (
+                        p.codigo.toLowerCase().includes(q) ||
+                        p.nombre.toLowerCase().includes(q) ||
+                        (p.categoria && p.categoria.toLowerCase().includes(q))
+                      );
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="text-center py-8 text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
+                          <Database className="w-6 h-6 mx-auto mb-1 text-slate-300" />
+                          {catCatalogSearch ? 'Ningún producto coincide con el filtro de búsqueda.' : 'No hay productos registrados en el catálogo.'}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="w-full border border-slate-200 rounded-xl overflow-hidden shadow-2xs bg-white">
+                        <div className="overflow-x-auto w-full">
+                          <table className="w-full text-xs text-left text-slate-600">
+                            <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
+                              <tr>
+                                <th className="px-3 py-2.5">Código Producto</th>
+                                <th className="px-3 py-2.5">Nombre Producto</th>
+                                <th className="px-3 py-2.5 text-right">Valor Bruto</th>
+                                <th className="px-3 py-2.5 text-right">Descuento</th>
+                                <th className="px-3 py-2.5 text-right">Subtotal</th>
+                                <th className="px-3 py-2.5 text-right">Impuesto Cargo</th>
+                                <th className="px-3 py-2.5 text-right font-black text-[#4B9CD3]">Total (P. Venta)</th>
+                                <th className="px-3 py-2.5 text-right">Precio Costo</th>
+                                <th className="px-3 py-2.5 text-right">Utilidad / Margen</th>
+                                <th className="px-3 py-2.5 text-center">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {filtered.map(p => {
+                                const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
+                                const desc = p.descuento != null ? p.descuento : 0;
+                                const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
+                                const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
+                                const tot = p.total != null ? p.total : p.precio;
+                                const costo = p.precio_costo != null ? p.precio_costo : 0;
+                                const ganancia = tot - costo;
+                                const pct = tot > 0 && costo > 0 ? Math.round((ganancia / tot) * 100) : 0;
+
+                                return (
+                                  <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
+                                    {/* Código producto */}
+                                    <td className="px-3 py-2.5 whitespace-nowrap">
+                                      <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold border border-slate-200">
+                                        {p.codigo}
+                                      </span>
+                                    </td>
+
+                                    {/* Nombre producto */}
+                                    <td className="px-3 py-2.5">
+                                      <div className="font-bold text-slate-800">{p.nombre}</div>
+                                      <div className="text-[10px] text-slate-400 font-medium">Cat: {p.categoria || 'General'}</div>
+                                    </td>
+
+                                    {/* Valor bruto */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
+                                      ${vb.toFixed(2)}
+                                    </td>
+
+                                    {/* Descuento */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      {desc > 0 ? (
+                                        <span className="text-amber-600 font-semibold">-${desc.toFixed(2)}</span>
+                                      ) : (
+                                        <span className="text-slate-400">$0.00</span>
+                                      )}
+                                    </td>
+
+                                    {/* Subtotal */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-semibold text-slate-700">
+                                      ${subt.toFixed(2)}
+                                    </td>
+
+                                    {/* Impuesto cargo */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      {imp > 0 ? (
+                                        <span className="text-slate-700 font-medium">+${imp.toFixed(2)}</span>
+                                      ) : (
+                                        <span className="text-slate-400">$0.00</span>
+                                      )}
+                                    </td>
+
+                                    {/* Total (P. Venta) */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      <span className="text-sm font-black text-[#4B9CD3]">${tot.toFixed(2)}</span>
+                                    </td>
+
+                                    {/* Precio Costo */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
+                                      {costo > 0 ? `$${costo.toFixed(2)}` : <span className="text-slate-400">--</span>}
+                                    </td>
+
+                                    {/* Utilidad / Margen */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      {costo > 0 ? (
+                                        <div>
+                                          <span className={`font-bold ${ganancia >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            ${ganancia.toFixed(2)}
+                                          </span>
+                                          <span className="block text-[9px] text-slate-400 font-semibold">
+                                            {pct}% margen
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-400 text-[10px]">--</span>
+                                      )}
+                                    </td>
+
+                                    {/* Acciones */}
+                                    <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                                      <div className="flex gap-1 justify-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleEditCatProd(p)}
+                                          className="p-1.5 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors border border-transparent hover:border-slate-100 cursor-pointer"
+                                          title="Editar producto"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (window.confirm(`¿Seguro que deseas eliminar el producto "${p.nombre}"?`)) {
+                                              onDeleteProductoCatalogo(p.id);
+                                            }
+                                          }}
+                                          className="p-1.5 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors border border-transparent hover:border-red-100 cursor-pointer"
+                                          title="Eliminar producto"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

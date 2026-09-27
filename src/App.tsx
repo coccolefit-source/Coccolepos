@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES } from './types';
+import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, DEFAULT_PRODUCTOS_CATALOGO } from './types';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import Leaderboard from './components/Leaderboard';
 import AdminDashboard from './components/AdminDashboard';
@@ -57,7 +57,10 @@ import {
   fetchActiveAnnouncementsFromSupabase,
   insertAnnouncementInSupabase,
   updateAnnouncementInSupabase,
-  deleteAnnouncementFromSupabase
+  deleteAnnouncementFromSupabase,
+  fetchCatalogFromSupabase,
+  upsertCatalogProductInSupabase,
+  deleteCatalogProductFromSupabase
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -70,7 +73,37 @@ export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'emplea
 
 export default function App() {
  
-  const [state, setState] = useState({ usuarios: [], tareas: [], productos: [], ventas: [], fichajes: [], incidencias: [], anuncios: [], feedbacks: [], inventario: [], horarios: [], productosCatalogo: [], ventasRegistradas: [], alertasPanico: [], cuadresCaja: [], clientes: [] });
+  const [state, setState] = useState(() => {
+    let initialCatalogo: Producto[] = DEFAULT_PRODUCTOS_CATALOGO;
+    try {
+      const saved = localStorage.getItem('coccole_productos_catalogo');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          initialCatalogo = parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Error loading coccole_productos_catalogo:', e);
+    }
+    return {
+      usuarios: [],
+      tareas: [],
+      productos: [],
+      ventas: [],
+      fichajes: [],
+      incidencias: [],
+      anuncios: [],
+      feedbacks: [],
+      inventario: [],
+      horarios: [],
+      productosCatalogo: initialCatalogo,
+      ventasRegistradas: [],
+      alertasPanico: [],
+      cuadresCaja: [],
+      clientes: []
+    };
+  });
   
   // Ponderación del Ranking de Colaboradores
   const [rankingWeights, setRankingWeights] = useState<RankingWeights>(DEFAULT_RANKING_WEIGHTS);
@@ -234,7 +267,7 @@ export default function App() {
 
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
-      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements] = await Promise.all([
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog] = await Promise.all([
         fetchDailyTasksFromSupabase(getLocalDateString()),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
@@ -242,7 +275,8 @@ export default function App() {
         fetchRankingWeightsFromSupabase(),
         fetchUpsellRulesFromSupabase(),
         fetchCampaignProductsFromSupabase(),
-        fetchAllAnnouncementsFromSupabase()
+        fetchAllAnnouncementsFromSupabase(),
+        fetchCatalogFromSupabase()
       ]);
 
       setState(prev => {
@@ -259,6 +293,12 @@ export default function App() {
           });
         }
 
+        if (supaCatalog && supaCatalog.length > 0) {
+          try {
+            localStorage.setItem('coccole_productos_catalogo', JSON.stringify(supaCatalog));
+          } catch (e) {}
+        }
+
         return {
           ...prev,
           usuarios: updatedUsuarios,
@@ -267,6 +307,7 @@ export default function App() {
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
+          productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo
         };
       });
 
@@ -317,15 +358,22 @@ export default function App() {
 
     async function syncFromSupabase() {
       try {
-        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements] = await Promise.all([
+        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog] = await Promise.all([
           fetchProfilesFromSupabase(),
           fetchSalesFromSupabase(),
           fetchCustomersFromSupabase(),
           fetchInventoryFromSupabase(),
           fetchTimeEntriesFromSupabase(),
           fetchCampaignProductsFromSupabase(),
-          fetchAllAnnouncementsFromSupabase()
+          fetchAllAnnouncementsFromSupabase(),
+          fetchCatalogFromSupabase()
         ]);
+
+        if (supaCatalog && supaCatalog.length > 0) {
+          try {
+            localStorage.setItem('coccole_productos_catalogo', JSON.stringify(supaCatalog));
+          } catch (e) {}
+        }
 
         setState(prev => ({
           ...prev,
@@ -335,6 +383,7 @@ export default function App() {
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
+          productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
             id: f.id,
             usuario_id: f.empleado_id,
@@ -352,7 +401,7 @@ export default function App() {
 
     syncFromSupabase();
 
-    // Suscripción Realtime en tablas sales, inventory, campaign_products y announcements para actualización en vivo
+    // Suscripción Realtime en tablas sales, inventory, campaign_products, announcements y products_catalog para actualización en vivo
     const unsubscribe = subscribeToRealtimeUpdates(
       async () => {
         const sales = await fetchSalesFromSupabase();
@@ -376,6 +425,15 @@ export default function App() {
         const announcements = await fetchAllAnnouncementsFromSupabase();
         if (announcements) {
           setState(prev => ({ ...prev, anuncios: announcements }));
+        }
+      },
+      async () => {
+        const freshCatalog = await fetchCatalogFromSupabase();
+        if (freshCatalog && freshCatalog.length > 0) {
+          setState(prev => ({ ...prev, productosCatalogo: freshCatalog }));
+          try {
+            localStorage.setItem('coccole_productos_catalogo', JSON.stringify(freshCatalog));
+          } catch (e) {}
         }
       }
     );
@@ -1655,30 +1713,59 @@ export default function App() {
 
   // --- ACTIONS: CATÁLOGO DE PRODUCTOS (CÓDIGOS Y PRECIOS) ---
 
-  const handleSaveProductoCatalogo = (prod: Omit<Producto, 'id'> & { id?: string }) => {
+  const handleSaveProductoCatalogo = async (prod: Omit<Producto, 'id'> & { id?: string }) => {
+    let savedProd: Producto;
     setState(prev => {
       const catalog = prev.productosCatalogo || [];
+      let updatedCatalog: Producto[];
       if (prod.id) {
-        const updated = catalog.map(p => p.id === prod.id ? { ...p, ...prod } as Producto : p);
+        savedProd = { ...prod, id: prod.id } as Producto;
+        updatedCatalog = catalog.map(p => p.id === prod.id ? { ...p, ...prod } as Producto : p);
         pushNotification(`Producto "${prod.nombre}" actualizado en catálogo.`, 'success');
-        return { ...prev, productosCatalogo: updated };
       } else {
-        const newProd: Producto = {
+        savedProd = {
           ...prod,
           id: `cat-${Date.now()}`
         };
         pushNotification(`Producto "${prod.nombre}" registrado con código ${prod.codigo}.`, 'success');
-        return { ...prev, productosCatalogo: [...catalog, newProd] };
+        updatedCatalog = [...catalog, savedProd];
       }
+      try {
+        localStorage.setItem('coccole_productos_catalogo', JSON.stringify(updatedCatalog));
+      } catch (e) {
+        console.error('Error saving coccole_productos_catalogo to localStorage:', e);
+      }
+      return { ...prev, productosCatalogo: updatedCatalog };
     });
+
+    if (isSupabaseConfigured()) {
+      try {
+        await upsertCatalogProductInSupabase(savedProd!);
+      } catch (err) {
+        console.error('Error al guardar producto en catálogo de Supabase:', err);
+      }
+    }
   };
 
-  const handleDeleteProductoCatalogo = (id: string) => {
+  const handleDeleteProductoCatalogo = async (id: string) => {
     setState(prev => {
       const filtered = (prev.productosCatalogo || []).filter(p => p.id !== id);
+      try {
+        localStorage.setItem('coccole_productos_catalogo', JSON.stringify(filtered));
+      } catch (e) {
+        console.error('Error saving coccole_productos_catalogo to localStorage:', e);
+      }
       pushNotification('Producto removido del catálogo de ventas.', 'alert');
       return { ...prev, productosCatalogo: filtered };
     });
+
+    if (isSupabaseConfigured()) {
+      try {
+        await deleteCatalogProductFromSupabase(id);
+      } catch (err) {
+        console.error('Error al eliminar producto del catálogo en Supabase:', err);
+      }
+    }
   };
 
   // --- ACTIONS: REGISTRO DE VENTAS DEL DÍA (EMPLEADOS) ---

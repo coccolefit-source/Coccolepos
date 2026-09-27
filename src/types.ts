@@ -144,7 +144,88 @@ export interface Producto {
   nombre: string;
   precio: number;
   categoria?: string;
+  valor_bruto?: number;
+  descuento?: number;
+  subtotal?: number;
+  impuesto_cargo?: number;
+  total?: number;
+  precio_costo?: number;
+  margen_ganancia?: number;
+  stock?: number;
 }
+
+export const DEFAULT_PRODUCTOS_CATALOGO: Producto[] = [
+  {
+    id: 'cat-1',
+    codigo: 'PARF-01',
+    nombre: 'Parfait Berry Chía Slim',
+    categoria: 'Parfaits',
+    valor_bruto: 110.00,
+    descuento: 0,
+    subtotal: 110.00,
+    impuesto_cargo: 0,
+    total: 110.00,
+    precio: 110.00,
+    precio_costo: 65.00,
+    margen_ganancia: 45.00
+  },
+  {
+    id: 'cat-2',
+    codigo: 'BOWL-01',
+    nombre: 'Açaí Bowl Power',
+    categoria: 'Bowls',
+    valor_bruto: 135.00,
+    descuento: 5.00,
+    subtotal: 130.00,
+    impuesto_cargo: 0,
+    total: 130.00,
+    precio: 130.00,
+    precio_costo: 75.00,
+    margen_ganancia: 55.00
+  },
+  {
+    id: 'cat-3',
+    codigo: 'JUIC-01',
+    nombre: 'Jugo Verde Prensado en Frío',
+    categoria: 'Bebidas',
+    valor_bruto: 85.00,
+    descuento: 0,
+    subtotal: 85.00,
+    impuesto_cargo: 0,
+    total: 85.00,
+    precio: 85.00,
+    precio_costo: 40.00,
+    margen_ganancia: 45.00
+  },
+  {
+    id: 'cat-4',
+    codigo: 'SNK-01',
+    nombre: 'Barra Energética Artesanal',
+    categoria: 'Snacks',
+    valor_bruto: 45.00,
+    descuento: 0,
+    subtotal: 45.00,
+    impuesto_cargo: 0,
+    total: 45.00,
+    precio: 45.00,
+    precio_costo: 22.00,
+    margen_ganancia: 23.00
+  },
+  {
+    id: 'cat-5',
+    codigo: 'POST-01',
+    nombre: 'Strawberry Cream Fit',
+    categoria: 'Postres',
+    valor_bruto: 120.00,
+    descuento: 0,
+    subtotal: 120.00,
+    impuesto_cargo: 0,
+    total: 120.00,
+    precio: 120.00,
+    precio_costo: 70.00,
+    margen_ganancia: 50.00
+  }
+];
 
 export interface DetalleVentaItem {
   producto_id: string;
