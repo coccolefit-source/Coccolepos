@@ -3091,26 +3091,40 @@ export async function fetchCatalogFromSupabase(): Promise<Producto[] | null> {
     const candidateTables = ['products_catalog', 'productos_catalogo'];
     for (const table of candidateTables) {
       try {
-        const { data, error } = await client.from(table).select('*').order('created_at', { ascending: true });
+        const { data, error } = await client
+          .from(table)
+          .select('*')
+          .order('codigo', { ascending: true });
+
         if (!error && data && data.length > 0) {
-          return data.map((d: any) => ({
-            id: d.id,
-            codigo: d.codigo || d.code || 'PROD',
-            nombre: d.nombre || d.name || 'Producto',
-            categoria: d.categoria || d.category || 'General',
-            valor_bruto: Number(d.valor_bruto != null ? d.valor_bruto : (d.precio || 0)),
-            descuento: Number(d.descuento || 0),
-            subtotal: Number(d.subtotal != null ? d.subtotal : (d.valor_bruto || d.precio || 0)),
-            impuesto_cargo: Number(d.impuesto_cargo || 0),
-            total: Number(d.total != null ? d.total : (d.precio || 0)),
-            precio: Number(d.precio != null ? d.precio : (d.total || 0)),
-            precio_costo: Number(d.precio_costo || 0),
-            margen_ganancia: Number(d.margen_ganancia || 0),
-            stock: Number(d.stock || 0)
-          }));
+          return data.map((d: any) => {
+            const vb = Number(d.valor_bruto != null ? d.valor_bruto : (d.precio || 0));
+            const desc = Number(d.descuento || 0);
+            const subt = Number(d.subtotal != null ? d.subtotal : (vb - desc));
+            const imp = Number(d.impuesto_cargo || 0);
+            const tot = Number(d.total != null ? d.total : (d.precio || 0));
+            const costo = Number(d.precio_costo || 0);
+            const ganancia = Number(d.margen_ganancia != null ? d.margen_ganancia : (tot - costo));
+
+            return {
+              id: String(d.id || `cat-${d.codigo || Date.now()}`),
+              codigo: String(d.codigo || d.code || 'PROD').toUpperCase(),
+              nombre: String(d.nombre || d.name || 'Producto'),
+              categoria: String(d.categoria || d.category || 'General'),
+              valor_bruto: vb,
+              descuento: desc,
+              subtotal: subt,
+              impuesto_cargo: imp,
+              total: tot,
+              precio: tot,
+              precio_costo: costo,
+              margen_ganancia: ganancia,
+              stock: Number(d.stock || 0)
+            };
+          });
         }
       } catch (err) {
-        // try next
+        // try next table
       }
     }
     return null;
@@ -3122,49 +3136,125 @@ export async function fetchCatalogFromSupabase(): Promise<Producto[] | null> {
 
 export async function upsertCatalogProductInSupabase(prod: Producto): Promise<boolean> {
   const client = getSupabaseClient();
-  if (!client) return false;
+  if (!client || !prod) {
+    console.warn('upsertCatalogProductInSupabase: client o producto nulo', { client: !!client, prod });
+    return false;
+  }
 
-  const payload = {
-    id: prod.id,
-    codigo: prod.codigo.toUpperCase().trim(),
-    nombre: prod.nombre.trim(),
-    categoria: prod.categoria || 'General',
-    valor_bruto: prod.valor_bruto != null ? prod.valor_bruto : prod.precio,
-    descuento: prod.descuento || 0,
-    subtotal: prod.subtotal != null ? prod.subtotal : (prod.valor_bruto || prod.precio),
-    impuesto_cargo: prod.impuesto_cargo || 0,
-    total: prod.total != null ? prod.total : prod.precio,
-    precio: prod.precio != null ? prod.precio : (prod.total || 0),
-    precio_costo: prod.precio_costo || 0,
-    margen_ganancia: prod.margen_ganancia || 0,
-    stock: prod.stock || 0,
-    activo: true,
-    updated_at: new Date().toISOString()
-  };
+  const cleanCodigo = String(prod.codigo || '').toUpperCase().trim();
+  const cleanNombre = String(prod.nombre || '').trim();
+  const vb = Number(prod.valor_bruto != null ? prod.valor_bruto : prod.precio) || 0;
+  const desc = Number(prod.descuento || 0);
+  const subt = Number(prod.subtotal != null ? prod.subtotal : (vb - desc));
+  const imp = Number(prod.impuesto_cargo || 0);
+  const tot = Number(prod.total != null ? prod.total : prod.precio) || (subt + imp);
+  const costo = Number(prod.precio_costo || 0);
+  const ganancia = Number(prod.margen_ganancia != null ? prod.margen_ganancia : (tot - costo));
 
   const candidateTables = ['products_catalog', 'productos_catalogo'];
+
   for (const table of candidateTables) {
     try {
-      const { error } = await client.from(table).upsert(payload);
-      if (!error) return true;
-    } catch (e) {
-      // try next
+      // 1. Buscar si ya existe por código o ID
+      let existingRecord: any = null;
+      try {
+        const { data: byCode } = await client
+          .from(table)
+          .select('id, codigo')
+          .eq('codigo', cleanCodigo)
+          .maybeSingle();
+        existingRecord = byCode;
+      } catch (e) {}
+
+      if (!existingRecord && prod.id) {
+        try {
+          const { data: byId } = await client
+            .from(table)
+            .select('id, codigo')
+            .eq('id', prod.id)
+            .maybeSingle();
+          existingRecord = byId;
+        } catch (e) {}
+      }
+
+      const finalId = existingRecord?.id || prod.id || `cat-${Date.now()}`;
+
+      const payload = {
+        id: finalId,
+        codigo: cleanCodigo,
+        nombre: cleanNombre,
+        categoria: prod.categoria || 'General',
+        valor_bruto: vb,
+        descuento: desc,
+        subtotal: subt,
+        impuesto_cargo: imp,
+        total: tot,
+        precio: tot,
+        precio_costo: costo,
+        margen_ganancia: ganancia,
+        stock: Number(prod.stock || 0),
+        activo: true,
+        updated_at: new Date().toISOString()
+      };
+
+      if (existingRecord) {
+        // Actualizar registro existente
+        const { error: updateErr } = await client
+          .from(table)
+          .update(payload)
+          .eq('id', finalId);
+
+        if (!updateErr) {
+          console.log(`[Supabase] Producto ${cleanCodigo} actualizado en ${table}`);
+          return true;
+        } else {
+          console.warn(`[Supabase] Error actualizando producto en ${table}:`, updateErr.message);
+        }
+      } else {
+        // Insertar nuevo producto
+        const { error: insertErr } = await client
+          .from(table)
+          .insert(payload);
+
+        if (!insertErr) {
+          console.log(`[Supabase] Producto ${cleanCodigo} insertado en ${table}`);
+          return true;
+        } else {
+          console.warn(`[Supabase] Error insertando producto en ${table}:`, insertErr.message);
+          // Intento de fallback con upsert usando onConflict en código
+          const { error: upsertErr } = await client
+            .from(table)
+            .upsert(payload, { onConflict: 'codigo' });
+          if (!upsertErr) {
+            console.log(`[Supabase] Producto ${cleanCodigo} guardado vía upsert con onConflict`);
+            return true;
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error(`[Supabase] Excepción al guardar producto en ${table}:`, err?.message || err);
     }
   }
+
   return false;
 }
 
-export async function deleteCatalogProductFromSupabase(id: string): Promise<boolean> {
+export async function deleteCatalogProductFromSupabase(idOrCodigo: string): Promise<boolean> {
   const client = getSupabaseClient();
-  if (!client) return false;
+  if (!client || !idOrCodigo) return false;
 
+  const target = String(idOrCodigo).trim();
   const candidateTables = ['products_catalog', 'productos_catalogo'];
+
   for (const table of candidateTables) {
     try {
-      const { error } = await client.from(table).delete().eq('id', id);
-      if (!error) return true;
+      const { error: err1 } = await client.from(table).delete().eq('id', target);
+      if (!err1) return true;
+
+      const { error: err2 } = await client.from(table).delete().eq('codigo', target.toUpperCase());
+      if (!err2) return true;
     } catch (e) {
-      // try next
+      console.error(`Error deleting from ${table}:`, e);
     }
   }
   return false;

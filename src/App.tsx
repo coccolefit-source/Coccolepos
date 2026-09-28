@@ -1714,21 +1714,43 @@ export default function App() {
   // --- ACTIONS: CATÁLOGO DE PRODUCTOS (CÓDIGOS Y PRECIOS) ---
 
   const handleSaveProductoCatalogo = async (prod: Omit<Producto, 'id'> & { id?: string }) => {
-    let savedProd: Producto;
+    const finalId = prod.id || `cat-${Date.now()}`;
+    const cleanCodigo = (prod.codigo || '').toUpperCase().trim();
+    const cleanNombre = (prod.nombre || '').trim();
+    const vb = Number(prod.valor_bruto != null ? prod.valor_bruto : prod.precio) || 0;
+    const desc = Number(prod.descuento || 0);
+    const subt = Number(prod.subtotal != null ? prod.subtotal : Math.max(0, vb - desc));
+    const imp = Number(prod.impuesto_cargo || 0);
+    const tot = Number(prod.total != null ? prod.total : prod.precio) || (subt + imp);
+    const costo = Number(prod.precio_costo || 0);
+    const ganancia = Number(prod.margen_ganancia != null ? prod.margen_ganancia : (tot - costo));
+
+    const productToSave: Producto = {
+      ...prod,
+      id: finalId,
+      codigo: cleanCodigo,
+      nombre: cleanNombre,
+      categoria: prod.categoria || 'General',
+      valor_bruto: vb,
+      descuento: desc,
+      subtotal: subt,
+      impuesto_cargo: imp,
+      total: tot,
+      precio: tot,
+      precio_costo: costo,
+      margen_ganancia: ganancia
+    };
+
     setState(prev => {
       const catalog = prev.productosCatalogo || [];
+      const isExisting = catalog.some(p => p.id === productToSave.id || p.codigo === productToSave.codigo);
       let updatedCatalog: Producto[];
-      if (prod.id) {
-        savedProd = { ...prod, id: prod.id } as Producto;
-        updatedCatalog = catalog.map(p => p.id === prod.id ? { ...p, ...prod } as Producto : p);
-        pushNotification(`Producto "${prod.nombre}" actualizado en catálogo.`, 'success');
+      if (isExisting) {
+        updatedCatalog = catalog.map(p => (p.id === productToSave.id || p.codigo === productToSave.codigo) ? productToSave : p);
+        pushNotification(`Producto "${productToSave.nombre}" actualizado en catálogo.`, 'success');
       } else {
-        savedProd = {
-          ...prod,
-          id: `cat-${Date.now()}`
-        };
-        pushNotification(`Producto "${prod.nombre}" registrado con código ${prod.codigo}.`, 'success');
-        updatedCatalog = [...catalog, savedProd];
+        updatedCatalog = [...catalog, productToSave];
+        pushNotification(`Producto "${productToSave.nombre}" registrado con código ${productToSave.codigo}.`, 'success');
       }
       try {
         localStorage.setItem('coccole_productos_catalogo', JSON.stringify(updatedCatalog));
@@ -1740,7 +1762,16 @@ export default function App() {
 
     if (isSupabaseConfigured()) {
       try {
-        await upsertCatalogProductInSupabase(savedProd!);
+        const saved = await upsertCatalogProductInSupabase(productToSave);
+        if (saved) {
+          triggerPushToast({
+            kind: 'standard',
+            type: 'success',
+            text: `Producto ${productToSave.codigo} sincronizado en la nube de Supabase.`
+          });
+        } else {
+          console.warn('No se pudo confirmar guardado en Supabase para:', productToSave.codigo);
+        }
       } catch (err) {
         console.error('Error al guardar producto en catálogo de Supabase:', err);
       }
