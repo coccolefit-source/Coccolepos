@@ -529,19 +529,39 @@ export default function AdminDashboard({
 
     const header = parseRow(lines[0]).map(h => h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
     
-    const getIndex = (possibleNames: string[]) => {
-      return header.findIndex(h => possibleNames.some(p => h.includes(p)));
+    // Asignador inteligente de índices con exclusión de solapamientos
+    const getIndex = (primaryExactNames: string[], partialNames: string[], excludeWords: string[] = []) => {
+      for (const name of primaryExactNames) {
+        const idx = header.findIndex(h => h === name);
+        if (idx >= 0) return idx;
+      }
+      for (const name of primaryExactNames) {
+        const cleanName = name.replace(/[^a-z0-9]/g, '');
+        const idx = header.findIndex(h => h.replace(/[^a-z0-9]/g, '') === cleanName);
+        if (idx >= 0) return idx;
+      }
+      for (const name of partialNames) {
+        const idx = header.findIndex(h => {
+          const cleanH = h.replace(/[^a-z0-9]/g, '');
+          if (excludeWords.some(ex => cleanH.includes(ex))) return false;
+          return cleanH.includes(name.replace(/[^a-z0-9]/g, ''));
+        });
+        if (idx >= 0) return idx;
+      }
+      return -1;
     };
 
-    const codeIdx = getIndex(['codigo', 'code', 'cod', 'sku']);
-    const nameIdx = getIndex(['nombre', 'name', 'producto', 'product', 'descripcion']);
-    const catIdx = getIndex(['categoria', 'category', 'cat', 'tipo']);
-    const vbIdx = getIndex(['valor_bruto', 'valorbruto', 'bruto', 'precio_lista', 'p_lista']);
-    const descIdx = getIndex(['descuento', 'discount', 'desc']);
-    const subtIdx = getIndex(['subtotal', 'sub_total']);
-    const impIdx = getIndex(['impuesto', 'tax', 'iva', 'cargo']);
-    const totIdx = getIndex(['total', 'precio', 'price', 'pvp', 'p_venta']);
-    const costoIdx = getIndex(['precio_costo', 'preciocosto', 'costo', 'cost']);
+    const codeIdx = getIndex(['codigo', 'code', 'sku', 'cod'], ['codigo', 'code', 'sku', 'cod']);
+    const nameIdx = getIndex(['nombre', 'name', 'producto', 'descripcion'], ['nombre', 'name', 'producto', 'descripcion']);
+    const catIdx = getIndex(['categoria', 'category', 'tipo'], ['categoria', 'category', 'tipo']);
+    
+    // Buscar Costo primero para evitar que totIdx/vbIdx lo confunda con "precio"
+    const costoIdx = getIndex(['precio_costo', 'preciocosto', 'costo', 'cost', 'pcosto'], ['costo', 'preciocosto', 'cost']);
+    const vbIdx = getIndex(['valor_bruto', 'valorbruto', 'bruto', 'precio_lista', 'plista', 'valor'], ['valorbruto', 'bruto', 'preciolista', 'valor'], ['costo', 'cost']);
+    const descIdx = getIndex(['descuento', 'discount', 'desc'], ['descuento', 'discount'], ['descripcion', 'description']);
+    const subtIdx = getIndex(['subtotal', 'sub_total'], ['subtotal']);
+    const impIdx = getIndex(['impuesto', 'tax', 'iva', 'cargo'], ['impuesto', 'tax', 'iva']);
+    const totIdx = getIndex(['total', 'precio', 'price', 'pvp', 'p_venta', 'precioventa'], ['total', 'precio', 'price', 'pvp'], ['costo', 'cost', 'bruto', 'subtotal', 'impuesto']);
 
     const errors: string[] = [];
     const products: Omit<Producto, 'id'>[] = [];
