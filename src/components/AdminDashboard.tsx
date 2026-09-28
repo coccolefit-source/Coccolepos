@@ -455,6 +455,51 @@ export default function AdminDashboard({
     URL.revokeObjectURL(url);
   };
 
+  const parseCsvNumber = (val: any): number => {
+    if (val == null) return NaN;
+    let str = String(val).trim();
+    if (!str) return NaN;
+
+    if (/^-?\d+$/.test(str)) {
+      return parseFloat(str);
+    }
+
+    str = str.replace(/[^0-9.,-]/g, '');
+    if (!str) return NaN;
+
+    const hasComma = str.includes(',');
+    const hasDot = str.includes('.');
+
+    if (hasComma && hasDot) {
+      const lastComma = str.lastIndexOf(',');
+      const lastDot = str.lastIndexOf('.');
+      if (lastComma > lastDot) {
+        str = str.replace(/\./g, '').replace(',', '.');
+      } else {
+        str = str.replace(/,/g, '');
+      }
+    } else if (hasComma && !hasDot) {
+      const parts = str.split(',');
+      if (parts.length === 2 && parts[1].length === 3 && parts[0].length >= 1 && parts[0].length <= 3) {
+        str = str.replace(',', '');
+      } else {
+        str = str.replace(',', '.');
+      }
+    } else if (hasDot && !hasComma) {
+      const parts = str.split('.');
+      if (parts.length > 2) {
+        str = str.replace(/\./g, '');
+      } else if (parts.length === 2) {
+        if (parts[1].length === 3 && parts[0].length >= 1 && parts[0].length <= 3) {
+          str = str.replace('.', '');
+        }
+      }
+    }
+
+    const num = parseFloat(str);
+    return isNaN(num) ? NaN : num;
+  };
+
   const parseCsvText = (text: string) => {
     const lines = text.split(/\r\n|\n|\r/).filter(line => line.trim().length > 0);
     if (lines.length < 2) {
@@ -515,12 +560,12 @@ export default function AdminDashboard({
 
       const category = catIdx >= 0 && row[catIdx] ? row[catIdx] : 'General';
       
-      const vbVal = vbIdx >= 0 ? parseFloat(row[vbIdx]?.replace(/[^0-9.-]+/g, '')) : NaN;
-      const descVal = descIdx >= 0 ? parseFloat(row[descIdx]?.replace(/[^0-9.-]+/g, '')) : 0;
-      const subtVal = subtIdx >= 0 ? parseFloat(row[subtIdx]?.replace(/[^0-9.-]+/g, '')) : NaN;
-      const impVal = impIdx >= 0 ? parseFloat(row[impIdx]?.replace(/[^0-9.-]+/g, '')) : 0;
-      const totVal = totIdx >= 0 ? parseFloat(row[totIdx]?.replace(/[^0-9.-]+/g, '')) : NaN;
-      const costoVal = costoIdx >= 0 ? parseFloat(row[costoIdx]?.replace(/[^0-9.-]+/g, '')) : 0;
+      const vbVal = vbIdx >= 0 ? parseCsvNumber(row[vbIdx]) : NaN;
+      const descVal = descIdx >= 0 ? parseCsvNumber(row[descIdx]) : 0;
+      const subtVal = subtIdx >= 0 ? parseCsvNumber(row[subtIdx]) : NaN;
+      const impVal = impIdx >= 0 ? parseCsvNumber(row[impIdx]) : 0;
+      const totVal = totIdx >= 0 ? parseCsvNumber(row[totIdx]) : NaN;
+      const costoVal = costoIdx >= 0 ? parseCsvNumber(row[costoIdx]) : 0;
 
       const vb = !isNaN(vbVal) ? vbVal : (!isNaN(totVal) ? totVal : 0);
       const desc = !isNaN(descVal) ? descVal : 0;
