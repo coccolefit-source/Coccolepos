@@ -3259,3 +3259,16 @@ export async function deleteCatalogProductFromSupabase(idOrCodigo: string): Prom
   }
   return false;
 }
+
+export async function upsertCatalogProductsBatchInSupabase(products: Producto[]): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !products || products.length === 0) return false;
+
+  let successCount = 0;
+  for (const prod of products) {
+    const ok = await upsertCatalogProductInSupabase(prod);
+    if (ok) successCount++;
+  }
+
+  return successCount > 0;
+}

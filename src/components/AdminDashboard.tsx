@@ -60,6 +60,7 @@ export interface AdminDashboardProps {
   onDeleteTurno: (id: string) => void;
   onDeleteFichaje?: (id: string) => void;
   onSaveProductoCatalogo: (producto: Omit<Producto, 'id'> & { id?: string }) => void;
+  onBulkSaveProductosCatalogo?: (productos: Omit<Producto, 'id'>[]) => void;
   onDeleteProductoCatalogo: (id: string) => void;
   onDuplicarHorarios: () => void;
   onUpdateVenta?: (venta: Venta) => void;
@@ -116,6 +117,7 @@ export default function AdminDashboard({
   onDeleteTurno,
   onDeleteFichaje,
   onSaveProductoCatalogo,
+  onBulkSaveProductosCatalogo,
   onDeleteProductoCatalogo,
   onDuplicarHorarios,
   onUpdateVenta,
@@ -425,6 +427,163 @@ export default function AdminDashboard({
   const [catProdPrecioCosto, setCatProdPrecioCosto] = useState('');
   const [catCatalogSearch, setCatCatalogSearch] = useState('');
   const [editingCatProdId, setEditingCatProdId] = useState<string | null>(null);
+
+  // Estados y Funciones para Carga Masiva de Productos vía CSV
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvFileName, setCsvFileName] = useState('');
+  const [csvParsedProducts, setCsvParsedProducts] = useState<Omit<Producto, 'id'>[]>([]);
+  const [csvParseErrors, setCsvParseErrors] = useState<string[]>([]);
+  const [isCsvUploading, setIsCsvUploading] = useState(false);
+
+  const handleDownloadSampleCsv = () => {
+    const csvHeader = 'codigo,nombre,categoria,valor_bruto,descuento,subtotal,impuesto_cargo,total,precio_costo\n';
+    const sampleRows = [
+      'PARF-01,Parfait Berry Chía Slim,Parfaits,110.00,0.00,110.00,0.00,110.00,65.00',
+      'BOWL-01,Açaí Bowl Power,Bowls,135.00,5.00,130.00,0.00,130.00,75.00',
+      'JUIC-01,Jugo Verde Prensado en Frío,Bebidas,85.00,0.00,85.00,0.00,85.00,40.00',
+      'SNK-01,Barra Energética Artesanal,Snacks,45.00,0.00,45.00,0.00,45.00,22.00'
+    ].join('\n');
+
+    const blob = new Blob([csvHeader + sampleRows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'plantilla_catalogo_productos_coccole.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const parseCsvText = (text: string) => {
+    const lines = text.split(/\r\n|\n|\r/).filter(line => line.trim().length > 0);
+    if (lines.length < 2) {
+      setCsvParseErrors(['El archivo CSV está vacío o no contiene encabezados.']);
+      setCsvParsedProducts([]);
+      return;
+    }
+
+    const parseRow = (rowStr: string): string[] => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < rowStr.length; i++) {
+        const char = rowStr[i];
+        if (char === '"' || char === "'") {
+          inQuotes = !inQuotes;
+        } else if ((char === ',' || char === ';') && !inQuotes) {
+          result.push(current.trim().replace(/^["']|["']$/g, ''));
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim().replace(/^["']|["']$/g, ''));
+      return result;
+    };
+
+    const header = parseRow(lines[0]).map(h => h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+    
+    const getIndex = (possibleNames: string[]) => {
+      return header.findIndex(h => possibleNames.some(p => h.includes(p)));
+    };
+
+    const codeIdx = getIndex(['codigo', 'code', 'cod', 'sku']);
+    const nameIdx = getIndex(['nombre', 'name', 'producto', 'product', 'descripcion']);
+    const catIdx = getIndex(['categoria', 'category', 'cat', 'tipo']);
+    const vbIdx = getIndex(['valor_bruto', 'valorbruto', 'bruto', 'precio_lista', 'p_lista']);
+    const descIdx = getIndex(['descuento', 'discount', 'desc']);
+    const subtIdx = getIndex(['subtotal', 'sub_total']);
+    const impIdx = getIndex(['impuesto', 'tax', 'iva', 'cargo']);
+    const totIdx = getIndex(['total', 'precio', 'price', 'pvp', 'p_venta']);
+    const costoIdx = getIndex(['precio_costo', 'preciocosto', 'costo', 'cost']);
+
+    const errors: string[] = [];
+    const products: Omit<Producto, 'id'>[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseRow(lines[i]);
+      if (row.length === 0 || (row.length === 1 && !row[0])) continue;
+
+      const rawCode = codeIdx >= 0 ? row[codeIdx] : row[0];
+      const rawName = nameIdx >= 0 ? row[nameIdx] : row[1];
+
+      if (!rawCode || !rawName) {
+        errors.push(`Línea ${i + 1}: Código o Nombre de producto faltante.`);
+        continue;
+      }
+
+      const category = catIdx >= 0 && row[catIdx] ? row[catIdx] : 'General';
+      
+      const vbVal = vbIdx >= 0 ? parseFloat(row[vbIdx]?.replace(/[^0-9.-]+/g, '')) : NaN;
+      const descVal = descIdx >= 0 ? parseFloat(row[descIdx]?.replace(/[^0-9.-]+/g, '')) : 0;
+      const subtVal = subtIdx >= 0 ? parseFloat(row[subtIdx]?.replace(/[^0-9.-]+/g, '')) : NaN;
+      const impVal = impIdx >= 0 ? parseFloat(row[impIdx]?.replace(/[^0-9.-]+/g, '')) : 0;
+      const totVal = totIdx >= 0 ? parseFloat(row[totIdx]?.replace(/[^0-9.-]+/g, '')) : NaN;
+      const costoVal = costoIdx >= 0 ? parseFloat(row[costoIdx]?.replace(/[^0-9.-]+/g, '')) : 0;
+
+      const vb = !isNaN(vbVal) ? vbVal : (!isNaN(totVal) ? totVal : 0);
+      const desc = !isNaN(descVal) ? descVal : 0;
+      const subt = !isNaN(subtVal) ? subtVal : Math.max(0, vb - desc);
+      const imp = !isNaN(impVal) ? impVal : 0;
+      const tot = !isNaN(totVal) ? totVal : (subt + imp);
+      const costo = !isNaN(costoVal) ? costoVal : 0;
+      const ganancia = tot - costo;
+
+      products.push({
+        codigo: rawCode.toUpperCase().trim(),
+        nombre: rawName.trim(),
+        categoria: category,
+        valor_bruto: vb,
+        descuento: desc,
+        subtotal: subt,
+        impuesto_cargo: imp,
+        total: tot,
+        precio: tot,
+        precio_costo: costo,
+        margen_ganancia: ganancia
+      });
+    }
+
+    setCsvParsedProducts(products);
+    setCsvParseErrors(errors);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        parseCsvText(content);
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const handleConfirmCsvImport = async () => {
+    if (csvParsedProducts.length === 0) return;
+    setIsCsvUploading(true);
+    try {
+      if (onBulkSaveProductosCatalogo) {
+        await onBulkSaveProductosCatalogo(csvParsedProducts);
+      } else {
+        for (const prod of csvParsedProducts) {
+          await onSaveProductoCatalogo(prod);
+        }
+      }
+      setShowCsvModal(false);
+      setCsvFileName('');
+      setCsvParsedProducts([]);
+      setCsvParseErrors([]);
+    } catch (err) {
+      console.error('Error durante la importación CSV:', err);
+    } finally {
+      setIsCsvUploading(false);
+    }
+  };
 
   const [salesStartDate, setSalesStartDate] = useState(() => {
     const d = new Date();
@@ -4629,6 +4788,16 @@ export default function AdminDashboard({
 
                       <button
                         type="button"
+                        onClick={() => setShowCsvModal(true)}
+                        className="bg-[#4B9CD3] hover:bg-[#3B8CB3] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                        title="Importar productos de manera masiva desde un archivo CSV"
+                      >
+                        <Upload className="w-3.5 h-3.5 text-white" />
+                        <span>Carga Masiva CSV</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => {
                           if (productosCatalogo.length === 0) return;
                           const headers = ['Código producto', 'Nombre producto', 'Categoría', 'Valor bruto', 'Descuento', 'Subtotal', 'Impuesto cargo', 'Total', 'Precio Costo', 'Margen Ganancia ($)', 'Margen (%)'];
@@ -4859,6 +5028,177 @@ export default function AdminDashboard({
                   })()}
                 </div>
               </div>
+
+              {/* MODAL DE CARGA MASIVA CSV DE PRODUCTOS */}
+              {showCsvModal && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                    {/* Modal Header */}
+                    <div className="bg-gradient-to-r from-[#2C3E50] to-[#4B9CD3] p-4 text-white flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-white/10 rounded-lg backdrop-blur-xs">
+                          <Upload className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-black uppercase tracking-wide">Carga Masiva de Productos (CSV)</h3>
+                          <p className="text-[11px] text-sky-100">Sube múltiples productos al catálogo mediante un archivo CSV o Excel</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCsvModal(false);
+                          setCsvParsedProducts([]);
+                          setCsvParseErrors([]);
+                          setCsvFileName('');
+                        }}
+                        className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Modal Body */}
+                    <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                      {/* Indicaciones y Descarga de Plantilla */}
+                      <div className="bg-[#EBF5FB] border border-[#AED6F1] rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <h4 className="text-xs font-bold text-[#1B4F72] flex items-center gap-1.5">
+                            <FileText className="w-4 h-4 text-[#4B9CD3]" />
+                            Plantilla Formateada de Ejemplo
+                          </h4>
+                          <p className="text-[11px] text-slate-600">
+                            Descarga nuestro formato CSV con las columnas correspondientes (<span className="font-mono font-bold text-slate-700">codigo, nombre, categoria, valor_bruto, descuento, total, precio_costo</span>).
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleDownloadSampleCsv}
+                          className="bg-white hover:bg-slate-50 text-[#4B9CD3] border border-[#4B9CD3] text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Descargar Plantilla CSV</span>
+                        </button>
+                      </div>
+
+                      {/* File Dropzone */}
+                      <div className="border-2 border-dashed border-slate-300 hover:border-[#4B9CD3] rounded-xl p-6 text-center bg-slate-50/50 transition-colors relative">
+                        <input
+                          type="file"
+                          accept=".csv,.txt"
+                          onChange={handleFileUpload}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        />
+                        <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                          <div className="p-3 bg-sky-100/80 rounded-full text-[#4B9CD3]">
+                            <Upload className="w-6 h-6" />
+                          </div>
+                          <p className="text-xs font-bold text-slate-700">
+                            {csvFileName ? `Archivo seleccionado: ${csvFileName}` : 'Arrastra o haz clic para subir tu archivo CSV'}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Archivos compatibles: .csv (delimitado por comas o punto y coma)
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Errores de parsing */}
+                      {csvParseErrors.length > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
+                          <div className="font-bold flex items-center gap-1 text-amber-900">
+                            <AlertCircle className="w-4 h-4 text-amber-600" />
+                            Advertencias detectadas en el archivo:
+                          </div>
+                          <ul className="list-disc list-inside text-[11px] space-y-0.5 text-amber-700 pl-1">
+                            {csvParseErrors.map((err, idx) => (
+                              <li key={idx}>{err}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Vista Previa de Productos Detectados */}
+                      {csvParsedProducts.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                              <CheckCircle className="w-4 h-4 text-emerald-500" />
+                              Vista Previa ({csvParsedProducts.length} productos válidos detectados)
+                            </h4>
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              Listos para guardar
+                            </span>
+                          </div>
+
+                          <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl">
+                            <table className="w-full text-left border-collapse text-[11px]">
+                              <thead>
+                                <tr className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                                  <th className="p-2">Código</th>
+                                  <th className="p-2">Nombre</th>
+                                  <th className="p-2">Categoría</th>
+                                  <th className="p-2 text-right">Valor Bruto</th>
+                                  <th className="p-2 text-right">Desc.</th>
+                                  <th className="p-2 text-right">Total ($)</th>
+                                  <th className="p-2 text-right">Costo ($)</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                                {csvParsedProducts.map((p, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-50">
+                                    <td className="p-2 font-mono font-bold text-slate-900">{p.codigo}</td>
+                                    <td className="p-2 font-bold">{p.nombre}</td>
+                                    <td className="p-2 text-slate-500">{p.categoria}</td>
+                                    <td className="p-2 text-right font-mono">${(p.valor_bruto || 0).toFixed(2)}</td>
+                                    <td className="p-2 text-right font-mono text-emerald-600">${(p.descuento || 0).toFixed(2)}</td>
+                                    <td className="p-2 text-right font-mono font-bold text-slate-900">${(p.total || 0).toFixed(2)}</td>
+                                    <td className="p-2 text-right font-mono text-slate-500">${(p.precio_costo || 0).toFixed(2)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Modal Footer */}
+                    <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCsvModal(false);
+                          setCsvParsedProducts([]);
+                          setCsvParseErrors([]);
+                          setCsvFileName('');
+                        }}
+                        className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={csvParsedProducts.length === 0 || isCsvUploading}
+                        onClick={handleConfirmCsvImport}
+                        className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        {isCsvUploading ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Sincronizando con Supabase...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-4 h-4" />
+                            <span>Confirmar e Importar {csvParsedProducts.length} Productos</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* FILA B: FILTROS + REPORTE GENERAL DE VENTAS REALIZADAS (ANCHO COMPLETO) */}
               <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-5 flex flex-col">

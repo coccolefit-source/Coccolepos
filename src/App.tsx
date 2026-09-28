@@ -60,7 +60,8 @@ import {
   deleteAnnouncementFromSupabase,
   fetchCatalogFromSupabase,
   upsertCatalogProductInSupabase,
-  deleteCatalogProductFromSupabase
+  deleteCatalogProductFromSupabase,
+  upsertCatalogProductsBatchInSupabase
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -1778,6 +1779,77 @@ export default function App() {
     }
   };
 
+  const handleBulkSaveProductosCatalogo = async (newProducts: Omit<Producto, 'id'>[]) => {
+    if (!newProducts || newProducts.length === 0) return;
+
+    const processedProducts: Producto[] = newProducts.map((p, idx) => {
+      const finalId = `cat-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`;
+      const cleanCodigo = (p.codigo || '').toUpperCase().trim();
+      const cleanNombre = (p.nombre || '').trim();
+      const vb = Number(p.valor_bruto != null ? p.valor_bruto : p.precio) || 0;
+      const desc = Number(p.descuento || 0);
+      const subt = Number(p.subtotal != null ? p.subtotal : Math.max(0, vb - desc));
+      const imp = Number(p.impuesto_cargo || 0);
+      const tot = Number(p.total != null ? p.total : p.precio) || (subt + imp);
+      const costo = Number(p.precio_costo || 0);
+      const ganancia = Number(p.margen_ganancia != null ? p.margen_ganancia : (tot - costo));
+
+      return {
+        ...p,
+        id: finalId,
+        codigo: cleanCodigo,
+        nombre: cleanNombre,
+        categoria: p.categoria || 'General',
+        valor_bruto: vb,
+        descuento: desc,
+        subtotal: subt,
+        impuesto_cargo: imp,
+        total: tot,
+        precio: tot,
+        precio_costo: costo,
+        margen_ganancia: ganancia
+      };
+    });
+
+    setState(prev => {
+      const catalog = prev.productosCatalogo || [];
+      const updatedCatalog = [...catalog];
+
+      processedProducts.forEach(newP => {
+        const existingIdx = updatedCatalog.findIndex(cp => cp.codigo === newP.codigo);
+        if (existingIdx >= 0) {
+          updatedCatalog[existingIdx] = { ...updatedCatalog[existingIdx], ...newP };
+        } else {
+          updatedCatalog.push(newP);
+        }
+      });
+
+      try {
+        localStorage.setItem('coccole_productos_catalogo', JSON.stringify(updatedCatalog));
+      } catch (e) {
+        console.error('Error saving coccole_productos_catalogo to localStorage:', e);
+      }
+
+      pushNotification(`Carga masiva completada: ${processedProducts.length} productos procesados.`, 'success');
+      return { ...prev, productosCatalogo: updatedCatalog };
+    });
+
+    if (isSupabaseConfigured()) {
+      try {
+        const ok = await upsertCatalogProductsBatchInSupabase(processedProducts);
+        if (ok) {
+          triggerPushToast({
+            kind: 'standard',
+            type: 'success',
+            text: `Se sincronizaron ${processedProducts.length} productos en la nube de Supabase.`
+          });
+        }
+      } catch (err) {
+        console.error('Error en carga masiva a Supabase:', err);
+      }
+    }
+  };
+
   const handleDeleteProductoCatalogo = async (id: string) => {
     setState(prev => {
       const filtered = (prev.productosCatalogo || []).filter(p => p.id !== id);
@@ -2324,6 +2396,7 @@ export default function App() {
               onDeleteTurno={handleDeleteTurno}
               onDeleteFichaje={handleDeleteFichaje}
               onSaveProductoCatalogo={handleSaveProductoCatalogo}
+              onBulkSaveProductosCatalogo={handleBulkSaveProductosCatalogo}
               onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
               onDuplicarHorarios={handleDuplicarHorarios}
               onUpdateVenta={handleUpdateVenta}
