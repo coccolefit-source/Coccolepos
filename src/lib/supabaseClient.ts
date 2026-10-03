@@ -2252,19 +2252,6 @@ export async function deleteAllDailyTasksFromSupabase(fecha?: string): Promise<b
   }
 }
 
-export function getLocalCampaignProductsFallback(): ProductoPromocion[] {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    try {
-      const saved = localStorage.getItem('coccole_campaign_products');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {}
-  }
-  return [];
-}
-
 export async function clearOldCampaignProductsInSupabase(fechaHoy?: string): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
@@ -2283,9 +2270,8 @@ export async function clearOldCampaignProductsInSupabase(fechaHoy?: string): Pro
 }
 
 export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromocion[]> {
-  const fallback = getLocalCampaignProductsFallback();
   const client = getSupabaseClient();
-  if (!client) return fallback;
+  if (!client) return [];
 
   const fechaHoy = getLocalDateString();
 
@@ -2305,7 +2291,7 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
       }
     }
 
-    if (!data || data.length === 0) return fallback;
+    if (!data || data.length === 0) return [];
 
     // 1. Filtrar por la fecha de hoy si existe campo fecha/date
     const datosHoy = data.filter((d: any) => {
@@ -2334,44 +2320,16 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
       asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
     }));
 
-    // Combinar los datos de Supabase con el respaldo local sin sobrescribir ni perder elementos guardados
-    const combinedMap = new Map<string, ProductoPromocion>();
-    for (const item of fallback) {
-      if (item && item.nombre_producto) {
-        combinedMap.set(item.nombre_producto.trim().toLowerCase(), item);
-      }
-    }
-    for (const item of result) {
-      if (item && item.nombre_producto) {
-        combinedMap.set(item.nombre_producto.trim().toLowerCase(), item);
-      }
-    }
-
-    const merged = Array.from(combinedMap.values());
-
-    if (merged.length > 0) {
-      try {
-        localStorage.setItem('coccole_campaign_products', JSON.stringify(merged));
-      } catch (e) {}
-      return merged;
-    }
-
-    return fallback;
+    return result;
   } catch (err) {
-    return fallback;
+    console.error('Error en fetchCampaignProductsFromSupabase:', err);
+    return [];
   }
 }
 
 export async function insertCampaignProductInSupabase(prod: ProductoPromocion): Promise<boolean> {
-  // Guardar inmediatamente en fallback local
-  try {
-    const currentFallback = getLocalCampaignProductsFallback();
-    const updated = [prod, ...currentFallback.filter(p => p.nombre_producto.toLowerCase() !== prod.nombre_producto.toLowerCase())];
-    localStorage.setItem('coccole_campaign_products', JSON.stringify(updated));
-  } catch (e) {}
-
   const client = getSupabaseClient();
-  if (!client) return true;
+  if (!client) return false;
 
   try {
     const datosAEnviar = {
@@ -2415,21 +2373,16 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
         // Siguiente tabla
       }
     }
-    return true;
+    return false;
   } catch (err) {
-    return true;
+    console.error('Error en insertCampaignProductInSupabase:', err);
+    return false;
   }
 }
 
 export async function updateCampaignProductInSupabase(prod: ProductoPromocion): Promise<boolean> {
-  try {
-    const currentFallback = getLocalCampaignProductsFallback();
-    const updated = currentFallback.map(p => p.id === prod.id ? prod : p);
-    localStorage.setItem('coccole_campaign_products', JSON.stringify(updated));
-  } catch (e) {}
-
   const client = getSupabaseClient();
-  if (!client) return true;
+  if (!client) return false;
 
   try {
     const payload = {
@@ -2464,21 +2417,16 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
         // Siguiente tabla
       }
     }
-    return true;
+    return false;
   } catch (err) {
-    return true;
+    console.error('Error en updateCampaignProductInSupabase:', err);
+    return false;
   }
 }
 
 export async function deleteCampaignProductFromSupabase(id: string): Promise<boolean> {
-  try {
-    const currentFallback = getLocalCampaignProductsFallback();
-    const updated = currentFallback.filter(p => p.id !== id);
-    localStorage.setItem('coccole_campaign_products', JSON.stringify(updated));
-  } catch (e) {}
-
   const client = getSupabaseClient();
-  if (!client) return true;
+  if (!client) return false;
 
   const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
   for (const table of candidateTables) {
@@ -2489,7 +2437,7 @@ export async function deleteCampaignProductFromSupabase(id: string): Promise<boo
       // Siguiente tabla
     }
   }
-  return true;
+  return false;
 }
 
 // --- FUNCIONES PARA SCHEDULES / HORARIOS SEMANALES ---

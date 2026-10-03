@@ -61,8 +61,7 @@ import {
   fetchCatalogFromSupabase,
   upsertCatalogProductInSupabase,
   deleteCatalogProductFromSupabase,
-  upsertCatalogProductsBatchInSupabase,
-  getLocalCampaignProductsFallback
+  upsertCatalogProductsBatchInSupabase
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -91,7 +90,7 @@ export default function App() {
     return {
       usuarios: [],
       tareas: [],
-      productos: getLocalCampaignProductsFallback(),
+      productos: [],
       ventas: [],
       fichajes: [],
       incidencias: [],
