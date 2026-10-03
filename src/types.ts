@@ -93,6 +93,9 @@ export interface InventarioItem {
   stock_actual: number;
   stock_minimo_alerta: number;
   unidad: string; // Ej. Kg, Litros, Unidades, Bolsas
+  costo_unitario?: number;
+  precio_venta?: number;
+  codigo?: string;
   ultima_actualizacion_fecha?: string; // YYYY-MM-DD HH:MM
   ultima_actualizacion_por?: string; // Nombre del usuario
 }

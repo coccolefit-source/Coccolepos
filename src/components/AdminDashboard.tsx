@@ -1605,19 +1605,21 @@ export default function AdminDashboard({
 
   const handleDownloadSampleExcel = () => {
     const sampleData = [
-      ['Nombre del Recurso', 'Categoría', 'Stock Actual', 'Stock Mínimo', 'Unidad'],
-      ['Fresas de Huerto Orgánico', 'insumos', 25, 5, 'Kg'],
-      ['Vasos Eco Biodegradables 12oz', 'empaques', 200, 30, 'Unidades'],
-      ['Base de Avena Silvestre', 'preparados', 15, 3, 'Litros'],
-      ['Proteína Whey Isolate Vainilla', 'insumos', 10, 2, 'Kg'],
-      ['Cucharas Biodegradables', 'empaques', 300, 50, 'Unidades']
+      ['Código', 'Nombre del Producto', 'Categoría', 'Precio Venta', 'Costo Unitario', 'Stock Actual', 'Stock Mínimo', 'Unidad'],
+      ['PROD-001', 'Pan de Bonito Fit', 'Panadería', 4900, 2200, 30, 5, 'Unidad'],
+      ['PROD-002', 'Bretaña', 'Bebidas', 4900, 2000, 50, 10, 'Unidad'],
+      ['PROD-003', 'Sándwich Milano tres queso', 'Snacks Fit', 20900, 11000, 20, 4, 'Unidad'],
+      ['PROD-004', 'Agua Mineral', 'Bebidas', 3000, 1200, 60, 15, 'Unidad'],
+      ['INS-001', 'Fresas de Huerto Orgánico', 'Insumos', 0, 8000, 25, 5, 'Kg'],
+      ['EMP-001', 'Vasos Eco Biodegradables 12oz', 'Empaques', 0, 350, 200, 30, 'Unidades'],
+      ['PREP-001', 'Base de Avena Silvestre', 'Preparados', 0, 4500, 15, 3, 'Litros']
     ];
 
     const worksheet = XLSX.utils.aoa_to_sheet(sampleData);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Plantilla Inventario');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Catálogo e Inventario');
 
-    XLSX.writeFile(workbook, 'Plantilla_Inventario_Coccole.xlsx');
+    XLSX.writeFile(workbook, 'Plantilla_Inventario_Catalogo_Coccole.xlsx');
   };
 
   const handleExcelFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1643,65 +1645,146 @@ export default function AdminDashboard({
           return;
         }
 
-        let importedCount = 0;
-
         if (importOption === 'replace') {
           inventario.forEach(item => {
             onDeleteInventarioItem(item.id);
           });
         }
 
-        jsonRows.forEach((row: any, idx: number) => {
-          if (!row || !Array.isArray(row) || row.length === 0) return;
+        // 1. Detectar cabeceras en las primeras filas
+        let headerRowIdx = -1;
+        let colCodigo = -1;
+        let colNombre = -1;
+        let colCategoria = -1;
+        let colPrecio = -1;
+        let colCosto = -1;
+        let colStock = -1;
+        let colMinStock = -1;
+        let colUnidad = -1;
 
-          const col0 = String(row[0] || '').trim();
-          if (!col0) return;
+        for (let r = 0; r < Math.min(5, jsonRows.length); r++) {
+          const row = jsonRows[r];
+          if (!row || !Array.isArray(row)) continue;
+          const rowTexts = row.map(cell => String(cell || '').trim().toLowerCase());
+          const hasNombre = rowTexts.some(t => t.includes('nom') || t.includes('prod') || t.includes('item') || t.includes('recurso') || t.includes('insumo'));
+          if (hasNombre) {
+            headerRowIdx = r;
+            rowTexts.forEach((text, cIdx) => {
+              if (text.includes('cod') || text.includes('cód') || text.includes('sku')) colCodigo = cIdx;
+              else if (text.includes('nom') || text.includes('prod') || text.includes('item') || text.includes('recurso') || text.includes('insumo')) colNombre = cIdx;
+              else if (text.includes('cat')) colCategoria = cIdx;
+              else if (text.includes('prec') || text.includes('val') || text.includes('vent') || text.includes('pvp') || text.includes('tot') || text.includes('price')) colPrecio = cIdx;
+              else if (text.includes('cost') || text.includes('comp')) colCosto = cIdx;
+              else if (text.includes('stock') || text.includes('cant') || text.includes('exist')) {
+                if (text.includes('min') || text.includes('mín') || text.includes('alert')) colMinStock = cIdx;
+                else colStock = cIdx;
+              }
+              else if (text.includes('min') || text.includes('mín') || text.includes('alert')) colMinStock = cIdx;
+              else if (text.includes('unid') || text.includes('med')) colUnidad = cIdx;
+            });
+            break;
+          }
+        }
 
-          const col0Lower = col0.toLowerCase();
-          if (col0Lower === 'nombre' || col0Lower === 'nombre del recurso' || col0Lower === 'producto' || col0Lower === 'recurso' || col0Lower === 'insumo' || col0Lower === 'item' || col0Lower === 'name') {
-            return;
+        const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
+        let importedCount = 0;
+        const catalogItemsToSave: Omit<Producto, 'id'>[] = [];
+
+        for (let i = startIdx; i < jsonRows.length; i++) {
+          const row = jsonRows[i];
+          if (!row || !Array.isArray(row) || row.length === 0) continue;
+
+          // Asignación de columnas con detección o fallback posicional
+          let rawNombre = '';
+          let rawCodigo = '';
+          let rawCategoria = 'General';
+          let rawPrecio = 0;
+          let rawCosto = 0;
+          let rawStock = 10;
+          let rawMinStock = 5;
+          let rawUnidad = 'Unidad';
+
+          if (colNombre >= 0) {
+            rawNombre = String(row[colNombre] || '').trim();
+            if (colCodigo >= 0) rawCodigo = String(row[colCodigo] || '').trim();
+            if (colCategoria >= 0) rawCategoria = String(row[colCategoria] || 'General').trim();
+            if (colPrecio >= 0) rawPrecio = Number(String(row[colPrecio] || 0).replace(/[^0-9.-]+/g, '')) || 0;
+            if (colCosto >= 0) rawCosto = Number(String(row[colCosto] || 0).replace(/[^0-9.-]+/g, '')) || 0;
+            if (colStock >= 0) rawStock = Number(String(row[colStock] || 10).replace(/[^0-9.-]+/g, '')) || 10;
+            if (colMinStock >= 0) rawMinStock = Number(String(row[colMinStock] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+            if (colUnidad >= 0) rawUnidad = String(row[colUnidad] || 'Unidad').trim();
+          } else if (row.length >= 7) {
+            // Formato estándar de 8 columnas: Código, Nombre, Categoría, Precio, Costo, Stock, Stock Mínimo, Unidad
+            rawCodigo = String(row[0] || '').trim();
+            rawNombre = String(row[1] || '').trim();
+            rawCategoria = String(row[2] || 'General').trim();
+            rawPrecio = Number(String(row[3] || 0).replace(/[^0-9.-]+/g, '')) || 0;
+            rawCosto = Number(String(row[4] || 0).replace(/[^0-9.-]+/g, '')) || 0;
+            rawStock = Number(String(row[5] || 10).replace(/[^0-9.-]+/g, '')) || 10;
+            rawMinStock = Number(String(row[6] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+            rawUnidad = String(row[7] || 'Unidad').trim();
+          } else {
+            // Formato clásico de 5 columnas: Nombre, Categoría, Stock, Stock Mínimo, Unidad
+            rawNombre = String(row[0] || '').trim();
+            rawCategoria = String(row[1] || 'General').trim();
+            rawStock = Number(String(row[2] || 10).replace(/[^0-9.-]+/g, '')) || 10;
+            rawMinStock = Number(String(row[3] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+            rawUnidad = String(row[4] || 'Unidad').trim();
           }
 
-          const nombre = col0;
-
-          let categoria: 'insumos' | 'empaques' | 'preparados' = 'insumos';
-          const rawCat = String(row[1] || '').trim().toLowerCase();
-          if (rawCat.includes('empaque') || rawCat.includes('vaso') || rawCat.includes('bolsa') || rawCat === 'empaques') {
-            categoria = 'empaques';
-          } else if (rawCat.includes('prepara') || rawCat.includes('base') || rawCat.includes('barra') || rawCat === 'preparados') {
-            categoria = 'preparados';
+          if (!rawNombre || rawNombre.toLowerCase() === 'nombre' || rawNombre.toLowerCase() === 'producto' || rawNombre.toLowerCase() === 'item') {
+            continue;
           }
 
-          let stock_actual = 10;
-          const rawStock = row[2];
-          if (rawStock !== undefined && rawStock !== '' && !isNaN(Number(rawStock))) {
-            stock_actual = Number(rawStock);
-          }
+          const codigoFinal = rawCodigo || `CF-${String(importedCount + 1).padStart(3, '0')}`;
+          const precioFinal = Math.max(0, rawPrecio);
+          const costoFinal = Math.max(0, rawCosto);
+          const stockFinal = Math.max(0, rawStock);
+          const minStockFinal = Math.max(0, rawMinStock);
+          const unidadFinal = rawUnidad || 'Unidad';
 
-          let stock_minimo_alerta = 5;
-          const rawMin = row[3];
-          if (rawMin !== undefined && rawMin !== '' && !isNaN(Number(rawMin))) {
-            stock_minimo_alerta = Number(rawMin);
-          }
-
-          const rawUnidad = String(row[4] || '').trim();
-          const unidad = rawUnidad || 'Unidades';
-
+          // 1. Guardar en Bodega / Inventario (con costo y niveles de stock)
           onSaveInventarioItem({
-            nombre,
-            categoria,
-            stock_actual,
-            stock_minimo_alerta,
-            unidad,
+            nombre: rawNombre,
+            categoria: rawCategoria,
+            stock_actual: stockFinal,
+            stock_minimo_alerta: minStockFinal,
+            unidad: unidadFinal,
+            costo_unitario: costoFinal,
             ultima_actualizacion_fecha: getLocalDateString()
           });
 
+          // 2. Guardar en Catálogo Oficial de Productos (para ventas, precios oficiales y reportes)
+          catalogItemsToSave.push({
+            codigo: codigoFinal.toUpperCase(),
+            nombre: rawNombre,
+            categoria: rawCategoria,
+            valor_bruto: precioFinal,
+            descuento: 0,
+            subtotal: precioFinal,
+            impuesto_cargo: 0,
+            total: precioFinal,
+            precio: precioFinal,
+            precio_costo: costoFinal,
+            margen_ganancia: Math.max(0, precioFinal - costoFinal),
+            stock: stockFinal
+          });
+
           importedCount++;
-        });
+        }
+
+        // Sincronizar catálogo masivamente si hay elementos
+        if (catalogItemsToSave.length > 0) {
+          if (onBulkSaveProductosCatalogo) {
+            onBulkSaveProductosCatalogo(catalogItemsToSave);
+          } else {
+            catalogItemsToSave.forEach(p => onSaveProductoCatalogo(p));
+          }
+        }
 
         setImportStatus({
           type: 'success',
-          message: `¡Carga Masiva Exitosa! Se registraron ${importedCount} productos e insumos desde "${file.name}".`
+          message: `¡Carga Masiva Exitosa! Se registraron ${importedCount} productos con sus códigos, precios, costos y stock tanto en Inventario como en el Catálogo de Ventas.`
         });
 
         e.target.value = '';
@@ -1731,6 +1814,7 @@ export default function AdminDashboard({
       const lines = text.split(/\r?\n/);
       let count = 0;
       let ignored = 0;
+      const catalogItemsToSave: Omit<Producto, 'id'>[] = [];
 
       if (importOption === 'replace') {
         inventario.forEach(item => {
@@ -1738,7 +1822,7 @@ export default function AdminDashboard({
         });
       }
 
-      lines.forEach((line) => {
+      lines.forEach((line, idx) => {
         if (!line || !line.trim()) return;
 
         let parts: string[] = [];
@@ -1752,49 +1836,85 @@ export default function AdminDashboard({
           parts = [line];
         }
 
-        const rawNombre = parts[0]?.trim();
+        let rawNombre = '';
+        let rawCodigo = '';
+        let rawCategoria = 'General';
+        let rawPrecio = 0;
+        let rawCosto = 0;
+        let rawStock = 10;
+        let rawMinStock = 5;
+        let rawUnidad = 'Unidad';
+
+        if (parts.length >= 7) {
+          // Formato 8 columnas: Código, Nombre, Categoría, Precio, Costo, Stock, Stock Mínimo, Unidad
+          rawCodigo = parts[0]?.trim() || '';
+          rawNombre = parts[1]?.trim() || '';
+          rawCategoria = parts[2]?.trim() || 'General';
+          rawPrecio = Number(String(parts[3] || 0).replace(/[^0-9.-]+/g, '')) || 0;
+          rawCosto = Number(String(parts[4] || 0).replace(/[^0-9.-]+/g, '')) || 0;
+          rawStock = Number(String(parts[5] || 10).replace(/[^0-9.-]+/g, '')) || 10;
+          rawMinStock = Number(String(parts[6] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+          rawUnidad = parts[7]?.trim() || 'Unidad';
+        } else {
+          // Formato 5 columnas: Nombre, Categoría, Stock, Stock Mínimo, Unidad
+          rawNombre = parts[0]?.trim() || '';
+          rawCategoria = parts[1]?.trim() || 'General';
+          rawStock = Number(String(parts[2] || 10).replace(/[^0-9.-]+/g, '')) || 10;
+          rawMinStock = Number(String(parts[3] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+          rawUnidad = parts[4]?.trim() || 'Unidad';
+        }
+
         if (!rawNombre || rawNombre.toLowerCase() === 'nombre' || rawNombre.toLowerCase() === 'producto' || rawNombre.toLowerCase() === 'insumo' || rawNombre.toLowerCase() === 'recurso') {
           ignored++;
           return;
         }
 
-        const nombre = rawNombre;
-        
-        let categoria: 'insumos' | 'empaques' | 'preparados' = 'insumos';
-        const rawCat = parts[1]?.trim().toLowerCase() || '';
-        if (rawCat.includes('empaque') || rawCat.includes('vaso') || rawCat.includes('bolsa') || rawCat === 'empaques') {
-          categoria = 'empaques';
-        } else if (rawCat.includes('prepara') || rawCat.includes('base') || rawCat.includes('barra') || rawCat === 'preparados') {
-          categoria = 'preparados';
-        }
-
-        let stock_actual = 10;
-        const rawStock = parts[2]?.trim();
-        if (rawStock && !isNaN(Number(rawStock))) {
-          stock_actual = Number(rawStock);
-        }
-
-        let stock_minimo_alerta = 5;
-        const rawMin = parts[3]?.trim();
-        if (rawMin && !isNaN(Number(rawMin))) {
-          stock_minimo_alerta = Number(rawMin);
-        }
-
-        const unidad = parts[4]?.trim() || 'Kg';
+        const codigoFinal = rawCodigo || `CF-${String(count + 1).padStart(3, '0')}`;
+        const precioFinal = Math.max(0, rawPrecio);
+        const costoFinal = Math.max(0, rawCosto);
+        const stockFinal = Math.max(0, rawStock);
+        const minStockFinal = Math.max(0, rawMinStock);
+        const unidadFinal = rawUnidad || 'Unidad';
 
         onSaveInventarioItem({
-          nombre,
-          categoria,
-          stock_actual,
-          stock_minimo_alerta,
-          unidad
+          nombre: rawNombre,
+          categoria: rawCategoria,
+          stock_actual: stockFinal,
+          stock_minimo_alerta: minStockFinal,
+          unidad: unidadFinal,
+          costo_unitario: costoFinal,
+          ultima_actualizacion_fecha: getLocalDateString()
         });
+
+        catalogItemsToSave.push({
+          codigo: codigoFinal.toUpperCase(),
+          nombre: rawNombre,
+          categoria: rawCategoria,
+          valor_bruto: precioFinal,
+          descuento: 0,
+          subtotal: precioFinal,
+          impuesto_cargo: 0,
+          total: precioFinal,
+          precio: precioFinal,
+          precio_costo: costoFinal,
+          margen_ganancia: Math.max(0, precioFinal - costoFinal),
+          stock: stockFinal
+        });
+
         count++;
       });
 
+      if (catalogItemsToSave.length > 0) {
+        if (onBulkSaveProductosCatalogo) {
+          onBulkSaveProductosCatalogo(catalogItemsToSave);
+        } else {
+          catalogItemsToSave.forEach(p => onSaveProductoCatalogo(p));
+        }
+      }
+
       setImportStatus({ 
         type: 'success', 
-        message: `¡Importación exitosa! Se han agregado ${count} productos al inventario. (Filas de encabezado omitidas: ${ignored})` 
+        message: `¡Importación exitosa! Se han agregado ${count} productos con toda su información a Inventario y Catálogo Oficial. (Filas de encabezado omitidas: ${ignored})` 
       });
       setBulkPasteText('');
     } catch (err: any) {
