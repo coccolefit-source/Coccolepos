@@ -2337,8 +2337,16 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
     const { error: errUpsert } = await client.from('campaign_products').upsert(cleanPayload);
     if (!errUpsert) return true;
 
+    if (errUpsert?.code === '42501' || errUpsert?.message?.includes('row-level security')) {
+      console.error('[Supabase RLS Error] Permiso denegado por RLS en la tabla campaign_products:', errUpsert.message);
+    }
+
     const { error: errInsert } = await client.from('campaign_products').insert([cleanPayload]);
     if (!errInsert) return true;
+
+    if (errInsert?.code === '42501' || errInsert?.message?.includes('row-level security')) {
+      console.error('[Supabase RLS Error] Permiso denegado por RLS en la tabla campaign_products:', errInsert.message);
+    }
 
     console.warn('Upsert/Insert directo en campaign_products devolvió error:', errUpsert?.message || errInsert?.message);
 

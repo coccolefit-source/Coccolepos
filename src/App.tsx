@@ -999,8 +999,12 @@ export default function App() {
     });
 
     try {
-      await insertCampaignProductInSupabase(mainProd);
-      pushNotification(`¡Campaña de ventas "${newProd.nombre_producto}" configurada y sincronizada con éxito!`, 'success');
+      const ok = await insertCampaignProductInSupabase(mainProd);
+      if (ok) {
+        pushNotification(`¡Campaña de ventas "${newProd.nombre_producto}" guardada exitosamente en Supabase!`, 'success');
+      } else {
+        pushNotification(`Atención: Supabase no permitió guardar. Ejecuta 'ALTER TABLE public.campaign_products DISABLE ROW LEVEL SECURITY;' en tu SQL Editor de Supabase.`, 'alert');
+      }
       await cargarDatosSilencioso();
     } catch (err) {
       console.error('Error insertando producto de campaña:', err);
