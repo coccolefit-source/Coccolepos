@@ -3318,15 +3318,108 @@ export async function deleteCatalogProductFromSupabase(idOrCodigo: string): Prom
   return false;
 }
 
+export async function upsertInventoryBatchInSupabase(items: InsumoInventario[]): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !items || items.length === 0) return false;
+
+  try {
+    const payloads = items.map((insumo, idx) => {
+      const raw = insumo as any;
+      const cleanNombre = String(insumo.nombre || '').trim();
+      const cleanId = insumo.id || `inv-${cleanNombre.toLowerCase().replace(/[^a-z0-9]+/g, '-') || Date.now()}`;
+      return {
+        id: cleanId,
+        item_name: cleanNombre,
+        nombre: cleanNombre,
+        categoria: insumo.categoria || 'General',
+        current_stock: Number(insumo.stock_actual) || 0,
+        stock_actual: Number(insumo.stock_actual) || 0,
+        min_stock: Number(insumo.stock_minimo_alerta ?? raw.stock_minimo ?? 0),
+        stock_minimo: Number(insumo.stock_minimo_alerta ?? raw.stock_minimo ?? 0),
+        unidad_medida: insumo.unidad ?? raw.unidad_medida ?? 'Unidades',
+        estado_alerta: raw.estado_alerta || (Number(insumo.stock_actual) <= Number(insumo.stock_minimo_alerta) ? 'bajo' : 'normal'),
+        costo_unitario: Number(raw.costo_unitario) || 0,
+        updated_at: new Date().toISOString()
+      };
+    });
+
+    const { error } = await client.from('inventory').upsert(payloads);
+    if (!error) {
+      console.log(`[Supabase] ${payloads.length} insumos de bodega guardados masivamente.`);
+      return true;
+    }
+
+    console.warn('[Supabase] Error en batch upsert inventory:', error.message);
+    let okCount = 0;
+    for (const item of items) {
+      const ok = await upsertInventoryInSupabase(item);
+      if (ok) okCount++;
+    }
+    return okCount > 0;
+  } catch (err) {
+    console.error('Exception in upsertInventoryBatchInSupabase:', err);
+    return false;
+  }
+}
+
 export async function upsertCatalogProductsBatchInSupabase(products: Producto[]): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client || !products || products.length === 0) return false;
 
-  let successCount = 0;
-  for (const prod of products) {
-    const ok = await upsertCatalogProductInSupabase(prod);
-    if (ok) successCount++;
-  }
+  try {
+    const payloads = products.map((prod, idx) => {
+      const cleanCodigo = String(prod.codigo || `PROD-${idx + 1}`).toUpperCase().trim();
+      const cleanNombre = String(prod.nombre || '').trim();
+      const vb = Number(prod.valor_bruto != null ? prod.valor_bruto : prod.precio) || 0;
+      const desc = Number(prod.descuento || 0);
+      const subt = Number(prod.subtotal != null ? prod.subtotal : (vb - desc));
+      const imp = Number(prod.impuesto_cargo || 0);
+      const tot = Number(prod.total != null ? prod.total : prod.precio) || (subt + imp);
+      const costo = Number(prod.precio_costo || 0);
+      const ganancia = Number(prod.margen_ganancia != null ? prod.margen_ganancia : (tot - costo));
 
-  return successCount > 0;
+      return {
+        id: prod.id || `cat-${cleanCodigo}`,
+        codigo: cleanCodigo,
+        nombre: cleanNombre,
+        categoria: prod.categoria || 'General',
+        valor_bruto: vb,
+        descuento: desc,
+        subtotal: subt,
+        impuesto_cargo: imp,
+        total: tot,
+        precio: tot,
+        precio_costo: costo,
+        margen_ganancia: ganancia,
+        stock: Number(prod.stock || 0),
+        activo: true,
+        updated_at: new Date().toISOString()
+      };
+    });
+
+    const candidateTables = ['products_catalog', 'productos_catalogo'];
+    for (const table of candidateTables) {
+      try {
+        const { error } = await client.from(table).upsert(payloads, { onConflict: 'codigo' });
+        if (!error) {
+          console.log(`[Supabase] ${payloads.length} productos sincronizados en lote en ${table}`);
+          return true;
+        }
+        console.warn(`[Supabase] Batch upsert en ${table} devolvió error:`, error.message);
+      } catch (e) {
+        // try next table
+      }
+    }
+
+    // Fallback secuencial si falla upsert por lotes
+    let successCount = 0;
+    for (const prod of products) {
+      const ok = await upsertCatalogProductInSupabase(prod);
+      if (ok) successCount++;
+    }
+    return successCount > 0;
+  } catch (err) {
+    console.error('Exception in upsertCatalogProductsBatchInSupabase:', err);
+    return false;
+  }
 }

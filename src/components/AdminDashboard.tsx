@@ -56,6 +56,7 @@ export interface AdminDashboardProps {
   onEditUsuario: (usuario: Usuario) => Promise<boolean> | boolean | void;
   onDeleteUsuario: (id: string) => void;
   onSaveInventarioItem: (item: Omit<InventarioItem, 'id'> & { id?: string }) => void;
+  onBulkSaveInventario?: (items: InventarioItem[]) => Promise<boolean | void> | boolean | void;
   onDeleteInventarioItem: (id: string) => void;
   onSaveTurno: (turno: Omit<TurnoSemanal, 'id'> & { id?: string }) => void;
   onDeleteTurno: (id: string) => void;
@@ -113,6 +114,7 @@ export default function AdminDashboard({
   onEditUsuario,
   onDeleteUsuario,
   onSaveInventarioItem,
+  onBulkSaveInventario,
   onDeleteInventarioItem,
   onSaveTurno,
   onDeleteTurno,
@@ -1688,6 +1690,7 @@ export default function AdminDashboard({
 
         const startIdx = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
         let importedCount = 0;
+        const inventoryItemsToSave: InventarioItem[] = [];
         const catalogItemsToSave: Omit<Producto, 'id'>[] = [];
 
         for (let i = startIdx; i < jsonRows.length; i++) {
@@ -1743,8 +1746,9 @@ export default function AdminDashboard({
           const minStockFinal = Math.max(0, rawMinStock);
           const unidadFinal = rawUnidad || 'Unidad';
 
-          // 1. Guardar en Bodega / Inventario (con costo y niveles de stock)
-          onSaveInventarioItem({
+          // 1. Acumular para Bodega / Inventario (con costo y niveles de stock)
+          inventoryItemsToSave.push({
+            id: `inv-${rawNombre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
             nombre: rawNombre,
             categoria: rawCategoria,
             stock_actual: stockFinal,
@@ -1754,7 +1758,7 @@ export default function AdminDashboard({
             ultima_actualizacion_fecha: getLocalDateString()
           });
 
-          // 2. Guardar en Catálogo Oficial de Productos (para ventas, precios oficiales y reportes)
+          // 2. Acumular para Catálogo Oficial de Productos (para ventas, precios oficiales y reportes)
           catalogItemsToSave.push({
             codigo: codigoFinal.toUpperCase(),
             nombre: rawNombre,
@@ -1771,6 +1775,15 @@ export default function AdminDashboard({
           });
 
           importedCount++;
+        }
+
+        // Sincronizar inventario masivamente
+        if (inventoryItemsToSave.length > 0) {
+          if (onBulkSaveInventario) {
+            onBulkSaveInventario(inventoryItemsToSave);
+          } else {
+            inventoryItemsToSave.forEach(i => onSaveInventarioItem(i));
+          }
         }
 
         // Sincronizar catálogo masivamente si hay elementos
@@ -1814,6 +1827,7 @@ export default function AdminDashboard({
       const lines = text.split(/\r?\n/);
       let count = 0;
       let ignored = 0;
+      const inventoryItemsToSave: InventarioItem[] = [];
       const catalogItemsToSave: Omit<Producto, 'id'>[] = [];
 
       if (importOption === 'replace') {
@@ -1876,7 +1890,8 @@ export default function AdminDashboard({
         const minStockFinal = Math.max(0, rawMinStock);
         const unidadFinal = rawUnidad || 'Unidad';
 
-        onSaveInventarioItem({
+        inventoryItemsToSave.push({
+          id: `inv-${rawNombre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
           nombre: rawNombre,
           categoria: rawCategoria,
           stock_actual: stockFinal,
@@ -1903,6 +1918,14 @@ export default function AdminDashboard({
 
         count++;
       });
+
+      if (inventoryItemsToSave.length > 0) {
+        if (onBulkSaveInventario) {
+          onBulkSaveInventario(inventoryItemsToSave);
+        } else {
+          inventoryItemsToSave.forEach(i => onSaveInventarioItem(i));
+        }
+      }
 
       if (catalogItemsToSave.length > 0) {
         if (onBulkSaveProductosCatalogo) {

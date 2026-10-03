@@ -61,7 +61,8 @@ import {
   fetchCatalogFromSupabase,
   upsertCatalogProductInSupabase,
   deleteCatalogProductFromSupabase,
-  upsertCatalogProductsBatchInSupabase
+  upsertCatalogProductsBatchInSupabase,
+  upsertInventoryBatchInSupabase
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -1518,6 +1519,35 @@ export default function App() {
     }
   };
 
+  const handleBulkSaveInventario = async (items: InventarioItem[]) => {
+    if (!items || items.length === 0) return;
+
+    setState(prev => {
+      const existing = [...(prev.inventario || [])];
+      items.forEach(newItem => {
+        const idx = existing.findIndex(i => i.nombre.toLowerCase().trim() === newItem.nombre.toLowerCase().trim());
+        if (idx >= 0) {
+          existing[idx] = { ...existing[idx], ...newItem };
+        } else {
+          existing.push(newItem);
+        }
+      });
+      return { ...prev, inventario: existing };
+    });
+
+    if (isSupabaseConfigured()) {
+      try {
+        await upsertInventoryBatchInSupabase(items);
+        const latestInventory = await fetchInventoryFromSupabase();
+        if (latestInventory !== null) {
+          setState(prev => ({ ...prev, inventario: latestInventory }));
+        }
+      } catch (err) {
+        console.error('Error guardando lote de inventario en Supabase:', err);
+      }
+    }
+  };
+
   const handleDeleteInventarioItem = async (id: string) => {
     const deleted = (state.inventario || []).find(i => i.id === id);
     setState(prev => {
@@ -2324,6 +2354,7 @@ export default function App() {
               onEditUsuario={handleEditUsuario}
               onDeleteUsuario={handleDeleteUsuario}
               onSaveInventarioItem={handleSaveInventarioItem}
+              onBulkSaveInventario={handleBulkSaveInventario}
               onDeleteInventarioItem={handleDeleteInventarioItem}
               onSaveTurno={handleSaveTurno}
               onDeleteTurno={handleDeleteTurno}
