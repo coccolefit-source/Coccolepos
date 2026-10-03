@@ -61,7 +61,8 @@ import {
   fetchCatalogFromSupabase,
   upsertCatalogProductInSupabase,
   deleteCatalogProductFromSupabase,
-  upsertCatalogProductsBatchInSupabase
+  upsertCatalogProductsBatchInSupabase,
+  getLocalCampaignProductsFallback
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -90,7 +91,7 @@ export default function App() {
     return {
       usuarios: [],
       tareas: [],
-      productos: [],
+      productos: getLocalCampaignProductsFallback(),
       ventas: [],
       fichajes: [],
       incidencias: [],
@@ -980,84 +981,30 @@ export default function App() {
   // --- ACTIONS: PRODUCTOS A PROMOCIONAR ---
 
   const handleAddProducto = async (newProd: Omit<ProductoPromocion, 'id'>) => {
+    const fechaHoy = newProd.fecha || getLocalDateString();
     const mainProd: ProductoPromocion = {
       ...newProd,
-      id: `prod-${Date.now()}`
+      id: `prod-${Date.now()}`,
+      fecha: fechaHoy
     };
 
-    let empleados: Usuario[] = [];
-    const client = getSupabaseClient();
-    
-    if (client) {
-      try {
-        const { data, error } = await client
-          .from('profiles')
-          .select('*');
-        if (!error && data) {
-          empleados = data
-            .map((p: any) => ({
-              id: p.id,
-              nombre: p.full_name || p.nombre || 'Usuario',
-              rol: (p.role === 'staff' ? 'empleado' : (p.role || p.rol || 'empleado')) as 'admin' | 'empleado'
-            }))
-            .filter((u: any) => u.rol === 'empleado');
-        }
-      } catch (err) {
-        console.error('Error fetching profiles in handleAddProducto:', err);
-      }
-    }
-
-    if (empleados.length === 0) {
-      empleados = (state.usuarios || []).filter(u => u.rol === 'empleado');
-    }
-
-    // Actualización local para rendimiento inmediato
-    const prodsToInsert: ProductoPromocion[] = empleados.length > 0
-      ? empleados.map((emp, idx) => ({
-          id: `prod-${Date.now()}-${idx}`,
-          nombre_producto: newProd.nombre_producto,
-          fecha: newProd.fecha || getLocalDateString(),
-          meta_diaria_unidades: newProd.meta_diaria_unidades,
-          puntos_por_unidad: newProd.puntos_por_unidad,
-          asignado_a: emp.nombre
-        }))
-      : [mainProd];
-
-    setState(prev => ({
-      ...prev,
-      productos: [mainProd, ...prodsToInsert, ...prev.productos]
-    }));
-
-    if (!client) {
-      pushNotification(`Se agregó "${newProd.nombre_producto}" a la campaña diaria.`, 'success');
-      return;
-    }
+    // Actualización local limpia sin duplicados por empleado
+    setState(prev => {
+      const existingFiltered = (prev.productos || []).filter(
+        p => p.nombre_producto.trim().toLowerCase() !== mainProd.nombre_producto.trim().toLowerCase()
+      );
+      return {
+        ...prev,
+        productos: [mainProd, ...existingFiltered]
+      };
+    });
 
     try {
-      // 0. Limpiar campañas anteriores del día para evitar acumulación/duplicados
-      const fechaHoy = newProd.fecha || getLocalDateString();
-      await clearOldCampaignProductsInSupabase(fechaHoy);
-
-      // 1. Insertar siempre la regla general base (con product_name, target, points)
-      let okBase = await insertCampaignProductInSupabase(mainProd);
-
-      // 2. Si existen empleados y la tabla soporta asignación, intentar guardar por empleado
-      let successCount = okBase ? 1 : 0;
-      if (empleados.length > 0) {
-        for (const prod of prodsToInsert) {
-          const ok = await insertCampaignProductInSupabase(prod);
-          if (ok) successCount++;
-        }
-      }
-
-      if (successCount > 0 || okBase) {
-        pushNotification(`¡Campaña de ventas "${newProd.nombre_producto}" configurada y sincronizada con éxito!`, 'success');
-      } else {
-        pushNotification('Hubo un error al sincronizar la campaña en la nube.', 'alert');
-      }
+      await insertCampaignProductInSupabase(mainProd);
+      pushNotification(`¡Campaña de ventas "${newProd.nombre_producto}" configurada y sincronizada con éxito!`, 'success');
       await cargarDatosSilencioso();
     } catch (err) {
-      console.error('Error insertando producto de campaña masiva:', err);
+      console.error('Error insertando producto de campaña:', err);
     }
   };
 

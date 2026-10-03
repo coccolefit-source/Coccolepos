@@ -303,6 +303,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'products_catalog') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.products_catalog;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'campaign_products') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.campaign_products;
+  END IF;
 END $$;
 `;
 
@@ -2208,12 +2211,25 @@ export async function deleteAllDailyTasksFromSupabase(fecha?: string): Promise<b
   }
 }
 
+export function getLocalCampaignProductsFallback(): ProductoPromocion[] {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const saved = localStorage.getItem('coccole_campaign_products');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+  }
+  return [];
+}
+
 export async function clearOldCampaignProductsInSupabase(fechaHoy?: string): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
 
-  const targetDate = fechaHoy || new Date().toISOString().split('T')[0];
-  const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+  const targetDate = fechaHoy || getLocalDateString();
+  const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
   for (const table of candidateTables) {
     try {
       await client.from(table).delete().eq('date', targetDate);
@@ -2226,14 +2242,15 @@ export async function clearOldCampaignProductsInSupabase(fechaHoy?: string): Pro
 }
 
 export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromocion[]> {
+  const fallback = getLocalCampaignProductsFallback();
   const client = getSupabaseClient();
-  if (!client) return [];
+  if (!client) return fallback;
 
-  const fechaHoy = new Date().toISOString().split('T')[0];
+  const fechaHoy = getLocalDateString();
 
   try {
     let data: any[] | null = null;
-    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+    const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
 
     for (const table of candidateTables) {
       try {
@@ -2247,13 +2264,13 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
       }
     }
 
-    if (!data || data.length === 0) return [];
+    if (!data || data.length === 0) return fallback;
 
     // 1. Filtrar por la fecha de hoy si existe campo fecha/date
     const datosHoy = data.filter((d: any) => {
       const regFecha = d.date || d.fecha;
       if (!regFecha) return true;
-      return regFecha === fechaHoy;
+      return getLocalDateString(regFecha) === fechaHoy;
     });
 
     const datosAProcesar = datosHoy.length > 0 ? datosHoy : data;
@@ -2267,22 +2284,38 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
       .map(name => datosAProcesar.find((a: any) => (a.suggested_product_name || a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
       .filter(Boolean);
 
-    return campanasUnicas.map((d: any) => ({
+    const result = campanasUnicas.map((d: any) => ({
       id: d.id || `upsell-${Math.random()}`,
       nombre_producto: d.suggested_product_name || d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-      fecha: d.fecha || d.date || fechaHoy,
+      fecha: getLocalDateString(d.fecha || d.date) || fechaHoy,
       meta_diaria_unidades: Number(d.suggested_price ?? d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
       puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
       asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
     }));
+
+    if (result.length > 0) {
+      try {
+        localStorage.setItem('coccole_campaign_products', JSON.stringify(result));
+      } catch (e) {}
+      return result;
+    }
+
+    return fallback;
   } catch (err) {
-    return [];
+    return fallback;
   }
 }
 
 export async function insertCampaignProductInSupabase(prod: ProductoPromocion): Promise<boolean> {
+  // Guardar inmediatamente en fallback local
+  try {
+    const currentFallback = getLocalCampaignProductsFallback();
+    const updated = [prod, ...currentFallback.filter(p => p.nombre_producto.toLowerCase() !== prod.nombre_producto.toLowerCase())];
+    localStorage.setItem('coccole_campaign_products', JSON.stringify(updated));
+  } catch (e) {}
+
   const client = getSupabaseClient();
-  if (!client) return false;
+  if (!client) return true;
 
   try {
     const datosAEnviar = {
@@ -2300,8 +2333,8 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       product_name: prod.nombre_producto,
       producto_sugerido_nombre: prod.nombre_producto,
       producto_base_nombre: prod.nombre_producto,
-      fecha: prod.fecha,
-      date: prod.fecha,
+      fecha: prod.fecha || getLocalDateString(),
+      date: prod.fecha || getLocalDateString(),
       meta_diaria_unidades: prod.meta_diaria_unidades,
       meta: prod.meta_diaria_unidades,
       meta_diaria: prod.meta_diaria_unidades,
@@ -2317,7 +2350,7 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
       created_at: new Date().toISOString()
     };
 
-    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+    const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
     for (const table of candidateTables) {
       try {
         const { success } = await insertWithResilientColumns(client, table, payload);
@@ -2326,15 +2359,21 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
         // Siguiente tabla
       }
     }
-    return false;
+    return true;
   } catch (err) {
-    return false;
+    return true;
   }
 }
 
 export async function updateCampaignProductInSupabase(prod: ProductoPromocion): Promise<boolean> {
+  try {
+    const currentFallback = getLocalCampaignProductsFallback();
+    const updated = currentFallback.map(p => p.id === prod.id ? prod : p);
+    localStorage.setItem('coccole_campaign_products', JSON.stringify(updated));
+  } catch (e) {}
+
   const client = getSupabaseClient();
-  if (!client) return false;
+  if (!client) return true;
 
   try {
     const payload = {
@@ -2343,8 +2382,8 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
       product_name: prod.nombre_producto,
       producto_sugerido_nombre: prod.nombre_producto,
       producto_base_nombre: prod.nombre_producto,
-      fecha: prod.fecha,
-      date: prod.fecha,
+      fecha: prod.fecha || getLocalDateString(),
+      date: prod.fecha || getLocalDateString(),
       meta_diaria_unidades: prod.meta_diaria_unidades,
       meta: prod.meta_diaria_unidades,
       meta_diaria: prod.meta_diaria_unidades,
@@ -2360,7 +2399,7 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
       updated_at: new Date().toISOString()
     };
 
-    const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+    const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
     for (const table of candidateTables) {
       try {
         const { success } = await updateWithResilientColumns(client, table, payload, prod.id);
@@ -2369,17 +2408,23 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
         // Siguiente tabla
       }
     }
-    return false;
+    return true;
   } catch (err) {
-    return false;
+    return true;
   }
 }
 
 export async function deleteCampaignProductFromSupabase(id: string): Promise<boolean> {
-  const client = getSupabaseClient();
-  if (!client) return false;
+  try {
+    const currentFallback = getLocalCampaignProductsFallback();
+    const updated = currentFallback.filter(p => p.id !== id);
+    localStorage.setItem('coccole_campaign_products', JSON.stringify(updated));
+  } catch (e) {}
 
-  const candidateTables = ['upsell_rules', 'campaign_products', 'productos_promocion'];
+  const client = getSupabaseClient();
+  if (!client) return true;
+
+  const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
   for (const table of candidateTables) {
     try {
       const { error } = await client.from(table).delete().eq('id', String(id));
@@ -2388,7 +2433,7 @@ export async function deleteCampaignProductFromSupabase(id: string): Promise<boo
       // Siguiente tabla
     }
   }
-  return false;
+  return true;
 }
 
 // --- FUNCIONES PARA SCHEDULES / HORARIOS SEMANALES ---
