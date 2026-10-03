@@ -2276,51 +2276,41 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
   const fechaHoy = getLocalDateString();
 
   try {
-    let data: any[] | null = null;
     const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
 
     for (const table of candidateTables) {
       try {
-        const { data: resData, error } = await client.from(table).select('*');
-        if (!error && resData && resData.length > 0) {
-          data = resData;
-          break;
+        const { data, error } = await client.from(table).select('*');
+        if (!error && data && data.length > 0) {
+          const datosHoy = data.filter((d: any) => {
+            const regFecha = d.fecha || d.date;
+            if (!regFecha) return true;
+            return getLocalDateString(regFecha) === fechaHoy;
+          });
+
+          const datosAProcesar = datosHoy.length > 0 ? datosHoy : data;
+
+          const mapped: ProductoPromocion[] = datosAProcesar.map((d: any) => ({
+            id: String(d.id || `prod-${Math.random()}`),
+            nombre_producto: String(d.nombre_producto || d.product_name || d.suggested_product_name || d.name || '').trim(),
+            fecha: getLocalDateString(d.fecha || d.date) || fechaHoy,
+            meta_diaria_unidades: Number(d.meta_diaria_unidades ?? d.meta ?? d.target ?? 15),
+            puntos_por_unidad: Number(d.puntos_por_unidad ?? d.points ?? d.puntos ?? 10),
+            asignado_a: String(d.asignado_a || d.assigned_to || '')
+          })).filter(p => p.nombre_producto.length > 0);
+
+          const deduplicatedMap = new Map<string, ProductoPromocion>();
+          mapped.forEach(p => {
+            deduplicatedMap.set(p.nombre_producto.toLowerCase(), p);
+          });
+
+          return Array.from(deduplicatedMap.values());
         }
       } catch (e) {
-        // Continuar con tabla alternativa
+        // Siguiente tabla
       }
     }
-
-    if (!data || data.length === 0) return [];
-
-    // 1. Filtrar por la fecha de hoy si existe campo fecha/date
-    const datosHoy = data.filter((d: any) => {
-      const regFecha = d.date || d.fecha;
-      if (!regFecha) return true;
-      return getLocalDateString(regFecha) === fechaHoy;
-    });
-
-    const datosAProcesar = datosHoy.length > 0 ? datosHoy : data;
-
-    // 2. Deduplicar por nombre de producto para asegurar elementos únicos
-    const nombresUnicos = Array.from(
-      new Set(datosAProcesar.map((a: any) => a.suggested_product_name || a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre || ''))
-    ).filter(Boolean);
-
-    const campanasUnicas = nombresUnicos
-      .map(name => datosAProcesar.find((a: any) => (a.suggested_product_name || a.product_name || a.nombre_producto || a.name || a.producto_sugerido_nombre) === name))
-      .filter(Boolean);
-
-    const result = campanasUnicas.map((d: any) => ({
-      id: d.id || `upsell-${Math.random()}`,
-      nombre_producto: d.suggested_product_name || d.product_name || d.nombre_producto || d.producto_sugerido_nombre || d.name || d.producto_base_nombre || '',
-      fecha: getLocalDateString(d.fecha || d.date) || fechaHoy,
-      meta_diaria_unidades: Number(d.suggested_price ?? d.target ?? d.meta_diaria_unidades ?? d.meta ?? d.meta_diaria ?? 15),
-      puntos_por_unidad: Number(d.points ?? d.puntos_por_unidad ?? d.puntos ?? 10),
-      asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
-    }));
-
-    return result;
+    return [];
   } catch (err) {
     console.error('Error en fetchCampaignProductsFromSupabase:', err);
     return [];
@@ -2332,42 +2322,31 @@ export async function insertCampaignProductInSupabase(prod: ProductoPromocion): 
   if (!client) return false;
 
   try {
-    const datosAEnviar = {
-      id: prod.id || ('rule_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
-      base_product_name: 'General',
-      suggested_product_name: prod.nombre_producto,
-      suggested_price: Number(prod.meta_diaria_unidades) || 0,
-      active: true
-    };
-
-    const payload = {
-      ...datosAEnviar,
-      nombre_producto: prod.nombre_producto,
-      name: prod.nombre_producto,
-      product_name: prod.nombre_producto,
-      producto_sugerido_nombre: prod.nombre_producto,
-      producto_base_nombre: prod.nombre_producto,
+    const cleanPayload = {
+      id: prod.id || ('prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
+      nombre_producto: prod.nombre_producto.trim(),
       fecha: prod.fecha || getLocalDateString(),
-      date: prod.fecha || getLocalDateString(),
-      meta_diaria_unidades: prod.meta_diaria_unidades,
-      meta: prod.meta_diaria_unidades,
-      meta_diaria: prod.meta_diaria_unidades,
-      target: prod.meta_diaria_unidades,
-      puntos_por_unidad: prod.puntos_por_unidad,
-      points: prod.puntos_por_unidad,
-      puntos: prod.puntos_por_unidad,
-      asignado_a: prod.asignado_a || null,
-      assigned_to: prod.asignado_a || null,
-      asignado: prod.asignado_a || null,
-      descuento_promocional_pct: 0,
+      meta_diaria_unidades: Number(prod.meta_diaria_unidades) || 15,
+      puntos_por_unidad: Number(prod.puntos_por_unidad) || 10,
       activa: true,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
 
+    // Intentar inserción directa limpia en campaign_products
+    const { error: errUpsert } = await client.from('campaign_products').upsert(cleanPayload);
+    if (!errUpsert) return true;
+
+    const { error: errInsert } = await client.from('campaign_products').insert([cleanPayload]);
+    if (!errInsert) return true;
+
+    console.warn('Upsert/Insert directo en campaign_products devolvió error:', errUpsert?.message || errInsert?.message);
+
+    // Si falla por diferencias de columnas en otras tablas candidatas, probar resilient insertion
     const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
     for (const table of candidateTables) {
       try {
-        const { success } = await insertWithResilientColumns(client, table, payload);
+        const { success } = await insertWithResilientColumns(client, table, cleanPayload);
         if (success) return true;
       } catch (e) {
         // Siguiente tabla
@@ -2385,33 +2364,22 @@ export async function updateCampaignProductInSupabase(prod: ProductoPromocion): 
   if (!client) return false;
 
   try {
-    const payload = {
-      nombre_producto: prod.nombre_producto,
-      name: prod.nombre_producto,
-      product_name: prod.nombre_producto,
-      producto_sugerido_nombre: prod.nombre_producto,
-      producto_base_nombre: prod.nombre_producto,
+    const cleanPayload = {
+      nombre_producto: prod.nombre_producto.trim(),
       fecha: prod.fecha || getLocalDateString(),
-      date: prod.fecha || getLocalDateString(),
-      meta_diaria_unidades: prod.meta_diaria_unidades,
-      meta: prod.meta_diaria_unidades,
-      meta_diaria: prod.meta_diaria_unidades,
-      target: prod.meta_diaria_unidades,
-      puntos_por_unidad: prod.puntos_por_unidad,
-      points: prod.puntos_por_unidad,
-      puntos: prod.puntos_por_unidad,
-      asignado_a: prod.asignado_a || null,
-      assigned_to: prod.asignado_a || null,
-      asignado: prod.asignado_a || null,
-      descuento_promocional_pct: 0,
+      meta_diaria_unidades: Number(prod.meta_diaria_unidades) || 15,
+      puntos_por_unidad: Number(prod.puntos_por_unidad) || 10,
       activa: true,
       updated_at: new Date().toISOString()
     };
 
+    const { error } = await client.from('campaign_products').update(cleanPayload).eq('id', String(prod.id));
+    if (!error) return true;
+
     const candidateTables = ['campaign_products', 'productos_promocion', 'upsell_rules'];
     for (const table of candidateTables) {
       try {
-        const { success } = await updateWithResilientColumns(client, table, payload, prod.id);
+        const { success } = await updateWithResilientColumns(client, table, cleanPayload, prod.id);
         if (success) return true;
       } catch (e) {
         // Siguiente tabla
