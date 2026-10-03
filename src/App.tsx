@@ -2023,7 +2023,6 @@ export default function App() {
                       (window as any).sesionActual = { rol: null, nombre: null };
                     }
                     localStorage.removeItem('coccole_sesion');
-                    localStorage.clear();
                     setActiveUserRole(null);
                     window.location.reload();
                   }
