@@ -1605,6 +1605,15 @@ export default function AdminDashboard({
     setInvUnidad(item.unidad);
   };
 
+  const parseNumericCell = (val: any, defaultVal: number = 0): number => {
+    if (val === undefined || val === null) return defaultVal;
+    const str = String(val).trim();
+    if (str === '') return defaultVal;
+    const cleaned = str.replace(/[^\d.-]/g, '');
+    if (cleaned === '' || isNaN(Number(cleaned))) return defaultVal;
+    return Number(cleaned);
+  };
+
   const handleDownloadSampleExcel = () => {
     const sampleData = [
       ['Código', 'Nombre del Producto', 'Categoría', 'Precio Venta', 'Costo Unitario', 'Stock Actual', 'Stock Mínimo', 'Unidad'],
@@ -1672,17 +1681,33 @@ export default function AdminDashboard({
           if (hasNombre) {
             headerRowIdx = r;
             rowTexts.forEach((text, cIdx) => {
-              if (text.includes('cod') || text.includes('cód') || text.includes('sku')) colCodigo = cIdx;
-              else if (text.includes('nom') || text.includes('prod') || text.includes('item') || text.includes('recurso') || text.includes('insumo')) colNombre = cIdx;
-              else if (text.includes('cat')) colCategoria = cIdx;
-              else if (text.includes('prec') || text.includes('val') || text.includes('vent') || text.includes('pvp') || text.includes('tot') || text.includes('price')) colPrecio = cIdx;
-              else if (text.includes('cost') || text.includes('comp')) colCosto = cIdx;
-              else if (text.includes('stock') || text.includes('cant') || text.includes('exist')) {
-                if (text.includes('min') || text.includes('mín') || text.includes('alert')) colMinStock = cIdx;
-                else colStock = cIdx;
+              if (text.includes('cod') || text.includes('cód') || text.includes('sku') || text === 'id') {
+                colCodigo = cIdx;
+              } else if (text.includes('nom') || text.includes('prod') || text.includes('item') || text.includes('recurso') || text.includes('insumo')) {
+                colNombre = cIdx;
+              } else if (text.includes('cat')) {
+                colCategoria = cIdx;
+              } else if (text.includes('prec') || text.includes('val') || text.includes('vent') || text.includes('pvp') || text.includes('tot') || text.includes('price')) {
+                colPrecio = cIdx;
+              } else if (text.includes('cost') || text.includes('comp')) {
+                colCosto = cIdx;
+              } else if (
+                text.includes('min') || 
+                text.includes('mín') || 
+                text.includes('limit') || 
+                text.includes('límit') || 
+                text.includes('maxim') || 
+                text.includes('máxim') || 
+                text.includes('alert') || 
+                text.includes('tope') || 
+                text.includes('seguridad')
+              ) {
+                colMinStock = cIdx;
+              } else if (text.includes('stock') || text.includes('cant') || text.includes('exist') || text.includes('actual') || text.includes('unid')) {
+                colStock = cIdx;
+              } else if (text.includes('unid') || text.includes('med')) {
+                colUnidad = cIdx;
               }
-              else if (text.includes('min') || text.includes('mín') || text.includes('alert')) colMinStock = cIdx;
-              else if (text.includes('unid') || text.includes('med')) colUnidad = cIdx;
             });
             break;
           }
@@ -1703,35 +1728,35 @@ export default function AdminDashboard({
           let rawCategoria = 'General';
           let rawPrecio = 0;
           let rawCosto = 0;
-          let rawStock = 10;
-          let rawMinStock = 5;
+          let rawStock = 0;
+          let rawMinStock = 0;
           let rawUnidad = 'Unidad';
 
           if (colNombre >= 0) {
             rawNombre = String(row[colNombre] || '').trim();
             if (colCodigo >= 0) rawCodigo = String(row[colCodigo] || '').trim();
             if (colCategoria >= 0) rawCategoria = String(row[colCategoria] || 'General').trim();
-            if (colPrecio >= 0) rawPrecio = Number(String(row[colPrecio] || 0).replace(/[^0-9.-]+/g, '')) || 0;
-            if (colCosto >= 0) rawCosto = Number(String(row[colCosto] || 0).replace(/[^0-9.-]+/g, '')) || 0;
-            if (colStock >= 0) rawStock = Number(String(row[colStock] || 10).replace(/[^0-9.-]+/g, '')) || 10;
-            if (colMinStock >= 0) rawMinStock = Number(String(row[colMinStock] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+            if (colPrecio >= 0) rawPrecio = parseNumericCell(row[colPrecio], 0);
+            if (colCosto >= 0) rawCosto = parseNumericCell(row[colCosto], 0);
+            if (colStock >= 0) rawStock = parseNumericCell(row[colStock], 0);
+            if (colMinStock >= 0) rawMinStock = parseNumericCell(row[colMinStock], 0);
             if (colUnidad >= 0) rawUnidad = String(row[colUnidad] || 'Unidad').trim();
           } else if (row.length >= 7) {
             // Formato estándar de 8 columnas: Código, Nombre, Categoría, Precio, Costo, Stock, Stock Mínimo, Unidad
             rawCodigo = String(row[0] || '').trim();
             rawNombre = String(row[1] || '').trim();
             rawCategoria = String(row[2] || 'General').trim();
-            rawPrecio = Number(String(row[3] || 0).replace(/[^0-9.-]+/g, '')) || 0;
-            rawCosto = Number(String(row[4] || 0).replace(/[^0-9.-]+/g, '')) || 0;
-            rawStock = Number(String(row[5] || 10).replace(/[^0-9.-]+/g, '')) || 10;
-            rawMinStock = Number(String(row[6] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+            rawPrecio = parseNumericCell(row[3], 0);
+            rawCosto = parseNumericCell(row[4], 0);
+            rawStock = parseNumericCell(row[5], 0);
+            rawMinStock = parseNumericCell(row[6], 0);
             rawUnidad = String(row[7] || 'Unidad').trim();
           } else {
             // Formato clásico de 5 columnas: Nombre, Categoría, Stock, Stock Mínimo, Unidad
             rawNombre = String(row[0] || '').trim();
             rawCategoria = String(row[1] || 'General').trim();
-            rawStock = Number(String(row[2] || 10).replace(/[^0-9.-]+/g, '')) || 10;
-            rawMinStock = Number(String(row[3] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+            rawStock = parseNumericCell(row[2], 0);
+            rawMinStock = parseNumericCell(row[3], 0);
             rawUnidad = String(row[4] || 'Unidad').trim();
           }
 
@@ -1746,7 +1771,7 @@ export default function AdminDashboard({
           const minStockFinal = Math.max(0, rawMinStock);
           const unidadFinal = rawUnidad || 'Unidad';
 
-          // 1. Acumular para Bodega / Inventario (con costo y niveles de stock)
+          // 1. Acumular para Bodega / Inventario (con costo y niveles de stock exactos)
           inventoryItemsToSave.push({
             id: `inv-${rawNombre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
             nombre: rawNombre,
@@ -1864,17 +1889,17 @@ export default function AdminDashboard({
           rawCodigo = parts[0]?.trim() || '';
           rawNombre = parts[1]?.trim() || '';
           rawCategoria = parts[2]?.trim() || 'General';
-          rawPrecio = Number(String(parts[3] || 0).replace(/[^0-9.-]+/g, '')) || 0;
-          rawCosto = Number(String(parts[4] || 0).replace(/[^0-9.-]+/g, '')) || 0;
-          rawStock = Number(String(parts[5] || 10).replace(/[^0-9.-]+/g, '')) || 10;
-          rawMinStock = Number(String(parts[6] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+          rawPrecio = parseNumericCell(parts[3], 0);
+          rawCosto = parseNumericCell(parts[4], 0);
+          rawStock = parseNumericCell(parts[5], 0);
+          rawMinStock = parseNumericCell(parts[6], 0);
           rawUnidad = parts[7]?.trim() || 'Unidad';
         } else {
           // Formato 5 columnas: Nombre, Categoría, Stock, Stock Mínimo, Unidad
           rawNombre = parts[0]?.trim() || '';
           rawCategoria = parts[1]?.trim() || 'General';
-          rawStock = Number(String(parts[2] || 10).replace(/[^0-9.-]+/g, '')) || 10;
-          rawMinStock = Number(String(parts[3] || 5).replace(/[^0-9.-]+/g, '')) || 5;
+          rawStock = parseNumericCell(parts[2], 0);
+          rawMinStock = parseNumericCell(parts[3], 0);
           rawUnidad = parts[4]?.trim() || 'Unidad';
         }
 
