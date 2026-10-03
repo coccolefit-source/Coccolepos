@@ -1739,11 +1739,32 @@ export default function EmployeeWorkspace({
                     })()}
                   </div>
 
-                  {/* MÓDULO DE VENTAS SUGERIDAS / VENTA CRUZADA (CROSS-SELLING) */}
+                  {/* MÓDULO DE PRODUCTO A IMPULSAR (VENTAS SUGERIDAS / CROSS-SELLING) */}
                   {(() => {
-                    const activeRules = (upsellRules || DEFAULT_UPSELL_RULES).filter(r => r.activa !== false);
                     let suggestionsToShow: Array<{ id: string; nombre: string; precio: number; reglaOrigen?: string }> = [];
 
+                    // 1. Incluir primero los productos a impulsar configurados por la administración
+                    const campaignProds = localProductos && localProductos.length > 0 ? localProductos : productos;
+                    if (campaignProds && campaignProds.length > 0) {
+                      campaignProds.forEach(camp => {
+                        const catProd = productosCatalogo.find(p => p.nombre.toLowerCase().trim() === camp.nombre_producto.toLowerCase().trim() || p.nombre.toLowerCase().includes(camp.nombre_producto.toLowerCase()));
+                        const itemNombre = catProd ? catProd.nombre : camp.nombre_producto;
+                        const itemPrecio = catProd ? catProd.precio : (catProd?.valor_bruto || 3.50);
+                        const itemId = catProd ? catProd.id : camp.id;
+
+                        if (!suggestionsToShow.some(s => s.nombre.toLowerCase().trim() === itemNombre.toLowerCase().trim())) {
+                          suggestionsToShow.push({
+                            id: itemId,
+                            nombre: itemNombre,
+                            precio: itemPrecio,
+                            reglaOrigen: `+${camp.puntos_por_unidad} PTS · Meta: ${camp.meta_diaria_unidades} u.`
+                          });
+                        }
+                      });
+                    }
+
+                    // 2. Si hay productos en el carrito, buscar reglas de venta cruzada asociadas
+                    const activeRules = (upsellRules || DEFAULT_UPSELL_RULES).filter(r => r.activa !== false);
                     if (cartItems.length > 0) {
                       cartItems.forEach(cartItem => {
                         const matched = activeRules.filter(rule => 
@@ -1770,12 +1791,12 @@ export default function EmployeeWorkspace({
                       });
                     }
 
+                    // 3. Si aún no hay sugerencias, agregar opciones predeterminadas de impulso
                     if (suggestionsToShow.length === 0) {
                       const defaultImpulseNames = [
                         { nombre: 'Adición Whey Protein Isolate', precio: 3.50, desc: 'Impulso de proteína funcional' },
                         { nombre: 'Topping Extra de Frutas Silvestres', precio: 2.00, desc: 'Acompañamiento popular del día' },
-                        { nombre: 'Jugo Prensado en Frío Verde', precio: 4.50, desc: 'Bebida detox más vendida' },
-                        { nombre: 'Barra Energética Artesanal', precio: 2.80, desc: 'Snack complementario fit' }
+                        { nombre: 'Jugo Prensado en Frío Verde', precio: 4.50, desc: 'Bebida detox más vendida' }
                       ];
 
                       defaultImpulseNames.forEach(item => {
@@ -1790,16 +1811,16 @@ export default function EmployeeWorkspace({
                     }
 
                     const handleAddSuggestedToCart = (sug: { id: string; nombre: string; precio: number }) => {
-                      const catProd = productosCatalogo.find(p => p.id === sug.id || p.nombre.toLowerCase() === sug.nombre.toLowerCase());
+                      const catProd = productosCatalogo.find(p => p.id === sug.id || p.nombre.toLowerCase().trim() === sug.nombre.toLowerCase().trim());
                       const prodObj: Producto = catProd || {
                         id: sug.id,
-                        codigo: 'SUG-001',
+                        codigo: 'IMP-001',
                         nombre: sug.nombre,
                         precio: sug.precio,
-                        categoria: 'Adiciones'
+                        categoria: 'Producto a impulsar'
                       };
 
-                      const existing = cartItems.find(i => i.producto.id === prodObj.id || i.producto.nombre.toLowerCase() === prodObj.nombre.toLowerCase());
+                      const existing = cartItems.find(i => i.producto.id === prodObj.id || i.producto.nombre.toLowerCase().trim() === prodObj.nombre.toLowerCase().trim());
                       if (existing) {
                         setCartItems(cartItems.map(i => (i.producto.id === existing.producto.id ? { ...i, cantidad: i.cantidad + 1 } : i)));
                       } else {
@@ -1811,13 +1832,13 @@ export default function EmployeeWorkspace({
                       <div className="mt-4 pt-3 border-t border-[#E2E8F0]">
                         <div className="flex justify-between items-center mb-2">
                           <div>
-                            <h5 className="font-extrabold text-xs text-[#2C3E50] tracking-tight">Ventas Sugeridas / Venta Cruzada</h5>
+                            <h5 className="font-extrabold text-xs text-[#2C3E50] tracking-tight">Producto a impulsar</h5>
                             <p className="text-[10px] text-slate-400 font-medium">
-                              {cartItems.length > 0 ? 'Complementos recomendados para los productos en ticket' : 'Sugerencias de impulso más vendidas de la jornada'}
+                              {cartItems.length > 0 ? 'Complementos recomendados e impulsos activos del día' : 'Sugerencias de impulso configuradas por administración para la jornada'}
                             </p>
                           </div>
                           <span className="text-[9px] font-bold text-[#4B9CD3] bg-[#EBF5FB] px-2.5 py-0.5 rounded-full">
-                            Cross-selling
+                            Impulso del Día
                           </span>
                         </div>
 
@@ -1826,7 +1847,7 @@ export default function EmployeeWorkspace({
                             <div key={sug.id} className="p-2.5 bg-[#FFFDF6] border border-[#E2E8F0] rounded-lg flex items-center justify-between gap-2">
                               <div className="min-w-0 flex-1">
                                 <span className="font-bold text-xs text-[#2C3E50] block truncate">{sug.nombre}</span>
-                                <span className="text-[9px] text-slate-400 font-medium block truncate">{sug.reglaOrigen}</span>
+                                <span className="text-[9px] text-[#4B9CD3] font-semibold block truncate">{sug.reglaOrigen}</span>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="font-black text-xs text-[#4B9CD3]">{formatMoney(sug.precio)}</span>
