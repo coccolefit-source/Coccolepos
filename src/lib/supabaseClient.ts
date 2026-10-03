@@ -2293,11 +2293,26 @@ export async function fetchCampaignProductsFromSupabase(): Promise<ProductoPromo
       asignado_a: d.asignado_a || d.assigned_to || d.asignado || ''
     }));
 
-    if (result.length > 0) {
+    // Combinar los datos de Supabase con el respaldo local sin sobrescribir ni perder elementos guardados
+    const combinedMap = new Map<string, ProductoPromocion>();
+    for (const item of fallback) {
+      if (item && item.nombre_producto) {
+        combinedMap.set(item.nombre_producto.trim().toLowerCase(), item);
+      }
+    }
+    for (const item of result) {
+      if (item && item.nombre_producto) {
+        combinedMap.set(item.nombre_producto.trim().toLowerCase(), item);
+      }
+    }
+
+    const merged = Array.from(combinedMap.values());
+
+    if (merged.length > 0) {
       try {
-        localStorage.setItem('coccole_campaign_products', JSON.stringify(result));
+        localStorage.setItem('coccole_campaign_products', JSON.stringify(merged));
       } catch (e) {}
-      return result;
+      return merged;
     }
 
     return fallback;
