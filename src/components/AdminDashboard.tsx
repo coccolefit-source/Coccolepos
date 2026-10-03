@@ -2459,18 +2459,25 @@ export default function AdminDashboard({
               Impulsar Producto Fit
             </h3>
             
-            <form onSubmit={handleProdSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nombre del Producto</label>
-                <input
+            <form onSubmit={handleProdSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+              <div className="md:col-span-2">
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                  Seleccionar Producto del Catálogo (Reportes)
+                </label>
+                <select
                   id="inputNombreSugerido"
-                  type="text"
-                  placeholder="Ej. Parfait Berry Slim"
                   value={prodNombre}
                   onChange={(e) => setProdNombre(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4B9CD3] bg-[#FFFDF6] h-9 font-bold text-[#2C3E50] cursor-pointer shadow-2xs"
                   required
-                />
+                >
+                  <option value="">-- Selecciona un producto para impulsar --</option>
+                  {(productosCatalogo || []).map(p => (
+                    <option key={p.id || p.codigo} value={p.nombre}>
+                      {p.nombre} ({formatMoney(p.precio)}) - [{p.categoria}]
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -2479,10 +2486,10 @@ export default function AdminDashboard({
                   id="inputPrecioMeta"
                   type="number"
                   min="1"
-                  max="100"
+                  max="500"
                   value={prodMeta}
                   onChange={(e) => setProdMeta(Number(e.target.value))}
-                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6] h-9 font-bold"
                   required
                 />
               </div>
@@ -2492,22 +2499,24 @@ export default function AdminDashboard({
                 <input
                   type="number"
                   min="1"
-                  max="50"
+                  max="100"
                   value={prodPuntos}
                   onChange={(e) => setProdPuntos(Number(e.target.value))}
-                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6] h-9 font-bold"
                   required
                 />
               </div>
 
-              <button
-                id="btnGuardarCampana"
-                type="submit"
-                disabled={isSubmittingUpsell}
-                className="w-full bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer disabled:opacity-50"
-              >
-                {isSubmittingUpsell ? 'Guardando...' : 'Configurar Impulso'}
-              </button>
+              <div>
+                <button
+                  id="btnGuardarCampana"
+                  type="submit"
+                  disabled={isSubmittingUpsell}
+                  className="w-full bg-[#4B9CD3] text-white text-xs font-extrabold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer disabled:opacity-50 uppercase tracking-wider"
+                >
+                  {isSubmittingUpsell ? 'Guardando...' : 'Configurar Impulso'}
+                </button>
+              </div>
             </form>
           </div>
 

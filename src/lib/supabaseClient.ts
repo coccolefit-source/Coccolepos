@@ -303,6 +303,47 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'products_catalog') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.products_catalog;
   END IF;
+END $$;
+
+-- 9. Tabla: campaign_products (Productos a Impulsar / Ventas Sugeridas)
+CREATE TABLE IF NOT EXISTS public.campaign_products (
+  id TEXT PRIMARY KEY,
+  nombre_producto TEXT NOT NULL,
+  name TEXT,
+  product_name TEXT,
+  suggested_product_name TEXT,
+  producto_sugerido_nombre TEXT,
+  fecha TEXT DEFAULT CURRENT_DATE::text,
+  date TEXT DEFAULT CURRENT_DATE::text,
+  meta_diaria_unidades INT DEFAULT 15,
+  puntos_por_unidad INT DEFAULT 10,
+  activa BOOLEAN DEFAULT true,
+  active BOOLEAN DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.campaign_products ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'campaign_products' AND policyname = 'Permitir acceso publico total a campaign_products'
+  ) THEN
+    CREATE POLICY "Permitir acceso publico total a campaign_products" 
+    ON public.campaign_products 
+    FOR ALL 
+    TO public 
+    USING (true) 
+    WITH CHECK (true);
+  END IF;
+END $$;
+
+ALTER TABLE public.campaign_products REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'campaign_products') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.campaign_products;
   END IF;
