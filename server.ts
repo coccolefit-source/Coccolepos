@@ -111,7 +111,7 @@ Productos de Baja Rotación: ${worker.productosBajos ? worker.productosBajos.joi
 Asegúrate de llenar cada sección del JSON con datos analíticos realistas inspirados en las métricas provistas. Recuerda: CERO EMOJIS, CERO ÍCONOS DECORATIVOS.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: 'gemini-3.8-flash',
         contents: prompt,
         config: {
           systemInstruction,

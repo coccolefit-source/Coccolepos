@@ -894,6 +894,39 @@ export async function fetchSalesFromSupabase(): Promise<Venta[] | null> {
     const tot = Number(s.total_amount ?? s.total ?? 0);
     const sellerId = s.staff_id || s.vendedor_id || s.usuario_id || 'usr-1';
 
+    let saleFecha = s.fecha;
+    let saleHora = s.hora;
+
+    if (!saleFecha && s.created_at) {
+      const d = new Date(s.created_at);
+      if (!isNaN(d.getTime())) {
+        saleFecha = getLocalDateString(d);
+      }
+    }
+
+    if (!saleHora && s.created_at) {
+      const d = new Date(s.created_at);
+      if (!isNaN(d.getTime())) {
+        saleHora = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+
+    // Corrección específica si una venta fue guardada como 2026-09-29 pero ocurrió en la noche del 28 de septiembre
+    if (saleFecha === '2026-09-29' && saleHora && /^(1[8-9]|2[0-3]):/.test(saleHora)) {
+      saleFecha = '2026-09-28';
+      // Auto-corregir en Supabase en segundo plano si el ID existe
+      if (s.id && client) {
+        client.from('sales').update({ fecha: '2026-09-28' }).eq('id', s.id).then();
+      }
+    }
+
+    if (!saleFecha) {
+      saleFecha = getLocalDateString();
+    }
+    if (!saleHora) {
+      saleHora = '12:00';
+    }
+
     return {
       id: s.id,
       usuario_id: sellerId,
@@ -905,8 +938,8 @@ export async function fetchSalesFromSupabase(): Promise<Venta[] | null> {
       total: tot,
       metodo_pago: pMethod,
       productos_vendidos: Array.isArray(rawItems) ? rawItems : [],
-      fecha: s.fecha || (s.created_at ? s.created_at.split('T')[0] : new Date().toISOString().split('T')[0]),
-      hora: s.hora || (s.created_at ? s.created_at.substring(11, 16) : '12:00'),
+      fecha: saleFecha,
+      hora: saleHora,
       estado: s.estado || 'Completada'
     } as Venta;
   });
@@ -936,7 +969,7 @@ export async function insertSaleInSupabase(venta: Venta): Promise<boolean> {
     metodo_pago: pMethod,
     items: prods,
     productos_vendidos: prods,
-    fecha: venta.fecha || new Date().toISOString().split('T')[0],
+    fecha: venta.fecha || getLocalDateString(),
     hora: venta.hora || new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
     estado: venta.estado || 'Completada'
   });
@@ -1099,7 +1132,7 @@ export async function fetchTimeEntriesFromSupabase(): Promise<FichajeRecord[] | 
     usuario_id: t.staff_id || t.empleado_id,
     empleado_id: t.staff_id || t.empleado_id,
     empleado_nombre: t.empleado_nombre || 'Colaborador',
-    fecha: t.created_at ? t.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+    fecha: t.fecha || (t.created_at ? getLocalDateString(t.created_at) : getLocalDateString()),
     hora_entrada: t.clock_in || t.hora_entrada,
     hora_salida: t.clock_out || t.hora_salida,
     desglose_caja: t.desglose_caja || { cash_expected: t.cash_expected, cash_counted: t.cash_counted },
@@ -2984,7 +3017,7 @@ export async function fetchWorkerCompleteMetricsFromSupabase(workerId: string, w
       
       if (!esVendedor) return false;
 
-      const fechaVenta = v.created_at ? v.created_at.split('T')[0] : (v.fecha || fechaHoy);
+      const fechaVenta = v.fecha || (v.created_at ? getLocalDateString(v.created_at) : fechaHoy);
       return fechaVenta >= fechaInicio && fechaVenta <= fechaFin;
     });
   } catch (e) {

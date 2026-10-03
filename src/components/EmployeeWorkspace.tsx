@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, UpsellRule, DEFAULT_UPSELL_RULES } from '../types';
 
-import { calculateLeaderboard, getGlobalMetrics } from '../utils/metrics';
+import { calculateLeaderboard, getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
 import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase, fetchCampaignProductsFromSupabase, getLocalDateString, fetchActiveAnnouncementsFromSupabase, subscribeToAnnouncementsRealtime, formatFechaLegible } from '../lib/supabaseClient';
@@ -415,18 +415,36 @@ export default function EmployeeWorkspace({
     }
   }, [empleado?.nombre, tareasCompletadasCount, totalTareasCount, fechaFiltroTareas]);
 
+  // Auto-cierre de turno olvidado del día anterior cuando cambia el día
+  useEffect(() => {
+    if (!fichajes || !empleado?.id) return;
+    const hoyStr = getLocalDateString();
+    
+    // Buscar si existe un fichaje activo o sin hora de salida de un día anterior
+    const turnoAnteriorAbierto = fichajes.find(f => 
+      (f.usuario_id === empleado.id || (f as any).empleado_id === empleado.id) &&
+      (f.activo || !f.hora_salida) &&
+      f.fecha && f.fecha < hoyStr
+    );
+
+    if (turnoAnteriorAbierto) {
+      console.log(`[Auto-Cierre] Se detectó turno abierto de fecha anterior (${turnoAnteriorAbierto.fecha}). Cerrando automáticamente...`);
+      onRegistrarFichaje(empleado.id, 'salida', '23:59');
+    }
+  }, [fichajes, empleado.id, onRegistrarFichaje]);
+
   // Buscar fichaje de hoy
-  const miFichaje = fichajes.find(f => f.usuario_id === empleado.id && f.fecha === new Date().toISOString().split('T')[0]);
+  const miFichaje = fichajes.find(f => f.usuario_id === empleado.id && f.fecha === getLocalDateString());
 
   // Obtener ranking de este empleado en la vista "diario"
-  const leaderboardData = calculateLeaderboard(usuarios, tareas, ventas, fichajes, localProductos, 'diario', new Date().toISOString().split('T')[0], posVentas.length > 0 ? posVentas : ventasRegistradas, rankingWeights);
+  const leaderboardData = calculateLeaderboard(usuarios, tareas, ventas, fichajes, localProductos, 'diario', getLocalDateString(), posVentas.length > 0 ? posVentas : ventasRegistradas, rankingWeights);
 
   const miPosicion = leaderboardData.findIndex(item => item.usuario.id === empleado.id) + 1;
   const misPuntos = leaderboardData.find(item => item.usuario.id === empleado.id)?.puntosTotales || 0;
 
   // Modales
   const [employeeTab, setEmployeeTab] = useState<'tareas' | 'inventario' | 'horarios' | 'ventas' | 'progreso'>('tareas');
-  const [fechaProgresoHistorial, setFechaProgresoHistorial] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [fechaProgresoHistorial, setFechaProgresoHistorial] = useState<string>(getLocalDateString());
   const [historialProgresoData, setHistorialProgresoData] = useState<{ completadas: number; totales: number; porcentaje: number; updated_at: string } | null>(null);
   const [isLoadingProgresoHistorial, setIsLoadingProgresoHistorial] = useState<boolean>(false);
 
@@ -522,7 +540,7 @@ export default function EmployeeWorkspace({
       onAddVentaSugerida(mandatoryPaymentModal.sugeridaProdId, empleado.id, metodo);
     } else if (mandatoryPaymentModal.kind === 'pos') {
       const newVenta = {
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: getLocalDateString(),
         hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
         cajero_id: empleado.id,
         cajero_nombre: empleado.nombre,
@@ -644,7 +662,7 @@ export default function EmployeeWorkspace({
   const [cuadreObs, setCuadreObs] = useState('');
 
   const yaCuadrado = (cuadresCaja || []).some(
-    c => c.usuario_id === empleado.id && c.fecha === new Date().toISOString().split('T')[0]
+    c => c.usuario_id === empleado.id && c.fecha === getLocalDateString()
   );
 
   const handleCuadreCajaSubmit = (e: React.FormEvent) => {
@@ -654,7 +672,7 @@ export default function EmployeeWorkspace({
     onRegistrarCuadreCaja({
       usuario_id: empleado.id,
       usuario_nombre: empleado.nombre,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: getLocalDateString(),
       hora: `${new Date().getHours().toString().padStart(2, '0')}:${new Date().getMinutes().toString().padStart(2, '0')}`,
       efectivo_contado: Number(cuadreEfectivo),
       tarjeta_esperado: Number(cuadreTarjeta),
@@ -699,9 +717,34 @@ export default function EmployeeWorkspace({
     }
   };
 
+  const handleToggleTareaEstado = (
+    taskId: string,
+    nuevoEstado: 'Pendiente' | 'En proceso' | 'Completada',
+    fotoUrl?: string,
+    notaEvidencia?: string
+  ) => {
+    // Actualización optimista instantánea en el estado del componente (0ms delay)
+    if (tareasFechaSupabase) {
+      setTareasFechaSupabase(prev => {
+        if (!prev) return null;
+        return prev.map(t => {
+          if (t.id === taskId) {
+            const updated = { ...t, estado: nuevoEstado };
+            if (fotoUrl !== undefined) updated.foto_url = fotoUrl;
+            if (notaEvidencia !== undefined) updated.nota_evidencia = notaEvidencia;
+            return updated;
+          }
+          return t;
+        });
+      });
+    }
+
+    onUpdateTareaEstado(taskId, nuevoEstado, fotoUrl, notaEvidencia);
+  };
+
   const handleSavePhotoEvidence = () => {
     if (selectedTaskId) {
-      onUpdateTareaEstado(selectedTaskId, 'Completada', evidencePhoto, evidenceNote);
+      handleToggleTareaEstado(selectedTaskId, 'Completada', evidencePhoto, evidenceNote);
       setShowPhotoModal(false);
       setSelectedTaskId(null);
       setEvidenceNote('');
@@ -714,7 +757,7 @@ export default function EmployeeWorkspace({
 
     onAddIncidencia({
       usuario_id: empleado.id,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: getLocalDateString(),
       titulo: incidenciaTitulo,
       descripcion: incidenciaDesc,
       tipo: incidenciaTipo,
@@ -729,7 +772,7 @@ export default function EmployeeWorkspace({
 
   const getVentasProductoCount = (productId: string) => {
     return ventas
-      .filter(v => v.producto_id === productId && v.usuario_id === empleado.id && v.fecha === new Date().toISOString().split('T')[0])
+      .filter(v => v.producto_id === productId && v.usuario_id === empleado.id && v.fecha === getLocalDateString())
       .reduce((sum, v) => sum + v.unidades_contadas, 0);
   };
 
@@ -1159,7 +1202,7 @@ export default function EmployeeWorkspace({
         <div>
           <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
             <Sparkles className="w-3.5 h-3.5 text-[#4B9CD3]" />
-            Venta Sugerida del Turno
+            Producto a impulsar
           </h4>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1239,7 +1282,7 @@ export default function EmployeeWorkspace({
               }`}
             >
               <Boxes className="w-4 h-4 shrink-0" />
-              <span>Stock</span>
+              <span>Inventario</span>
             </button>
             
             <button
@@ -1273,7 +1316,7 @@ export default function EmployeeWorkspace({
               type="button"
               onClick={() => {
                 setEmployeeTab('progreso');
-                const hoy = new Date().toISOString().split('T')[0];
+                const hoy = getLocalDateString();
                 const fecha = fechaProgresoHistorial || hoy;
                 cargarProgresoHistorial(fecha);
               }}
@@ -1411,10 +1454,10 @@ export default function EmployeeWorkspace({
                                 if (t.requiere_foto && !t.foto_url) {
                                   handleCompletarConFoto(t.id);
                                 } else {
-                                  onUpdateTareaEstado(t.id, 'Completada');
+                                  handleToggleTareaEstado(t.id, 'Completada');
                                 }
                               } else {
-                                onUpdateTareaEstado(t.id, 'Pendiente');
+                                handleToggleTareaEstado(t.id, 'Pendiente');
                               }
                             }}
                             className="mt-1 w-5 h-5 accent-[#4B9CD3] cursor-pointer rounded border-slate-300 text-[#4B9CD3] focus:ring-[#4B9CD3] shrink-0"
@@ -1484,13 +1527,13 @@ export default function EmployeeWorkspace({
                                         if (file) {
                                           try {
                                             const compressed = await compressImage(file);
-                                            onUpdateTareaEstado(t.id, t.estado, compressed, t.nota_evidencia || 'Cargado directo de galería');
+                                            handleToggleTareaEstado(t.id, t.estado, compressed, t.nota_evidencia || 'Cargado directo de galería');
                                           } catch (err) {
                                             console.error("Error compressing direct upload:", err);
                                             const reader = new FileReader();
                                             reader.onloadend = () => {
                                               if (typeof reader.result === 'string') {
-                                                onUpdateTareaEstado(t.id, t.estado, reader.result, t.nota_evidencia || 'Cargado directo de galería');
+                                                handleToggleTareaEstado(t.id, t.estado, reader.result, t.nota_evidencia || 'Cargado directo de galería');
                                               }
                                             };
                                             reader.readAsDataURL(file);
@@ -1526,7 +1569,7 @@ export default function EmployeeWorkspace({
                                 {!isCompleted && (
                                   <button
                                     type="button"
-                                    onClick={() => onUpdateTareaEstado(t.id, t.estado === 'En proceso' ? 'Pendiente' : 'En proceso')}
+                                    onClick={() => handleToggleTareaEstado(t.id, t.estado === 'En proceso' ? 'Pendiente' : 'En proceso')}
                                     className={`text-[9px] font-black px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
                                       t.estado === 'En proceso'
                                         ? 'bg-amber-100 text-amber-800 border border-amber-200'
@@ -1670,7 +1713,7 @@ export default function EmployeeWorkspace({
                               <div key={prod.id} className="border border-[#E2E8F0] rounded-lg p-2.5 flex justify-between items-center hover:bg-[#FFFDF6] transition-colors">
                                 <div>
                                   <h5 className="font-bold text-xs text-[#2C3E50]">{prod.nombre}</h5>
-                                  <p className="text-[10px] text-[#4B9CD3] font-black">${prod.precio.toFixed(2)}</p>
+                                  <p className="text-[10px] text-[#4B9CD3] font-black">{formatMoney(prod.precio)}</p>
                                 </div>
                                 <div className="flex items-center gap-1">
                                   <button
@@ -1786,7 +1829,7 @@ export default function EmployeeWorkspace({
                                 <span className="text-[9px] text-slate-400 font-medium block truncate">{sug.reglaOrigen}</span>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="font-black text-xs text-[#4B9CD3]">${sug.precio.toFixed(2)}</span>
+                                <span className="font-black text-xs text-[#4B9CD3]">{formatMoney(sug.precio)}</span>
                                 <button
                                   type="button"
                                   onClick={() => handleAddSuggestedToCart(sug)}
@@ -1836,7 +1879,7 @@ export default function EmployeeWorkspace({
                             <span className="text-slate-600 truncate max-w-[100px]">{item.producto.nombre}</span>
                           </div>
                           <div className="flex items-center gap-3">
-                            <span className="font-bold text-[#4B9CD3]">${(item.producto.precio * item.cantidad).toFixed(2)}</span>
+                            <span className="font-bold text-[#4B9CD3]">{formatMoney(item.producto.precio * item.cantidad)}</span>
                             <button onClick={() => setCartItems(cartItems.filter(i => i.producto.id !== item.producto.id))} className="text-red-400 hover:text-red-600 cursor-pointer">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1914,7 +1957,7 @@ export default function EmployeeWorkspace({
                     <div className="flex justify-between items-center text-sm">
                       <span className="font-bold text-slate-500">Total a Cobrar:</span>
                       <span className="font-black text-[#2C3E50] text-lg">
-                        ${cartItems.reduce((sum, item) => sum + (item.producto.precio * item.cantidad), 0).toFixed(2)}
+                        {formatMoney(cartItems.reduce((sum, item) => sum + (item.producto.precio * item.cantidad), 0))}
                       </span>
                     </div>
 
@@ -1944,6 +1987,7 @@ export default function EmployeeWorkspace({
                   </div>
 
                   {(() => {
+                    const todayStr = getLocalDateString();
                     const shiftSales = (ventasRegistradas || []).filter(v => {
                       if (!v) return false;
                       const matchesEmp = 
@@ -1952,7 +1996,8 @@ export default function EmployeeWorkspace({
                         v.vendedor_id === empleado.id || 
                         (v as any).cajero_id === empleado.id || 
                         v.vendedor_nombre === empleado.nombre;
-                      return matchesEmp;
+                      const isToday = !v.fecha || v.fecha === todayStr;
+                      return matchesEmp && isToday;
                     });
 
                     const sortedSales = [...shiftSales].sort((a, b) => {
@@ -2052,7 +2097,7 @@ export default function EmployeeWorkspace({
                                     </span>
                                   </td>
                                   <td className="py-3 px-3 text-xs font-black text-[#2C3E50] text-right whitespace-nowrap">
-                                    ${Number(v.total || 0).toFixed(2)}
+                                    {formatMoney(v.total)}
                                   </td>
                                   <td className="py-3 px-3 text-xs text-center whitespace-nowrap">
                                     {isAnulada ? (
@@ -2106,7 +2151,7 @@ export default function EmployeeWorkspace({
                         const formData = new FormData(e.currentTarget);
                         
                         const newCuadre = {
-                          fecha: new Date().toISOString().split('T')[0],
+                          fecha: getLocalDateString(),
                           hora_cierre: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
                           empleado_id: empleado.id,
                           empleado_nombre: empleado.nombre,
@@ -2128,19 +2173,19 @@ export default function EmployeeWorkspace({
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-white p-3 rounded border border-slate-100 mb-3">
                         <div>
                           <p className="text-[9px] font-bold text-slate-500 uppercase">Efectivo Sistema</p>
-                          <p className="font-black text-[#4B9CD3] text-sm">${totalEfectivo.toFixed(2)}</p>
+                          <p className="font-black text-[#4B9CD3] text-sm">{formatMoney(totalEfectivo)}</p>
                         </div>
                         <div>
                           <p className="text-[9px] font-bold text-slate-500 uppercase">Tarjeta (Datáfono)</p>
-                          <p className="font-black text-slate-700 text-sm">${totalTarjeta.toFixed(2)}</p>
+                          <p className="font-black text-slate-700 text-sm">{formatMoney(totalTarjeta)}</p>
                         </div>
                         <div>
                           <p className="text-[9px] font-bold text-slate-500 uppercase">Transferencia</p>
-                          <p className="font-black text-slate-700 text-sm">${totalTransferencia.toFixed(2)}</p>
+                          <p className="font-black text-slate-700 text-sm">{formatMoney(totalTransferencia)}</p>
                         </div>
                         <div>
                           <p className="text-[9px] font-bold text-slate-500 uppercase">Rappi</p>
-                          <p className="font-black text-slate-700 text-sm">${totalRappi.toFixed(2)}</p>
+                          <p className="font-black text-slate-700 text-sm">{formatMoney(totalRappi)}</p>
                         </div>
                       </div>
 
@@ -2496,13 +2541,13 @@ export default function EmployeeWorkspace({
                   {mandatoryPaymentModal.articulos.map((art, idx) => (
                     <div key={idx} className="flex justify-between items-center text-xs font-bold text-[#2C3E50]">
                       <span>{art.cantidad} {art.nombre}</span>
-                      <span className="text-[#4B9CD3] font-black">${art.subtotal.toFixed(2)}</span>
+                      <span className="text-[#4B9CD3] font-black">{formatMoney(art.subtotal)}</span>
                     </div>
                   ))}
                 </div>
                 <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
                   <span className="text-xs font-black text-slate-500 uppercase">Total a Cobrar</span>
-                  <span className="text-base font-black text-[#2C3E50]">${mandatoryPaymentModal.total.toFixed(2)}</span>
+                  <span className="text-base font-black text-[#2C3E50]">{formatMoney(mandatoryPaymentModal.total)}</span>
                 </div>
               </div>
             )}

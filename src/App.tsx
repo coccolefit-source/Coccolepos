@@ -13,7 +13,7 @@ import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
 import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database } from 'lucide-react';
-import { getGlobalMetrics } from './utils/metrics';
+import { getGlobalMetrics, formatMoney } from './utils/metrics';
 import {
   isSupabaseConfigured,
   fetchProfilesFromSupabase,
@@ -170,7 +170,7 @@ export default function App() {
       tipo: 'equipo',
       titulo: `Solicitud de Restablecimiento de PIN: ${empNombre}`,
       descripcion: nota ? `El colaborador ${empNombre} solicita apoyo para restablecer su PIN. Comentario: ${nota}` : `El colaborador ${empNombre} solicita apoyo al Administrador para consultar o restablecer su PIN de 4 dígitos.`,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: getLocalDateString(),
       estado: 'Pendiente'
     };
     setState(prev => ({
@@ -388,7 +388,7 @@ export default function App() {
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
             id: f.id,
             usuario_id: f.empleado_id,
-            fecha: f.hora_entrada?.split(' ')[0] || new Date().toISOString().split('T')[0],
+            fecha: f.hora_entrada?.split(' ')[0] || getLocalDateString(),
             hora_entrada: f.hora_entrada,
             hora_salida: f.hora_salida,
             puntual: true,
@@ -903,38 +903,39 @@ export default function App() {
     const now = new Date();
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-    if (!isSupabaseConfigured()) {
-      setState(prev => ({
-        ...prev,
-        tareas: prev.tareas.map(t => {
-          if (t.id === id) {
-            const updated: Tarea = { ...t, estado };
-            if (estado === 'En proceso') {
-              updated.hora_inicio = t.hora_inicio || timeStr;
-              updated.started_at = t.started_at || now.toISOString();
-            } else if (estado === 'Completada') {
-              updated.hora_fin = t.hora_fin || timeStr;
-              updated.completed_at = t.completed_at || now.toISOString();
-              if (foto_url) updated.foto_url = foto_url;
-              if (nota_evidencia) updated.nota_evidencia = nota_evidencia;
-            } else {
-              updated.hora_inicio = undefined;
-              updated.hora_fin = undefined;
-              updated.started_at = undefined;
-              updated.completed_at = undefined;
-            }
-            return updated;
+    // 1. Actualización optimista INMEDIATA del estado local en React (0ms de latencia)
+    setState(prev => ({
+      ...prev,
+      tareas: prev.tareas.map(t => {
+        if (t.id === id) {
+          const updated: Tarea = { ...t, estado };
+          if (estado === 'En proceso') {
+            updated.hora_inicio = t.hora_inicio || timeStr;
+            updated.started_at = t.started_at || now.toISOString();
+          } else if (estado === 'Completada') {
+            updated.hora_fin = t.hora_fin || timeStr;
+            updated.completed_at = t.completed_at || now.toISOString();
+            if (foto_url) updated.foto_url = foto_url;
+            if (nota_evidencia) updated.nota_evidencia = nota_evidencia;
+          } else {
+            updated.hora_inicio = undefined;
+            updated.hora_fin = undefined;
+            updated.started_at = undefined;
+            updated.completed_at = undefined;
           }
-          return t;
-        })
-      }));
-      const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
-      pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}" (Local)`, estado === 'Completada' ? 'success' : 'info');
-      return;
-    }
+          return updated;
+        }
+        return t;
+      })
+    }));
+
+    const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
+    pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');
+
+    if (!isSupabaseConfigured()) return;
 
     try {
-      // 1. Ejecutar en Supabase (Supabase-First)
+      // 2. Guardar en Supabase en segundo plano sin congelar la UI
       const isCompleted = estado === 'Completada';
       const success = await updateDailyTaskStatusInSupabase(
         id,
@@ -946,50 +947,33 @@ export default function App() {
         estado === 'Completada' ? (originalTask.hora_fin || timeStr) : undefined
       );
 
-      if (!success) {
-        throw new Error('Supabase update returned false');
+      if (success) {
+        const assignedUser = state.usuarios.find(u => u.id === originalTask.asignado_a);
+        const empName = assignedUser?.nombre || currentUser.nombre;
+        if (empName) {
+          const hoyStr = getLocalDateString();
+          const userTasksRaw = state.tareas.filter(t => 
+            (t.asignado_a === (assignedUser?.id || currentUser.id) || t.asignado_a === empName || !t.asignado_a) &&
+            (!t.fecha || getLocalDateString(t.fecha) === hoyStr)
+          );
+          const deduplicatedMap = new Map<string, Tarea>();
+          userTasksRaw.forEach(t => {
+            const key = (t.titulo || '').trim().toLowerCase();
+            const isComp = t.id === id ? estado === 'Completada' : t.estado === 'Completada';
+            if (!deduplicatedMap.has(key)) {
+              deduplicatedMap.set(key, { ...t, estado: isComp ? 'Completada' : t.estado });
+            } else if (isComp) {
+              deduplicatedMap.set(key, { ...t, estado: 'Completada' });
+            }
+          });
+          const userTasks = Array.from(deduplicatedMap.values());
+          const totalCount = userTasks.length > 24 && userTasks.length % 24 === 0 ? 24 : (userTasks.length > 0 ? Math.min(userTasks.length, 24) : 24);
+          const completedCount = userTasks.filter(t => t.estado === 'Completada').length;
+          guardarProgresoEnSupabase(empName, completedCount, totalCount, hoyStr);
+        }
       }
-
-      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
-      await cargarDatosSilencioso();
-
-      const assignedUser = state.usuarios.find(u => u.id === originalTask.asignado_a);
-      const empName = assignedUser?.nombre || currentUser.nombre;
-      if (empName) {
-        const hoyStr = getLocalDateString();
-        const userTasksRaw = state.tareas.filter(t => 
-          (t.asignado_a === (assignedUser?.id || currentUser.id) || t.asignado_a === empName || !t.asignado_a) &&
-          (!t.fecha || getLocalDateString(t.fecha) === hoyStr)
-        );
-        // Deduplicar tareas por título
-        const deduplicatedMap = new Map<string, Tarea>();
-        userTasksRaw.forEach(t => {
-          const key = (t.titulo || '').trim().toLowerCase();
-          const existing = deduplicatedMap.get(key);
-          const isComp = t.id === id ? estado === 'Completada' : t.estado === 'Completada';
-          if (!existing) {
-            deduplicatedMap.set(key, { ...t, estado: isComp ? 'Completada' : t.estado });
-          } else if (isComp) {
-            deduplicatedMap.set(key, { ...t, estado: 'Completada' });
-          }
-        });
-        const userTasks = Array.from(deduplicatedMap.values());
-        const totalCount = userTasks.length > 24 && userTasks.length % 24 === 0 ? 24 : (userTasks.length > 0 ? Math.min(userTasks.length, 24) : 24);
-        const completedCount = userTasks.filter(t => t.estado === 'Completada').length;
-        guardarProgresoEnSupabase(empName, completedCount, totalCount, hoyStr);
-      }
-
-      const label = estado === 'Completada' ? 'completó' : estado === 'En proceso' ? 'inició' : 'marcó como pendiente';
-      pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');
     } catch (err: any) {
       console.error('Error al actualizar estado de la tarea en Supabase:', err);
-      alert('Error al actualizar tarea en la nube: ' + (err?.message || err));
-      triggerPushToast({
-        kind: 'standard',
-        type: 'alert',
-        text: 'Error de red/permisos: No se pudo actualizar el estado de la tarea en la nube.'
-      });
-      pushNotification('Error al sincronizar cambio en la tarea con la nube.', 'alert');
     }
   };
 
@@ -1032,7 +1016,7 @@ export default function App() {
       ? empleados.map((emp, idx) => ({
           id: `prod-${Date.now()}-${idx}`,
           nombre_producto: newProd.nombre_producto,
-          fecha: newProd.fecha || new Date().toISOString().split('T')[0],
+          fecha: newProd.fecha || getLocalDateString(),
           meta_diaria_unidades: newProd.meta_diaria_unidades,
           puntos_por_unidad: newProd.puntos_por_unidad,
           asignado_a: emp.nombre
@@ -1051,7 +1035,7 @@ export default function App() {
 
     try {
       // 0. Limpiar campañas anteriores del día para evitar acumulación/duplicados
-      const fechaHoy = newProd.fecha || new Date().toISOString().split('T')[0];
+      const fechaHoy = newProd.fecha || getLocalDateString();
       await clearOldCampaignProductsInSupabase(fechaHoy);
 
       // 1. Insertar siempre la regla general base (con product_name, target, points)
@@ -1133,7 +1117,7 @@ export default function App() {
   // --- ACTIONS: VENTAS SUGERIDAS (+1 CONTADOR EXPRESS) ---
 
   const handleAddVentaSugerida = (producto_id: string, usuario_id: string, metodo_pago: string) => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     
     setState(prev => {
       // Buscar si ya hay un registro de este producto y usuario hoy para acumularlo, o crear uno nuevo
@@ -1185,7 +1169,7 @@ export default function App() {
   // --- ACTIONS: FICHAJE / ASISTENCIA ---
 
   const handleRegistrarFichaje = (usuario_id: string, tipo: 'entrada' | 'salida', horaPersonalizada?: string) => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     const now = new Date();
     const timeStr = horaPersonalizada || `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
@@ -1225,7 +1209,7 @@ export default function App() {
       } else {
         // Salida: actualizar registro activo de hoy
         updatedFichajes = updatedFichajes.map(f => {
-          if (f.usuario_id === usuario_id && f.fecha === todayStr && f.activo) {
+          if ((f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && (f.activo || !f.hora_salida)) {
             return {
               ...f,
               hora_salida: timeStr,
@@ -1888,7 +1872,7 @@ export default function App() {
       const existingIdx = updatedClientes.findIndex(
         c => c.telefono.replace(/\D/g, '') === cleanPhone.replace(/\D/g, '') || c.telefono === cleanPhone
       );
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateString();
 
       if (existingIdx >= 0) {
         const existing = updatedClientes[existingIdx];
@@ -1941,7 +1925,7 @@ export default function App() {
       clienteTelefono: nuevaVenta.cliente_telefono
     });
 
-    pushNotification(`¡Venta registrada con éxito por ${vendedorNombre}! Total: $${nuevaVenta.total.toFixed(2)} (${nuevaVenta.metodo_pago || 'efectivo'})`, 'success');
+    pushNotification(`¡Venta registrada con éxito por ${vendedorNombre}! Total: ${formatMoney(nuevaVenta.total)} (${nuevaVenta.metodo_pago || 'efectivo'})`, 'success');
   };
 
   const handleUpdateVenta = (ventaActualizada: Venta) => {

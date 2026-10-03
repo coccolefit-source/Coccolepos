@@ -45,6 +45,14 @@ export const getTaskDurationMinutes = (tarea: Tarea): number => {
   return end - start;
 };
 
+export const getTodayLocal = (): string => {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 /**
  * Calcula las puntuaciones del Leaderboard filtrado por tiempo (diario, semanal, mensual) y ponderaciones configurables
  */
@@ -55,7 +63,7 @@ export const calculateLeaderboard = (
   fichajes: Fichaje[],
   productos: ProductoPromocion[],
   filtro: 'diario' | 'semanal' | 'mensual',
-  fechaReferencia: string = new Date().toISOString().split('T')[0],
+  fechaReferencia: string = getTodayLocal(),
   posVentas: Venta[] = [],
   rankingWeights: RankingWeights = DEFAULT_RANKING_WEIGHTS
 ): EmployeeScore[] => {
@@ -237,7 +245,7 @@ export const getGlobalMetrics = (
   ventas: RegistroVenta[],
   productos: ProductoPromocion[],
   filtro: 'diario' | 'semanal' | 'mensual',
-  fechaReferencia: string = new Date().toISOString().split('T')[0]
+  fechaReferencia: string = getTodayLocal()
 ) => {
   const refDate = new Date(fechaReferencia);
   
@@ -331,4 +339,20 @@ export const getGlobalMetrics = (
       ? Math.round((completadas / tareasPeriodo.length) * 100) 
       : 0
   };
+};
+
+/**
+ * Formatea cantidades numéricas a formato de moneda con separador de miles y dos decimales.
+ * Ejemplos:
+ * 55800 -> "$55,800.00"
+ * 74700 -> "$74,700.00"
+ * 0 -> "$0.00"
+ */
+export const formatMoney = (amount: number | string | null | undefined): string => {
+  const num = typeof amount === 'number' ? amount : (amount ? parseFloat(String(amount)) : 0);
+  if (isNaN(num)) return '$0.00';
+  const isNegative = num < 0;
+  const absVal = Math.abs(num);
+  const formatted = absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (isNegative ? '-$' : '$') + formatted;
 };

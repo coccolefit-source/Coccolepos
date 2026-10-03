@@ -9,7 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell, Download, Search, Percent, Tag, ArrowRight } from 'lucide-react';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase, formatFechaLegible, insertAnnouncementInSupabase, updateAnnouncementInSupabase, deleteAnnouncementFromSupabase } from '../lib/supabaseClient';
-import { getGlobalMetrics } from '../utils/metrics';
+import { getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
@@ -140,7 +140,7 @@ export default function AdminDashboard({
   const [deleteCampProdId, setDeleteCampProdId] = useState<string | null>(null);
 
   // Estado y sincronización de auditoría de productividad
-  const [adminFechaProd, setAdminFechaProd] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [adminFechaProd, setAdminFechaProd] = useState<string>(getLocalDateString());
   const [adminProductividadData, setAdminProductividadData] = useState<Array<{ id: string; employee_name: string; completadas: number; totales: number; porcentaje: number; updated_at: string }>>([]);
   const [loadingAdminProd, setLoadingAdminProd] = useState<boolean>(false);
 
@@ -653,9 +653,9 @@ export default function AdminDashboard({
   const [salesStartDate, setSalesStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
-    return d.toISOString().split('T')[0];
+    return getLocalDateString(d);
   });
-  const [salesEndDate, setSalesEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [salesEndDate, setSalesEndDate] = useState(() => getLocalDateString());
   const [salesSeller, setSalesSeller] = useState('');
   const [salesSearch, setSalesSearch] = useState('');
   const [salesPaymentMethod, setSalesPaymentMethod] = useState("");
@@ -774,8 +774,8 @@ export default function AdminDashboard({
   const [performanceData, setPerformanceData] = useState<any | null>(null);
   const [loadingPerformance, setLoadingPerformance] = useState(false);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
-  const [performanceDateFilter, setPerformanceDateFilter] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [performanceDateEndFilter, setPerformanceDateEndFilter] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [performanceDateFilter, setPerformanceDateFilter] = useState<string>(getLocalDateString());
+  const [performanceDateEndFilter, setPerformanceDateEndFilter] = useState<string>(getLocalDateString());
 
   // Simulador local seguro de Supabase que retorna vacio para probar el fallback
   const supabase: any = {
@@ -1390,7 +1390,7 @@ export default function AdminDashboard({
     (window as any).isSubmittingUpsell = true;
 
     try {
-      const fechaHoy = new Date().toISOString().split('T')[0];
+      const fechaHoy = getLocalDateString();
 
       await onAddProducto({
         nombre_producto: prodNombre.trim(),
@@ -2578,7 +2578,7 @@ export default function AdminDashboard({
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {empleados.map(emp => {
-                const fichaje = fichajes.find(f => f.usuario_id === emp.id && f.fecha === new Date().toISOString().split('T')[0]);
+                const fichaje = fichajes.find(f => f.usuario_id === emp.id && f.fecha === getLocalDateString());
                 return (
                   <div key={emp.id} className="border border-[#E2E8F0] p-3.5 rounded-xl flex items-center gap-3 bg-[#FFFDF6]/40">
                     <img
@@ -3924,7 +3924,7 @@ export default function AdminDashboard({
           {(() => {
         // --- CÁLCULOS PARA LA PESTAÑA DE FIDELIZACIÓN ---
         const allClientes = clientes || [];
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString();
         const monthStartStr = todayStr.substring(0, 7);
 
         const filteredClientes = allClientes.filter(c => {
@@ -4152,7 +4152,7 @@ export default function AdminDashboard({
                     <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
                       Ticket Promedio por Cliente
                     </span>
-                    <p className="text-2xl font-black text-[#4B9CD3]">${ticketPromedioCliente.toFixed(2)}</p>
+                    <p className="text-2xl font-black text-[#4B9CD3]">{formatMoney(ticketPromedioCliente)}</p>
                     <p className="text-[11px] text-slate-500 font-medium">Consumo acumulado promedio por usuario</p>
                   </div>
                 </div>
@@ -4227,7 +4227,7 @@ export default function AdminDashboard({
                           <tr key={cli.id} className="hover:bg-slate-50 transition-colors">
                             <td className="p-3 font-bold text-[#2C3E50]">{cli.nombre}</td>
                             <td className="p-3 text-slate-600">{cli.telefono}</td>
-                            <td className="p-3 font-bold text-[#4B9CD3]">${cli.total_compras_monto.toFixed(2)}</td>
+                            <td className="p-3 font-bold text-[#4B9CD3]">{formatMoney(cli.total_compras_monto)}</td>
                             <td className="p-3">
                               <span className="inline-block px-2 py-0.5 bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] font-bold rounded-md text-[11px]">
                                 {cli.total_compras_count} compras
@@ -4758,20 +4758,20 @@ export default function AdminDashboard({
                         <div className="flex flex-wrap items-center gap-2 text-xs w-full sm:w-auto">
                           <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
                             <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Subtotal:</span>
-                            <span className="font-extrabold text-slate-800">${subt.toFixed(2)}</span>
+                            <span className="font-extrabold text-slate-800">{formatMoney(subt)}</span>
                           </div>
                           <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
                             <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Impuesto:</span>
-                            <span className="font-extrabold text-slate-800">${imp.toFixed(2)}</span>
+                            <span className="font-extrabold text-slate-800">{formatMoney(imp)}</span>
                           </div>
                           <div className="bg-[#EBF5FB] border border-[#AED6F1] px-2.5 py-1 rounded-lg">
                             <span className="text-[10px] text-[#4B9CD3] font-bold uppercase mr-1">Total:</span>
-                            <span className="font-black text-[#2C3E50]">${tot.toFixed(2)}</span>
+                            <span className="font-black text-[#2C3E50]">{formatMoney(tot)}</span>
                           </div>
                           {costo > 0 && (
                             <div className={`border px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${ganancia >= 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
                               <span className="text-[10px] font-bold uppercase">Utilidad:</span>
-                              <span className="font-black">${ganancia.toFixed(2)}</span>
+                              <span className="font-black">{formatMoney(ganancia)}</span>
                               <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-white/70">
                                 {margenPct}% margen
                               </span>
@@ -4924,11 +4924,11 @@ export default function AdminDashboard({
                         </div>
                         <div className="text-center">
                           <span className="block text-[9px] font-bold text-slate-500 uppercase">P. Venta Promedio</span>
-                          <span className="text-xs font-black text-[#4B9CD3]">${avgVenta.toFixed(2)}</span>
+                          <span className="text-xs font-black text-[#4B9CD3]">{formatMoney(avgVenta)}</span>
                         </div>
                         <div className="text-center">
                           <span className="block text-[9px] font-bold text-slate-500 uppercase">Costo Promedio</span>
-                          <span className="text-xs font-black text-slate-700">${avgCosto.toFixed(2)}</span>
+                          <span className="text-xs font-black text-slate-700">{formatMoney(avgCosto)}</span>
                         </div>
                         <div className="text-center">
                           <span className="block text-[9px] font-bold text-slate-500 uppercase">Margen Promedio</span>
@@ -5005,13 +5005,13 @@ export default function AdminDashboard({
 
                                     {/* Valor bruto */}
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
-                                      ${vb.toFixed(2)}
+                                      {formatMoney(vb)}
                                     </td>
 
                                     {/* Descuento */}
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                                       {desc > 0 ? (
-                                        <span className="text-amber-600 font-semibold">-${desc.toFixed(2)}</span>
+                                        <span className="text-amber-600 font-semibold">-{formatMoney(desc)}</span>
                                       ) : (
                                         <span className="text-slate-400">$0.00</span>
                                       )}
@@ -5019,13 +5019,13 @@ export default function AdminDashboard({
 
                                     {/* Subtotal */}
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap font-semibold text-slate-700">
-                                      ${subt.toFixed(2)}
+                                      {formatMoney(subt)}
                                     </td>
 
                                     {/* Impuesto cargo */}
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                                       {imp > 0 ? (
-                                        <span className="text-slate-700 font-medium">+${imp.toFixed(2)}</span>
+                                        <span className="text-slate-700 font-medium">+{formatMoney(imp)}</span>
                                       ) : (
                                         <span className="text-slate-400">$0.00</span>
                                       )}
@@ -5033,12 +5033,12 @@ export default function AdminDashboard({
 
                                     {/* Total (P. Venta) */}
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                      <span className="text-sm font-black text-[#4B9CD3]">${tot.toFixed(2)}</span>
+                                      <span className="text-sm font-black text-[#4B9CD3]">{formatMoney(tot)}</span>
                                     </td>
 
                                     {/* Precio Costo */}
                                     <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
-                                      {costo > 0 ? `$${costo.toFixed(2)}` : <span className="text-slate-400">--</span>}
+                                      {costo > 0 ? formatMoney(costo) : <span className="text-slate-400">--</span>}
                                     </td>
 
                                     {/* Utilidad / Margen */}
@@ -5046,7 +5046,7 @@ export default function AdminDashboard({
                                       {costo > 0 ? (
                                         <div>
                                           <span className={`font-bold ${ganancia >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                            ${ganancia.toFixed(2)}
+                                            {formatMoney(ganancia)}
                                           </span>
                                           <span className="block text-[9px] text-slate-400 font-semibold">
                                             {pct}% margen
@@ -5214,10 +5214,10 @@ export default function AdminDashboard({
                                     <td className="p-2 font-mono font-bold text-slate-900">{p.codigo}</td>
                                     <td className="p-2 font-bold">{p.nombre}</td>
                                     <td className="p-2 text-slate-500">{p.categoria}</td>
-                                    <td className="p-2 text-right font-mono">${(p.valor_bruto || 0).toFixed(2)}</td>
-                                    <td className="p-2 text-right font-mono text-emerald-600">${(p.descuento || 0).toFixed(2)}</td>
-                                    <td className="p-2 text-right font-mono font-bold text-slate-900">${(p.total || 0).toFixed(2)}</td>
-                                    <td className="p-2 text-right font-mono text-slate-500">${(p.precio_costo || 0).toFixed(2)}</td>
+                                    <td className="p-2 text-right font-mono">{formatMoney(p.valor_bruto)}</td>
+                                    <td className="p-2 text-right font-mono text-emerald-600">{formatMoney(p.descuento)}</td>
+                                    <td className="p-2 text-right font-mono font-bold text-slate-900">{formatMoney(p.total)}</td>
+                                    <td className="p-2 text-right font-mono text-slate-500">{formatMoney(p.precio_costo)}</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -5340,9 +5340,9 @@ export default function AdminDashboard({
                       type="button"
                       onClick={() => {
                         const d = new Date();
-                        const endStr = d.toISOString().split('T')[0];
+                        const endStr = getLocalDateString(d);
                         d.setDate(d.getDate() - 7);
-                        const startStr = d.toISOString().split('T')[0];
+                        const startStr = getLocalDateString(d);
                         setSalesStartDate(startStr);
                         setSalesEndDate(endStr);
                         setSalesSeller('');
@@ -5360,19 +5360,19 @@ export default function AdminDashboard({
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-4">
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Efectivo</span>
-                    <span className="text-sm font-black text-[#4B9CD3] mt-0.5 block">${totalEfectivoFiltered.toFixed(2)}</span>
+                    <span className="text-sm font-black text-[#4B9CD3] mt-0.5 block">{formatMoney(totalEfectivoFiltered)}</span>
                   </div>
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Tarjeta</span>
-                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">${totalTarjetaFiltered.toFixed(2)}</span>
+                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalTarjetaFiltered)}</span>
                   </div>
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Transferencia</span>
-                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">${totalTransferenciaFiltered.toFixed(2)}</span>
+                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalTransferenciaFiltered)}</span>
                   </div>
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Rappi</span>
-                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">${totalRappiFiltered.toFixed(2)}</span>
+                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalRappiFiltered)}</span>
                   </div>
                 </div>
 
@@ -5380,7 +5380,7 @@ export default function AdminDashboard({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
                   <div className="bg-[#EBF5FB]/60 border border-[#AED6F1] p-3 rounded-lg text-center">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Total Vendido</span>
-                    <span className="text-base font-black text-[#4B9CD3] mt-0.5 block">${totalFilteredAmount.toFixed(2)}</span>
+                    <span className="text-base font-black text-[#4B9CD3] mt-0.5 block">{formatMoney(totalFilteredAmount)}</span>
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-center">
@@ -5390,7 +5390,7 @@ export default function AdminDashboard({
 
                   <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-center">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Ticket Promedio</span>
-                    <span className="text-base font-black text-slate-800 mt-0.5 block">${ticketPromedio.toFixed(2)}</span>
+                    <span className="text-base font-black text-slate-800 mt-0.5 block">{formatMoney(ticketPromedio)}</span>
                   </div>
 
                   <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-center">
@@ -5452,7 +5452,7 @@ export default function AdminDashboard({
                                     {v.productos_vendidos.map((prod, pIdx) => (
                                       <div key={pIdx} className="text-[11px] text-slate-700 font-semibold flex justify-between gap-2">
                                         <span className="truncate">{prod.nombre} x{prod.cantidad}</span>
-                                        <span className="text-slate-400 font-mono text-[10px] shrink-0">${(prod.precio * prod.cantidad).toFixed(2)}</span>
+                                        <span className="text-slate-400 font-mono text-[10px] shrink-0">{formatMoney(prod.precio * prod.cantidad)}</span>
                                       </div>
                                     ))}
                                   </div>
@@ -5465,7 +5465,7 @@ export default function AdminDashboard({
                                 <td className="px-4 py-3 text-right whitespace-nowrap font-extrabold">
                                   {isAnulada ? (
                                     <div className="text-right">
-                                      <span className="text-slate-400 line-through block font-medium">${v.total.toFixed(2)}</span>
+                                      <span className="text-slate-400 line-through block font-medium">{formatMoney(v.total)}</span>
                                       <span className="text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-2 py-0.5 rounded-md inline-block">
                                         Anulada
                                       </span>
@@ -5476,7 +5476,7 @@ export default function AdminDashboard({
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="text-[#4B9CD3] text-sm">${v.total.toFixed(2)}</span>
+                                    <span className="text-[#4B9CD3] text-sm">{formatMoney(v.total)}</span>
                                   )}
                                 </td>
                                 <td className="px-4 py-3 text-center whitespace-nowrap">
@@ -5587,8 +5587,8 @@ export default function AdminDashboard({
                                 <span className="block text-[10px] text-slate-400">{c.hora}</span>
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-700">{c.usuario_nombre}</td>
-                              <td className="px-4 py-3 text-right font-mono font-bold text-sky-700">${c.efectivo_contado.toFixed(2)}</td>
-                              <td className="px-4 py-3 text-right font-mono font-bold text-slate-700">${(c.tarjeta_esperado || 0).toFixed(2)}</td>
+                              <td className="px-4 py-3 text-right font-mono font-bold text-sky-700">{formatMoney(c.efectivo_contado)}</td>
+                              <td className="px-4 py-3 text-right font-mono font-bold text-slate-700">{formatMoney(c.tarjeta_esperado)}</td>
                               <td className="px-4 py-3 text-slate-600 font-medium max-w-[250px] truncate" title={c.observaciones}>{c.observaciones}</td>
                             </tr>
                           ))}
