@@ -6,7 +6,8 @@
 import React, { useState, useEffect } from 'react';
 import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule } from '../types';
 
-import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell, Download, Search, Percent, Tag, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell, Download, Search, Percent, Tag, ArrowRight, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase, formatFechaLegible, insertAnnouncementInSupabase, updateAnnouncementInSupabase, deleteAnnouncementFromSupabase } from '../lib/supabaseClient';
 import { getGlobalMetrics, formatMoney } from '../utils/metrics';
@@ -1600,6 +1601,124 @@ export default function AdminDashboard({
     setInvStockActual(item.stock_actual);
     setInvStockMinimo(item.stock_minimo_alerta);
     setInvUnidad(item.unidad);
+  };
+
+  const handleDownloadSampleExcel = () => {
+    const sampleData = [
+      ['Nombre del Recurso', 'Categoría', 'Stock Actual', 'Stock Mínimo', 'Unidad'],
+      ['Fresas de Huerto Orgánico', 'insumos', 25, 5, 'Kg'],
+      ['Vasos Eco Biodegradables 12oz', 'empaques', 200, 30, 'Unidades'],
+      ['Base de Avena Silvestre', 'preparados', 15, 3, 'Litros'],
+      ['Proteína Whey Isolate Vainilla', 'insumos', 10, 2, 'Kg'],
+      ['Cucharas Biodegradables', 'empaques', 300, 50, 'Unidades']
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(sampleData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Plantilla Inventario');
+
+    XLSX.writeFile(workbook, 'Plantilla_Inventario_Coccole.xlsx');
+  };
+
+  const handleExcelFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportStatus({ type: 'loading', message: `Procesando archivo "${file.name}"...` });
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = evt.target?.result;
+        if (!data) throw new Error('No se pudo leer el archivo.');
+
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        if (!jsonRows || jsonRows.length === 0) {
+          setImportStatus({ type: 'error', message: 'El archivo Excel o CSV ingresado está vacío.' });
+          return;
+        }
+
+        let importedCount = 0;
+
+        if (importOption === 'replace') {
+          inventario.forEach(item => {
+            onDeleteInventarioItem(item.id);
+          });
+        }
+
+        jsonRows.forEach((row: any, idx: number) => {
+          if (!row || !Array.isArray(row) || row.length === 0) return;
+
+          const col0 = String(row[0] || '').trim();
+          if (!col0) return;
+
+          const col0Lower = col0.toLowerCase();
+          if (col0Lower === 'nombre' || col0Lower === 'nombre del recurso' || col0Lower === 'producto' || col0Lower === 'recurso' || col0Lower === 'insumo' || col0Lower === 'item' || col0Lower === 'name') {
+            return;
+          }
+
+          const nombre = col0;
+
+          let categoria: 'insumos' | 'empaques' | 'preparados' = 'insumos';
+          const rawCat = String(row[1] || '').trim().toLowerCase();
+          if (rawCat.includes('empaque') || rawCat.includes('vaso') || rawCat.includes('bolsa') || rawCat === 'empaques') {
+            categoria = 'empaques';
+          } else if (rawCat.includes('prepara') || rawCat.includes('base') || rawCat.includes('barra') || rawCat === 'preparados') {
+            categoria = 'preparados';
+          }
+
+          let stock_actual = 10;
+          const rawStock = row[2];
+          if (rawStock !== undefined && rawStock !== '' && !isNaN(Number(rawStock))) {
+            stock_actual = Number(rawStock);
+          }
+
+          let stock_minimo_alerta = 5;
+          const rawMin = row[3];
+          if (rawMin !== undefined && rawMin !== '' && !isNaN(Number(rawMin))) {
+            stock_minimo_alerta = Number(rawMin);
+          }
+
+          const rawUnidad = String(row[4] || '').trim();
+          const unidad = rawUnidad || 'Unidades';
+
+          onSaveInventarioItem({
+            nombre,
+            categoria,
+            stock_actual,
+            stock_minimo_alerta,
+            unidad,
+            ultima_actualizacion_fecha: getLocalDateString()
+          });
+
+          importedCount++;
+        });
+
+        setImportStatus({
+          type: 'success',
+          message: `¡Carga Masiva Exitosa! Se registraron ${importedCount} productos e insumos desde "${file.name}".`
+        });
+
+        e.target.value = '';
+      } catch (err: any) {
+        console.error('Error al procesar archivo Excel:', err);
+        setImportStatus({
+          type: 'error',
+          message: `Error al leer el archivo Excel/CSV: ${err?.message || 'Formato no válido'}`
+        });
+      }
+    };
+
+    reader.onerror = () => {
+      setImportStatus({ type: 'error', message: 'Fallo al leer el archivo en el navegador.' });
+    };
+
+    reader.readAsBinaryString(file);
   };
 
   const parseAndImportRows = (text: string) => {
@@ -3364,7 +3483,7 @@ export default function AdminDashboard({
                   <button
                     type="button"
                     onClick={() => setInvFormMode('individual')}
-                    className={`px-2 py-1 rounded-md font-bold transition-all cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
                       invFormMode === 'individual' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -3376,11 +3495,12 @@ export default function AdminDashboard({
                       setInvFormMode('bulk');
                       setImportStatus({ type: 'idle', message: '' });
                     }}
-                    className={`px-2 py-1 rounded-md font-bold transition-all cursor-pointer flex items-center gap-0.5 ${
+                    className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer flex items-center gap-1 ${
                       invFormMode === 'bulk' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Google Sheets / Masivo
+                    <FileSpreadsheet className="w-3 h-3" />
+                    Carga Masiva Excel / Sheets
                   </button>
                 </div>
               )}
@@ -3490,6 +3610,49 @@ export default function AdminDashboard({
               </form>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start text-xs animate-in fade-in duration-150">
+                {/* BANNER PRINCIPAL DE CARGA MASIVA CON EXCEL */}
+                <div className="col-span-1 md:col-span-12 bg-[#FFFDF6] border-2 border-dashed border-[#4B9CD3]/50 rounded-xl p-4 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-[#EBF5FB] flex items-center justify-center text-[#4B9CD3] shrink-0 border border-[#AED6F1]">
+                      <FileSpreadsheet className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-sm text-[#2C3E50] flex items-center gap-2">
+                        Carga Masiva con Archivo Excel (.xlsx / .xls / .csv)
+                        <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border border-emerald-200">
+                          Recomendado
+                        </span>
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Sube tu archivo de Excel o CSV con tus productos e insumos para registrarlos automáticamente en bodega.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleExcel}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-200"
+                      title="Descargar plantilla de archivo Excel con formato listo para llenar"
+                    >
+                      <Download className="w-3.5 h-3.5 text-slate-600" />
+                      Plantilla Ejemplo
+                    </button>
+
+                    <label className="px-4 py-2 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 cursor-pointer shadow-xs border border-[#3A82B4]">
+                      <FileSpreadsheet className="w-4 h-4" />
+                      <span>Cargar Archivo Excel</span>
+                      <input
+                        type="file"
+                        accept=".xlsx, .xls, .csv"
+                        onChange={handleExcelFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+
                 <div className="md:col-span-4 bg-[#EBF5FB] text-[#4B9CD3] p-4 rounded-lg border border-[#AED6F1]/40">
                   <p className="font-extrabold text-[10px] uppercase tracking-wide flex items-center gap-1">
                     <Sparkles className="w-3.5 h-3.5 text-[#4B9CD3]" />
