@@ -9,7 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell, Download, Search, Percent, Tag, ArrowRight, FileSpreadsheet, Bot, Send, Copy, Check, Lightbulb, HelpCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase, formatFechaLegible, insertAnnouncementInSupabase, updateAnnouncementInSupabase, deleteAnnouncementFromSupabase, formatFechaSemana, ProductoRendimientoItem, DiaVentaResumen } from '../lib/supabaseClient';
+import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, calcularHorasTurno, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase, formatFechaLegible, insertAnnouncementInSupabase, updateAnnouncementInSupabase, deleteAnnouncementFromSupabase, formatFechaSemana, ProductoRendimientoItem, DiaVentaResumen } from '../lib/supabaseClient';
 import { getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 import AnalyticsPanel from './AnalyticsPanel';
@@ -3132,16 +3132,32 @@ export default function AdminDashboard({
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-[#2C3E50] text-xs truncate">{emp.nombre}</p>
                       {fichaje ? (
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
-                            fichaje.puntual ? 'bg-[#EBF5FB] text-[#4B9CD3]' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {fichaje.puntual ? 'Puntual' : 'Retraso'}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-semibold">
-                            In: {fichaje.hora_entrada || '--:--'} {fichaje.hora_salida ? `| Out: ${fichaje.hora_salida}` : ''}
-                          </span>
-                        </div>
+                        (() => {
+                          const dur = calcularHorasTurno(fichaje.hora_entrada, fichaje.hora_salida);
+                          return (
+                            <div className="space-y-1 mt-1">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
+                                  fichaje.puntual ? 'bg-[#EBF5FB] text-[#4B9CD3]' : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {fichaje.puntual ? 'Puntual' : 'Retraso'}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-semibold">
+                                  In: {fichaje.hora_entrada || '--:--'} {fichaje.hora_salida ? `| Out: ${fichaje.hora_salida}` : ''}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[10px] font-black px-1.5 py-0.2 rounded ${
+                                  fichaje.hora_salida 
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                                    : 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
+                                }`}>
+                                  {fichaje.hora_salida ? `⏱️ Turno: ${dur.textoCorto}` : `⏱️ En curso: ${dur.textoCorto}`}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()
                       ) : (
                         <p className="text-[10px] text-slate-400 mt-1">Sin registrar ingreso hoy</p>
                       )}
@@ -3177,6 +3193,7 @@ export default function AdminDashboard({
                     <th className="p-3">Fecha</th>
                     <th className="p-3">Hora de Ingreso</th>
                     <th className="p-3">Hora de Salida</th>
+                    <th className="p-3">Horas de Turno</th>
                     <th className="p-3">Puntualidad</th>
                     <th className="p-3 text-right">Acción</th>
                   </tr>
@@ -3184,7 +3201,7 @@ export default function AdminDashboard({
                 <tbody className="divide-y divide-[#E2E8F0]/40">
                   {fichajes.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-400 font-bold">
+                      <td colSpan={7} className="p-8 text-center text-slate-400 font-bold">
                         No hay registros de asistencia en este momento. Los ingresos registrados se mostrarán aquí inmediatamente.
                       </td>
                     </tr>
@@ -3201,6 +3218,7 @@ export default function AdminDashboard({
                           nombre: (f as any).empleado_nombre || (f as any).usuario_nombre || 'Empleado',
                           foto_avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
                         };
+                        const dur = calcularHorasTurno(f.hora_entrada, f.hora_salida);
                         return (
                           <tr key={f.id} className="hover:bg-slate-50 transition-colors">
                             <td className="p-3 flex items-center gap-2.5">
@@ -3259,6 +3277,24 @@ export default function AdminDashboard({
                                 <span className="text-[10px] text-orange-600 font-extrabold bg-orange-50 px-2 py-0.5 rounded-md border border-orange-200/50 animate-pulse">
                                   En servicio...
                                 </span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              {f.hora_entrada ? (
+                                <div className="flex flex-col">
+                                  <span className={`font-black text-[11px] px-2 py-0.5 rounded-md inline-block w-fit border ${
+                                    f.hora_salida 
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                                      : 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse'
+                                  }`}>
+                                    {dur.textoCorto}
+                                  </span>
+                                  <span className="text-[9px] text-slate-500 font-semibold mt-0.5">
+                                    {f.hora_salida ? `Total: ${dur.texto}` : 'En curso'}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">--</span>
                               )}
                             </td>
                             <td className="p-3">

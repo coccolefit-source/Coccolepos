@@ -2007,6 +2007,66 @@ export function getLocalDateString(dateInput?: Date | string | null): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/**
+ * Calcula las horas y minutos trabajados entre hora de entrada y hora de salida (o hora actual si está en curso).
+ */
+export function calcularHorasTurno(horaEntrada?: string | null, horaSalida?: string | null): { 
+  horas: number; 
+  minutos: number; 
+  totalMinutos: number; 
+  texto: string; 
+  textoCorto: string;
+  enCurso: boolean;
+} {
+  if (!horaEntrada || typeof horaEntrada !== 'string') {
+    return { horas: 0, minutos: 0, totalMinutos: 0, texto: '--', textoCorto: '--', enCurso: false };
+  }
+  
+  const partesIn = horaEntrada.trim().split(':');
+  if (partesIn.length < 2) {
+    return { horas: 0, minutos: 0, totalMinutos: 0, texto: '--', textoCorto: '--', enCurso: false };
+  }
+  const hIn = parseInt(partesIn[0], 10) || 0;
+  const mIn = parseInt(partesIn[1], 10) || 0;
+  
+  let hOut: number;
+  let mOut: number;
+  let enCurso = false;
+  
+  if (horaSalida && typeof horaSalida === 'string' && horaSalida.includes(':')) {
+    const partesOut = horaSalida.trim().split(':');
+    hOut = parseInt(partesOut[0], 10) || 0;
+    mOut = parseInt(partesOut[1], 10) || 0;
+  } else {
+    enCurso = true;
+    const now = new Date();
+    hOut = now.getHours();
+    mOut = now.getMinutes();
+  }
+  
+  let totalMinutos = (hOut * 60 + mOut) - (hIn * 60 + mIn);
+  if (totalMinutos < 0) {
+    // Si el turno cruza la medianoche (ej: 22:00 a 02:00)
+    totalMinutos += 24 * 60;
+  }
+  
+  const horas = Math.floor(totalMinutos / 60);
+  const minutos = totalMinutos % 60;
+  
+  let texto = '';
+  if (horas === 0) {
+    texto = `${minutos} min`;
+  } else if (minutos === 0) {
+    texto = `${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+  } else {
+    texto = `${horas} ${horas === 1 ? 'hora' : 'horas'} y ${minutos} min`;
+  }
+  
+  const textoCorto = `${horas}h ${minutos.toString().padStart(2, '0')}m`;
+  
+  return { horas, minutos, totalMinutos, texto, textoCorto, enCurso };
+}
+
 export async function generarLoteTareasPredeterminadasAutonomas(client: any, fechaTarget: string): Promise<Tarea[]> {
   try {
     const fechaLimpia = getLocalDateString(fechaTarget);

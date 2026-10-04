@@ -22,6 +22,7 @@ import {
   fetchInventoryFromSupabase,
   fetchTimeEntriesFromSupabase,
   saveFichajeToSupabase,
+  calcularHorasTurno,
   deleteTimeEntryFromSupabase,
   insertSaleInSupabase,
   updateSaleInSupabase,
@@ -1188,8 +1189,11 @@ export default function App() {
       pushNotification(`${empNombre} registró ENTRADA a las ${timeStr} (${punctual ? 'Puntual' : 'Retraso'}).`, punctual ? 'success' : 'info');
     } else {
       // Salida: actualizar registro activo de hoy
+      let duracionTexto = '';
       updatedFichajes = updatedFichajes.map(f => {
         if ((f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && (f.activo || !f.hora_salida)) {
+          const dur = calcularHorasTurno(f.hora_entrada, timeStr);
+          duracionTexto = dur.texto;
           const updated = {
             ...f,
             hora_salida: timeStr,
@@ -1200,7 +1204,11 @@ export default function App() {
         }
         return f;
       });
-      pushNotification(`${empNombre} registró SALIDA a las ${timeStr}. Turno finalizado.`, 'info');
+      if (duracionTexto) {
+        pushNotification(`¡${empNombre} registró SALIDA a las ${timeStr}! Total trabajado: ${duracionTexto}.`, 'success');
+      } else {
+        pushNotification(`${empNombre} registró SALIDA a las ${timeStr}. Turno finalizado.`, 'info');
+      }
     }
 
     // Actualizar estado local inmediatamente

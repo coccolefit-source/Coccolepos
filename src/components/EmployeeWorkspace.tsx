@@ -9,7 +9,7 @@ import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, 
 import { calculateLeaderboard, getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase, fetchCampaignProductsFromSupabase, getLocalDateString, fetchActiveAnnouncementsFromSupabase, subscribeToAnnouncementsRealtime, formatFechaLegible } from '../lib/supabaseClient';
+import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase, fetchCampaignProductsFromSupabase, getLocalDateString, calcularHorasTurno, fetchActiveAnnouncementsFromSupabase, subscribeToAnnouncementsRealtime, formatFechaLegible } from '../lib/supabaseClient';
 import { CheckCircle2, CheckCircle, Clock, AlertTriangle, AlertCircle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera, GripVertical, Bell, ClipboardList, Megaphone } from 'lucide-react';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
@@ -646,13 +646,6 @@ export default function EmployeeWorkspace({
   const [incidenciaDesc, setIncidenciaDesc] = useState('');
   const [incidenciaTipo, setIncidenciaTipo] = useState<'insumo' | 'equipo'>('insumo');
 
-  // Hora de ingreso personalizada
-  const [showCustomTimePicker, setShowCustomTimePicker] = useState(false);
-  const [customTime, setCustomTime] = useState(() => {
-    const now = new Date();
-    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-  });
-
   // Anuncio más reciente
   const anuncioReciente = anuncios[0];
 
@@ -830,104 +823,72 @@ export default function EmployeeWorkspace({
               <p className="text-lg font-black">#{miPosicion} <span className="text-[10px] font-medium opacity-85">/ {leaderboardData.length}</span></p>
             </div>
            {/* Fichaje widget */}
-          <div className="bg-white border border-[#E2E8F0] p-2 px-3.5 rounded-xl flex items-center gap-4">
-            <div>
-              <p className="text-[9px] text-slate-400 font-bold uppercase">Fichaje del Turno</p>
-              <p className="text-[10px] text-slate-600 font-bold mt-0.5 flex flex-wrap items-center gap-1.5">
-                {miFichaje?.hora_entrada ? (
-                  <>
-                    <span>Entrada: <strong>{miFichaje.hora_entrada}</strong></span>
-                    {!miFichaje.hora_salida && !showCustomTimePicker && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCustomTime(miFichaje.hora_entrada);
-                          setShowCustomTimePicker(true);
-                        }}
-                        className="text-[9px] text-[#4B9CD3] hover:text-[#3A82B4] font-black underline cursor-pointer bg-[#EBF5FB] px-1.5 py-0.5 rounded-md"
-                        title="Modificar hora de llegada de hoy"
-                      >
-                        Editar Entrada
-                      </button>
+          {(() => {
+            const duracionInfo = miFichaje?.hora_entrada ? calcularHorasTurno(miFichaje.hora_entrada, miFichaje.hora_salida) : null;
+            return (
+              <div className="bg-white border border-[#E2E8F0] p-2.5 px-4 rounded-xl flex flex-wrap sm:flex-nowrap items-center gap-4 shadow-xs">
+                <div>
+                  <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider">
+                    {miFichaje?.hora_salida ? 'Turno Finalizado' : miFichaje?.hora_entrada ? 'Turno en Curso' : 'Control de Asistencia'}
+                  </p>
+                  <div className="text-[11px] text-slate-700 font-bold mt-0.5 flex flex-wrap items-center gap-1.5">
+                    {miFichaje?.hora_entrada ? (
+                      <>
+                        <span>Entrada: <strong className="text-slate-900">{miFichaje.hora_entrada}</strong></span>
+                        {miFichaje.hora_salida ? (
+                          <>
+                            <span>| Salida: <strong className="text-slate-900">{miFichaje.hora_salida}</strong></span>
+                            <span className="bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-2 py-0.5 rounded-md text-[10px] font-black flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3 text-emerald-600" />
+                              Total: {duracionInfo?.texto || duracionInfo?.textoCorto}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 rounded-md text-[10px] font-black animate-pulse flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-amber-600" />
+                            {duracionInfo?.textoCorto} en turno ({duracionInfo?.texto})
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-slate-400 font-semibold">Sin registrar ingreso hoy</span>
                     )}
-                  </>
-                ) : (
-                  <span>Falta fichar hoy</span>
-                )}
-                {miFichaje?.hora_salida ? ` | Salida: ${miFichaje.hora_salida}` : ''}
-              </p>
-            </div>
+                  </div>
+                </div>
 
-            {showCustomTimePicker ? (
-              <div className="flex items-center gap-1.5 border border-[#E2E8F0] p-1 rounded-lg bg-[#FFFDF6]/40">
-                <input
-                  type="time"
-                  value={customTime}
-                  onChange={(e) => setCustomTime(e.target.value)}
-                  className="text-[10px] font-bold bg-white px-1.5 py-0.5 rounded-md border border-[#E2E8F0] focus:outline-hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    onRegistrarFichaje(empleado.id, 'entrada', customTime);
-                    setShowCustomTimePicker(false);
-                  }}
-                  className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-[9px] font-bold px-2 py-1 rounded-md transition-colors"
-                >
-                  Guardar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCustomTimePicker(false)}
-                  className="text-[10px] text-slate-400 hover:text-slate-600 font-bold px-1"
-                >
-                  X
-                </button>
+                <div className="ml-auto sm:ml-0">
+                  {miFichaje ? (
+                    miFichaje.hora_salida ? (
+                      <span className="text-[10px] bg-slate-100 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-black uppercase tracking-wider inline-flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 text-slate-500" />
+                        Jornada Cerrada
+                      </span>
+                    ) : (
+                      <button
+                        id="fichaje-out-btn"
+                        onClick={() => onRegistrarFichaje(empleado.id, 'salida')}
+                        className="bg-red-600 hover:bg-red-700 text-white text-[11px] font-black px-3.5 py-2 rounded-xl transition-all shadow-sm hover:shadow-md flex items-center gap-1.5 cursor-pointer uppercase tracking-wider active:scale-95"
+                        title="Registrar salida de turno y guardar en la nube"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        Registrar Salida Ahora
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      id="fichaje-in-btn"
+                      onClick={() => onRegistrarFichaje(empleado.id, 'entrada')}
+                      className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-[11px] font-black px-3.5 py-2 rounded-xl transition-all shadow-sm hover:shadow-md flex items-center gap-1.5 cursor-pointer uppercase tracking-wider active:scale-95"
+                      title="Registrar hora de entrada del turno"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      Registrar Entrada Ahora
+                    </button>
+                  )}
+                </div>
               </div>
-            ) : miFichaje ? (
-              miFichaje.hora_salida ? (
-                <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200 px-3 py-1.5 rounded-lg font-bold uppercase tracking-wider">
-                  Turno Cerrado
-                </span>
-              ) : (
-                <button
-                  id="fichaje-out-btn"
-                  disabled={!yaCuadrado}
-                  onClick={() => {
-                    if (yaCuadrado) {
-                      onRegistrarFichaje(empleado.id, 'salida');
-                    }
-                  }}
-                  className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors shadow-2xs uppercase tracking-wider ${
-                    yaCuadrado 
-                      ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer' 
-                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  }`}
-                  title={!yaCuadrado ? "Primero completa el cuadre de caja obligatorio abajo" : "Registrar Salida de Turno"}
-                >
-                  Registrar Salida
-                </button>
-              )
-            ) : (
-              <div className="flex items-center gap-2">
-                <button
-                  id="fichaje-in-btn"
-                  onClick={() => onRegistrarFichaje(empleado.id, 'entrada')}
-                  className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors shadow-2xs uppercase tracking-wider cursor-pointer font-black"
-                >
-                  Registrar Entrada (Ahora)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCustomTimePicker(true)}
-                  className="text-[10px] text-[#4B9CD3] hover:text-[#3A82B4] font-bold underline px-1"
-                  title="Registrar hora manual de ingreso"
-                >
-                  Manual
-                </button>
-              </div>
-            )}
-          </div>
+            );
+          })()}
           </div>
 
         </div>
