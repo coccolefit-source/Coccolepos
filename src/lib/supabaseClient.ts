@@ -2838,7 +2838,7 @@ export async function deleteScheduleFromSupabase(
 ): Promise<boolean> {
   const client = getSupabaseClient();
   
-  // Limpiar en almacenamiento local
+  // 1. Limpiar en almacenamiento local
   try {
     const stored = localStorage.getItem('coccole_horarios');
     if (stored) {
@@ -2857,25 +2857,29 @@ export async function deleteScheduleFromSupabase(
   if (!client) return true;
 
   try {
-    // 1. Intentar borrar por ID directo
-    if (id) {
-      await client.from('schedules').delete().eq('id', id);
-      await client.from('horarios').delete().eq('id', id);
-    }
+    const tables = ['schedules', 'horarios'];
+    for (const tbl of tables) {
+      // Borrar por ID exacto si existe
+      if (id) {
+        await client.from(tbl).delete().eq('id', id);
+      }
 
-    // 2. Si se suministra usuario y día, asegurar borrado por combinación
-    if (usuarioId && diaSemana) {
-      await client
-        .from('schedules')
-        .delete()
-        .or(`usuario_id.eq.${usuarioId},employee_id.eq.${usuarioId},employee_name.eq.${usuarioId}`)
-        .or(`dia_semana.eq.${diaSemana},day_of_week.eq.${diaSemana}`);
+      // Borrar combinando usuario/empleado y día de la semana para evitar discrepancias de ID
+      if (usuarioId && diaSemana) {
+        await client.from(tbl).delete().eq('usuario_id', usuarioId).eq('dia_semana', diaSemana);
+        await client.from(tbl).delete().eq('usuario_id', usuarioId).eq('day_of_week', diaSemana);
+        await client.from(tbl).delete().eq('employee_id', usuarioId).eq('dia_semana', diaSemana);
+        await client.from(tbl).delete().eq('employee_id', usuarioId).eq('day_of_week', diaSemana);
+        await client.from(tbl).delete().eq('employee_name', usuarioId).eq('dia_semana', diaSemana);
+        await client.from(tbl).delete().eq('employee_name', usuarioId).eq('day_of_week', diaSemana);
+      }
 
-      await client
-        .from('horarios')
-        .delete()
-        .or(`usuario_id.eq.${usuarioId},employee_id.eq.${usuarioId},employee_name.eq.${usuarioId}`)
-        .or(`dia_semana.eq.${diaSemana},day_of_week.eq.${diaSemana}`);
+      // Si sólo se pasa usuarioId sin día específico (opcional)
+      if (usuarioId && !diaSemana) {
+        await client.from(tbl).delete().eq('usuario_id', usuarioId);
+        await client.from(tbl).delete().eq('employee_id', usuarioId);
+        await client.from(tbl).delete().eq('employee_name', usuarioId);
+      }
     }
 
     return true;
