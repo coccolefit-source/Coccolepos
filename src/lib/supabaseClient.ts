@@ -1201,56 +1201,87 @@ export async function deleteInventoryFromSupabase(id: string): Promise<boolean> 
 export async function fetchTimeEntriesFromSupabase(): Promise<FichajeRecord[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
-  const { data, error } = await client.from('time_entries').select('*').order('created_at', { ascending: false });
-  if (error) {
-    console.warn('Supabase fetchTimeEntries error:', error.message);
+  try {
+    const { data, error } = await client.from('time_entries').select('*').order('created_at', { ascending: false });
+    if (error) {
+      console.warn('Supabase fetchTimeEntries error:', error.message);
+      return null;
+    }
+    if (!data) return [];
+    return data.map((t: any) => {
+      let horaIn = t.hora_entrada;
+      if (!horaIn && t.clock_in) {
+        if (typeof t.clock_in === 'string') {
+          horaIn = t.clock_in.includes('T') ? t.clock_in.split('T')[1].slice(0, 5) : t.clock_in.slice(0, 5);
+        }
+      }
+      let horaOut = t.hora_salida;
+      if (!horaOut && t.clock_out) {
+        if (typeof t.clock_out === 'string') {
+          horaOut = t.clock_out.includes('T') ? t.clock_out.split('T')[1].slice(0, 5) : t.clock_out.slice(0, 5);
+        }
+      }
+
+      // Validar y sanear fecha: nunca permitir que una hora (ej: "08:00") o undefined se use como fecha
+      let rawFecha = t.fecha;
+      let cleanFecha = '';
+      if (rawFecha && typeof rawFecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawFecha.trim())) {
+        cleanFecha = rawFecha.trim();
+      } else if (t.clock_in && typeof t.clock_in === 'string') {
+        cleanFecha = getLocalDateString(t.clock_in);
+      } else if (t.created_at && typeof t.created_at === 'string') {
+        cleanFecha = getLocalDateString(t.created_at);
+      } else {
+        cleanFecha = getLocalDateString();
+      }
+
+      return {
+        id: t.id,
+        usuario_id: t.staff_id || t.empleado_id,
+        empleado_id: t.staff_id || t.empleado_id,
+        empleado_nombre: t.empleado_nombre || t.usuario_nombre || 'Colaborador',
+        fecha: cleanFecha,
+        hora_entrada: horaIn || '08:00',
+        hora_salida: horaOut || undefined,
+        desglose_caja: t.desglose_caja || { cash_expected: t.cash_expected, cash_counted: t.cash_counted },
+        incidencias: t.observations || t.incidencias,
+        puntual: t.puntual !== undefined ? t.puntual : true,
+        activo: t.activo !== undefined ? t.activo : (!t.clock_out && !t.hora_salida)
+      };
+    }) as any[];
+  } catch (err) {
+    console.error('Error in fetchTimeEntriesFromSupabase:', err);
     return null;
   }
-  if (!data) return [];
-  return data.map((t: any) => {
-    let horaIn = t.hora_entrada;
-    if (!horaIn && t.clock_in) {
-      if (typeof t.clock_in === 'string') {
-        horaIn = t.clock_in.includes('T') ? t.clock_in.split('T')[1].slice(0, 5) : t.clock_in.slice(0, 5);
-      }
-    }
-    let horaOut = t.hora_salida;
-    if (!horaOut && t.clock_out) {
-      if (typeof t.clock_out === 'string') {
-        horaOut = t.clock_out.includes('T') ? t.clock_out.split('T')[1].slice(0, 5) : t.clock_out.slice(0, 5);
-      }
-    }
-
-    return {
-      id: t.id,
-      usuario_id: t.staff_id || t.empleado_id,
-      empleado_id: t.staff_id || t.empleado_id,
-      empleado_nombre: t.empleado_nombre || t.usuario_nombre || 'Colaborador',
-      fecha: t.fecha || (t.clock_in ? getLocalDateString(t.clock_in) : (t.created_at ? getLocalDateString(t.created_at) : getLocalDateString())),
-      hora_entrada: horaIn || '08:00',
-      hora_salida: horaOut || undefined,
-      desglose_caja: t.desglose_caja || { cash_expected: t.cash_expected, cash_counted: t.cash_counted },
-      incidencias: t.observations || t.incidencias,
-      puntual: t.puntual !== undefined ? t.puntual : true,
-      activo: t.activo !== undefined ? t.activo : (!t.clock_out && !t.hora_salida)
-    };
-  }) as any[];
 }
 
 export async function saveFichajeToSupabase(fichaje: any, empleadoNombre?: string): Promise<boolean> {
   const client = getSupabaseClient();
-  if (!client) return false;
+  if (!client) {
+    console.warn('Supabase client no configurado para saveFichajeToSupabase');
+    return false;
+  }
   try {
     const staffId = fichaje.usuario_id || fichaje.empleado_id;
-    const todayStr = fichaje.fecha || getLocalDateString();
+    // Asegurar fecha válida en formato YYYY-MM-DD
+    const todayStr = (fichaje.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(fichaje.fecha).trim()))
+      ? String(fichaje.fecha).trim()
+      : getLocalDateString();
+
+    const horaInStr = fichaje.hora_entrada ? (fichaje.hora_entrada.length === 5 ? `${fichaje.hora_entrada}:00` : fichaje.hora_entrada) : null;
+    const horaOutStr = fichaje.hora_salida ? (fichaje.hora_salida.length === 5 ? `${fichaje.hora_salida}:00` : fichaje.hora_salida) : null;
+
+    const clockInVal = horaInStr ? `${todayStr}T${horaInStr}` : new Date().toISOString();
+    const clockOutVal = horaOutStr ? `${todayStr}T${horaOutStr}` : null;
+
     const payload: any = {
       id: fichaje.id || `f-${Date.now()}`,
       staff_id: staffId,
       empleado_id: staffId,
       empleado_nombre: empleadoNombre || fichaje.empleado_nombre || fichaje.usuario_nombre || 'Colaborador',
       fecha: todayStr,
-      clock_in: fichaje.hora_entrada ? `${todayStr}T${fichaje.hora_entrada}:00` : new Date().toISOString(),
-      clock_out: fichaje.hora_salida ? `${todayStr}T${fichaje.hora_salida}:00` : null,
+      clock_in: clockInVal,
+      clock_out: clockOutVal,
       hora_entrada: fichaje.hora_entrada || null,
       hora_salida: fichaje.hora_salida || null,
       puntual: fichaje.puntual !== undefined ? fichaje.puntual : true,
@@ -1264,16 +1295,31 @@ export async function saveFichajeToSupabase(fichaje: any, empleadoNombre?: strin
 
     const { error } = await client.from('time_entries').upsert(payload, { onConflict: 'id' });
     if (error) {
-      console.warn('Supabase upsert time_entries error, trying insert:', error.message);
-      const { error: insertErr } = await client.from('time_entries').insert(payload);
-      if (insertErr) {
-        console.error('Supabase insert time_entries error:', insertErr.message);
-        return false;
+      console.warn('Supabase upsert time_entries con columnas completas falló:', error.message, 'Intentando con payload estándar...');
+      
+      // Fallback a columnas estándar en caso de que la tabla aún no tenga las columnas extendidas
+      const minimalPayload: any = {
+        id: payload.id,
+        staff_id: staffId,
+        clock_in: payload.clock_in,
+        clock_out: payload.clock_out,
+        cash_expected: Number(payload.cash_expected) || 0,
+        cash_counted: Number(payload.cash_counted) || 0,
+        observations: payload.observations || `Entrada: ${payload.hora_entrada || '--:--'} | Salida: ${payload.hora_salida || '--:--'} | ${payload.empleado_nombre} | Puntual: ${payload.puntual ? 'SI' : 'NO'}`
+      };
+
+      const { error: minUpsertErr } = await client.from('time_entries').upsert(minimalPayload, { onConflict: 'id' });
+      if (minUpsertErr) {
+        const { error: minInsertErr } = await client.from('time_entries').insert(minimalPayload);
+        if (minInsertErr) {
+          console.error('Supabase time_entries fallback error:', minInsertErr.message);
+          return false;
+        }
       }
     }
     return true;
   } catch (err) {
-    console.error('Error saving fichaje to Supabase:', err);
+    console.error('Error guardando fichaje en Supabase:', err);
     return false;
   }
 }

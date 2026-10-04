@@ -3212,7 +3212,39 @@ export default function AdminDashboard({
                               />
                               <span className="font-extrabold text-[#2C3E50]">{emp?.nombre || 'Empleado'}</span>
                             </td>
-                            <td className="p-3 text-slate-600 font-bold">{f.fecha}</td>
+                            <td className="p-3 text-slate-700 font-bold">
+                              {(() => {
+                                const raw = f.fecha ? String(f.fecha).trim() : '';
+                                if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                                  const [yyyy, mm, dd] = raw.split('-');
+                                  return (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
+                                        {dd}/{mm}/{yyyy}
+                                      </span>
+                                    </div>
+                                  );
+                                }
+                                if (raw.includes('T')) {
+                                  const datePart = raw.split('T')[0];
+                                  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                                    const [yyyy, mm, dd] = datePart.split('-');
+                                    return (
+                                      <span className="bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
+                                        {dd}/{mm}/{yyyy}
+                                      </span>
+                                    );
+                                  }
+                                }
+                                // Si contenía una hora u otro valor corrupto, obtener fecha local de hoy
+                                const [yyyy, mm, dd] = getLocalDateString().split('-');
+                                return (
+                                  <span className="bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
+                                    {dd}/{mm}/{yyyy}
+                                  </span>
+                                );
+                              })()}
+                            </td>
                             <td className="p-3">
                               <span className="font-black text-slate-800 bg-sky-50 text-sky-800 px-2.5 py-1 rounded-md border border-sky-200/50">
                                 {f.hora_entrada || 'Sin registrar'}

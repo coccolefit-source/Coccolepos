@@ -316,15 +316,20 @@ export default function App() {
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
-          fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
-            id: f.id,
-            usuario_id: f.usuario_id || f.empleado_id,
-            fecha: f.fecha || (f.hora_entrada?.split(' ')[0]) || getLocalDateString(),
-            hora_entrada: f.hora_entrada,
-            hora_salida: f.hora_salida,
-            puntual: f.puntual !== undefined ? f.puntual : true,
-            activo: !f.hora_salida
-          })) : prev.fichajes
+          fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
+            const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
+              ? String(f.fecha).trim()
+              : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
+            return {
+              id: f.id,
+              usuario_id: f.usuario_id || f.empleado_id,
+              fecha: cleanFecha,
+              hora_entrada: f.hora_entrada,
+              hora_salida: f.hora_salida,
+              puntual: f.puntual !== undefined ? f.puntual : true,
+              activo: !f.hora_salida
+            };
+          }) : prev.fichajes
         };
       });
 
@@ -458,15 +463,20 @@ export default function App() {
         if (timeEntries && timeEntries.length > 0) {
           setState(prev => ({
             ...prev,
-            fichajes: timeEntries.map((f: any) => ({
-              id: f.id,
-              usuario_id: f.usuario_id || f.empleado_id,
-              fecha: f.fecha || (f.hora_entrada?.split(' ')[0]) || getLocalDateString(),
-              hora_entrada: f.hora_entrada,
-              hora_salida: f.hora_salida,
-              puntual: f.puntual !== undefined ? f.puntual : true,
-              activo: !f.hora_salida
-            }))
+            fichajes: timeEntries.map((f: any) => {
+              const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
+                ? String(f.fecha).trim()
+                : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
+              return {
+                id: f.id,
+                usuario_id: f.usuario_id || f.empleado_id,
+                fecha: cleanFecha,
+                hora_entrada: f.hora_entrada,
+                hora_salida: f.hora_salida,
+                puntual: f.puntual !== undefined ? f.puntual : true,
+                activo: !f.hora_salida
+              };
+            })
           }));
         }
       }
@@ -1141,73 +1151,77 @@ export default function App() {
     const empObj = state.usuarios.find(u => u.id === usuario_id);
     const empNombre = empObj?.nombre || 'Empleado';
 
+    let punctual = true;
+    if (horaPersonalizada) {
+      const [h, m] = horaPersonalizada.split(':').map(Number);
+      punctual = h < 8 || (h === 8 && m <= 5);
+    } else {
+      punctual = now.getHours() < 8 || (now.getHours() === 8 && now.getMinutes() <= 5);
+    }
+
+    let updatedFichajes = [...state.fichajes];
     let fichajeToSave: Fichaje | null = null;
 
-    setState(prev => {
-      let updatedFichajes = [...prev.fichajes];
-      
-      if (tipo === 'entrada') {
-        let punctual = true;
-        if (horaPersonalizada) {
-          const [h, m] = horaPersonalizada.split(':').map(Number);
-          punctual = h < 8 || (h === 8 && m <= 5);
-        } else {
-          punctual = now.getHours() < 8 || (now.getHours() === 8 && now.getMinutes() <= 5);
-        }
-
-        const existingIdx = updatedFichajes.findIndex(f => (f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && f.fecha === todayStr);
-        if (existingIdx !== -1) {
-          const updated = {
-            ...updatedFichajes[existingIdx],
-            hora_entrada: timeStr,
-            puntual: punctual,
-            activo: true
-          };
-          updatedFichajes[existingIdx] = updated;
-          fichajeToSave = updated;
-        } else {
-          const newFichaje: Fichaje = {
-            id: `f-${Date.now()}`,
-            usuario_id,
-            fecha: todayStr,
-            hora_entrada: timeStr,
-            puntual: punctual,
-            activo: true
-          };
-          updatedFichajes.push(newFichaje);
-          fichajeToSave = newFichaje;
-        }
-        pushNotification(`${empNombre} registró ENTRADA a las ${timeStr} (${punctual ? 'Puntual' : 'Retraso'}).`, punctual ? 'success' : 'info');
+    if (tipo === 'entrada') {
+      const existingIdx = updatedFichajes.findIndex(f => (f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && f.fecha === todayStr);
+      if (existingIdx !== -1) {
+        const updated = {
+          ...updatedFichajes[existingIdx],
+          hora_entrada: timeStr,
+          puntual: punctual,
+          activo: true
+        };
+        updatedFichajes[existingIdx] = updated;
+        fichajeToSave = updated;
       } else {
-        // Salida: actualizar registro activo de hoy
-        updatedFichajes = updatedFichajes.map(f => {
-          if ((f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && (f.activo || !f.hora_salida)) {
-            const updated = {
-              ...f,
-              hora_salida: timeStr,
-              activo: false
-            };
-            fichajeToSave = updated;
-            return updated;
-          }
-          return f;
-        });
-        pushNotification(`${empNombre} registró SALIDA a las ${timeStr}. Turno finalizado.`, 'info');
+        const newFichaje: Fichaje = {
+          id: `f-${Date.now()}`,
+          usuario_id,
+          fecha: todayStr,
+          hora_entrada: timeStr,
+          puntual: punctual,
+          activo: true
+        };
+        updatedFichajes.push(newFichaje);
+        fichajeToSave = newFichaje;
       }
+      pushNotification(`${empNombre} registró ENTRADA a las ${timeStr} (${punctual ? 'Puntual' : 'Retraso'}).`, punctual ? 'success' : 'info');
+    } else {
+      // Salida: actualizar registro activo de hoy
+      updatedFichajes = updatedFichajes.map(f => {
+        if ((f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && (f.activo || !f.hora_salida)) {
+          const updated = {
+            ...f,
+            hora_salida: timeStr,
+            activo: false
+          };
+          fichajeToSave = updated;
+          return updated;
+        }
+        return f;
+      });
+      pushNotification(`${empNombre} registró SALIDA a las ${timeStr}. Turno finalizado.`, 'info');
+    }
 
-      try {
-        localStorage.setItem('coccole_fichajes', JSON.stringify(updatedFichajes));
-      } catch (e) {}
+    // Actualizar estado local inmediatamente
+    setState(prev => ({
+      ...prev,
+      fichajes: updatedFichajes
+    }));
 
-      return {
-        ...prev,
-        fichajes: updatedFichajes
-      };
-    });
+    try {
+      localStorage.setItem('coccole_fichajes', JSON.stringify(updatedFichajes));
+    } catch (e) {}
 
+    // Guardar en Supabase en la nube
     if (fichajeToSave) {
       try {
-        await saveFichajeToSupabase(fichajeToSave, empNombre);
+        const ok = await saveFichajeToSupabase(fichajeToSave, empNombre);
+        if (ok) {
+          console.log('✅ Fichaje sincronizado en Supabase con éxito');
+        } else {
+          console.warn('⚠️ No se pudo guardar fichaje en Supabase, conservado localmente');
+        }
       } catch (err) {
         console.error('Error guardando fichaje en Supabase:', err);
       }
