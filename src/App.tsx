@@ -21,6 +21,8 @@ import {
   fetchCustomersFromSupabase,
   fetchInventoryFromSupabase,
   fetchTimeEntriesFromSupabase,
+  saveFichajeToSupabase,
+  deleteTimeEntryFromSupabase,
   insertSaleInSupabase,
   updateSaleInSupabase,
   upsertCustomerInSupabase,
@@ -272,7 +274,7 @@ export default function App() {
 
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
-      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog] = await Promise.all([
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries] = await Promise.all([
         fetchDailyTasksFromSupabase(getLocalDateString()),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
@@ -281,7 +283,8 @@ export default function App() {
         fetchUpsellRulesFromSupabase(),
         fetchCampaignProductsFromSupabase(),
         fetchAllAnnouncementsFromSupabase(),
-        fetchCatalogFromSupabase()
+        fetchCatalogFromSupabase(),
+        fetchTimeEntriesFromSupabase()
       ]);
 
       setState(prev => {
@@ -312,7 +315,16 @@ export default function App() {
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
-          productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo
+          productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
+          fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
+            id: f.id,
+            usuario_id: f.usuario_id || f.empleado_id,
+            fecha: f.fecha || (f.hora_entrada?.split(' ')[0]) || getLocalDateString(),
+            hora_entrada: f.hora_entrada,
+            hora_salida: f.hora_salida,
+            puntual: f.puntual !== undefined ? f.puntual : true,
+            activo: !f.hora_salida
+          })) : prev.fichajes
         };
       });
 
@@ -439,6 +451,23 @@ export default function App() {
           try {
             localStorage.setItem('coccole_productos_catalogo', JSON.stringify(freshCatalog));
           } catch (e) {}
+        }
+      },
+      async () => {
+        const timeEntries = await fetchTimeEntriesFromSupabase();
+        if (timeEntries && timeEntries.length > 0) {
+          setState(prev => ({
+            ...prev,
+            fichajes: timeEntries.map((f: any) => ({
+              id: f.id,
+              usuario_id: f.usuario_id || f.empleado_id,
+              fecha: f.fecha || (f.hora_entrada?.split(' ')[0]) || getLocalDateString(),
+              hora_entrada: f.hora_entrada,
+              hora_salida: f.hora_salida,
+              puntual: f.puntual !== undefined ? f.puntual : true,
+              activo: !f.hora_salida
+            }))
+          }));
         }
       }
     );
@@ -1104,10 +1133,15 @@ export default function App() {
 
   // --- ACTIONS: FICHAJE / ASISTENCIA ---
 
-  const handleRegistrarFichaje = (usuario_id: string, tipo: 'entrada' | 'salida', horaPersonalizada?: string) => {
+  const handleRegistrarFichaje = async (usuario_id: string, tipo: 'entrada' | 'salida', horaPersonalizada?: string) => {
     const todayStr = getLocalDateString();
     const now = new Date();
     const timeStr = horaPersonalizada || `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+    const empObj = state.usuarios.find(u => u.id === usuario_id);
+    const empNombre = empObj?.nombre || 'Empleado';
+
+    let fichajeToSave: Fichaje | null = null;
 
     setState(prev => {
       let updatedFichajes = [...prev.fichajes];
@@ -1121,14 +1155,16 @@ export default function App() {
           punctual = now.getHours() < 8 || (now.getHours() === 8 && now.getMinutes() <= 5);
         }
 
-        const existingIdx = updatedFichajes.findIndex(f => f.usuario_id === usuario_id && f.fecha === todayStr);
+        const existingIdx = updatedFichajes.findIndex(f => (f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && f.fecha === todayStr);
         if (existingIdx !== -1) {
-          updatedFichajes[existingIdx] = {
+          const updated = {
             ...updatedFichajes[existingIdx],
             hora_entrada: timeStr,
             puntual: punctual,
             activo: true
           };
+          updatedFichajes[existingIdx] = updated;
+          fichajeToSave = updated;
         } else {
           const newFichaje: Fichaje = {
             id: `f-${Date.now()}`,
@@ -1139,36 +1175,63 @@ export default function App() {
             activo: true
           };
           updatedFichajes.push(newFichaje);
+          fichajeToSave = newFichaje;
         }
-        const empNombre = prev.usuarios.find(u => u.id === usuario_id)?.nombre || 'Empleado';
         pushNotification(`${empNombre} registró ENTRADA a las ${timeStr} (${punctual ? 'Puntual' : 'Retraso'}).`, punctual ? 'success' : 'info');
       } else {
         // Salida: actualizar registro activo de hoy
         updatedFichajes = updatedFichajes.map(f => {
           if ((f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && (f.activo || !f.hora_salida)) {
-            return {
+            const updated = {
               ...f,
               hora_salida: timeStr,
               activo: false
             };
+            fichajeToSave = updated;
+            return updated;
           }
           return f;
         });
-        const empNombre = prev.usuarios.find(u => u.id === usuario_id)?.nombre || 'Empleado';
         pushNotification(`${empNombre} registró SALIDA a las ${timeStr}. Turno finalizado.`, 'info');
       }
+
+      try {
+        localStorage.setItem('coccole_fichajes', JSON.stringify(updatedFichajes));
+      } catch (e) {}
+
       return {
         ...prev,
         fichajes: updatedFichajes
       };
     });
+
+    if (fichajeToSave) {
+      try {
+        await saveFichajeToSupabase(fichajeToSave, empNombre);
+      } catch (err) {
+        console.error('Error guardando fichaje en Supabase:', err);
+      }
+    }
   };
 
-  const handleDeleteFichaje = (id: string) => {
-    setState(prev => ({
-      ...prev,
-      fichajes: prev.fichajes.filter(f => f.id !== id)
-    }));
+  const handleDeleteFichaje = async (id: string) => {
+    setState(prev => {
+      const updated = prev.fichajes.filter(f => f.id !== id);
+      try {
+        localStorage.setItem('coccole_fichajes', JSON.stringify(updated));
+      } catch (e) {}
+      return {
+        ...prev,
+        fichajes: updated
+      };
+    });
+
+    try {
+      await deleteTimeEntryFromSupabase(id);
+    } catch (e) {
+      console.error('Error eliminando fichaje en Supabase:', e);
+    }
+
     pushNotification('Registro de asistencia eliminado de la bitácora.', 'info');
   };
 

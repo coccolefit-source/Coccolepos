@@ -3115,7 +3115,12 @@ export default function AdminDashboard({
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {empleados.map(emp => {
-                const fichaje = fichajes.find(f => f.usuario_id === emp.id && f.fecha === getLocalDateString());
+                const fichaje = fichajes.find(f => {
+                  const fId = f.usuario_id || (f as any).empleado_id;
+                  const fNom = ((f as any).empleado_nombre || (f as any).usuario_nombre || '').toLowerCase().trim();
+                  const empNom = emp.nombre.toLowerCase().trim();
+                  return ((fId && fId === emp.id) || (fNom && fNom === empNom)) && f.fecha === getLocalDateString();
+                });
                 return (
                   <div key={emp.id} className="border border-[#E2E8F0] p-3.5 rounded-xl flex items-center gap-3 bg-[#FFFDF6]/40">
                     <img
@@ -3133,7 +3138,7 @@ export default function AdminDashboard({
                           }`}>
                             {fichaje.puntual ? 'Puntual' : 'Retraso'}
                           </span>
-                          <span className="text-[10px] text-slate-500">
+                          <span className="text-[10px] text-slate-500 font-semibold">
                             In: {fichaje.hora_entrada || '--:--'} {fichaje.hora_salida ? `| Out: ${fichaje.hora_salida}` : ''}
                           </span>
                         </div>
@@ -3191,7 +3196,11 @@ export default function AdminDashboard({
                         return (b.hora_entrada || '').localeCompare(a.hora_entrada || '');
                       })
                       .map(f => {
-                        const emp = usuarios.find(u => u.id === f.usuario_id);
+                        const emp = usuarios.find(u => u.id === f.usuario_id || u.id === (f as any).empleado_id) || {
+                          id: f.usuario_id || (f as any).empleado_id || 'emp',
+                          nombre: (f as any).empleado_nombre || (f as any).usuario_nombre || 'Empleado',
+                          foto_avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
+                        };
                         return (
                           <tr key={f.id} className="hover:bg-slate-50 transition-colors">
                             <td className="p-3 flex items-center gap-2.5">
@@ -6624,57 +6633,129 @@ export default function AdminDashboard({
                               </p>
                             </div>
 
-                            {/* Día que MÁS vendió y a qué horas */}
-                            <div className="bg-emerald-50/80 border border-emerald-200 rounded-lg p-2.5 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[9px] font-extrabold uppercase text-emerald-800 flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                                  Día que Más Vendió
-                                </span>
-                                <span className="text-[11px] font-black text-emerald-700 bg-white border border-emerald-200 px-1.5 py-0.5 rounded">
-                                  ${(performanceData.patronesVenta?.diaMaxVenta?.totalMonto || 385000).toLocaleString('es-CO')}
-                                </span>
-                              </div>
-                              <p className="text-xs font-bold text-slate-800 leading-snug">
-                                {performanceData.patronesVenta?.diaMaxVenta?.fecha || 'Viernes (Jornada Récord Comercial)'}
-                              </p>
-                              <div className="text-[10px] text-emerald-950 font-medium pt-1 border-t border-emerald-200/60 flex flex-wrap justify-between items-center gap-1">
-                                <span>
-                                  Horario Pico: <strong className="font-extrabold text-emerald-900">{performanceData.patronesVenta?.diaMaxVenta?.horaPico || performanceData.patronesVenta?.picoHorario || '12:00 PM a 2:00 PM'}</strong>
-                                </span>
-                                {performanceData.patronesVenta?.diaMaxVenta?.transacciones ? (
-                                  <span className="text-slate-500 font-semibold">
-                                    {performanceData.patronesVenta.diaMaxVenta.transacciones} ventas
+                            {/* CASO A: Todas las ventas del rango están en el mismo día */}
+                            {((performanceData.patronesVenta?.diaMaxVenta?.fechaRaw && 
+                               performanceData.patronesVenta?.diaMinVenta?.fechaRaw && 
+                               performanceData.patronesVenta.diaMaxVenta.fechaRaw === performanceData.patronesVenta.diaMinVenta.fechaRaw) ||
+                              (performanceData.patronesVenta?.diaMaxVenta?.fecha === performanceData.patronesVenta?.diaMinVenta?.fecha)) ? (
+                              <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2.5 shadow-2xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                                  <span className="text-[10px] font-black uppercase text-[#2C3E50] flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                                    Jornada de Ventas Registrada
                                   </span>
-                                ) : null}
-                              </div>
-                            </div>
+                                  <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                    ${(performanceData.patronesVenta?.diaMaxVenta?.totalMonto || 0).toLocaleString('es-CO')}
+                                  </span>
+                                </div>
 
-                            {/* Día que MENOS vendió y a qué horas */}
-                            <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[9px] font-extrabold uppercase text-amber-800 flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                                  Día que Menos Vendió
-                                </span>
-                                <span className="text-[11px] font-black text-amber-700 bg-white border border-amber-200 px-1.5 py-0.5 rounded">
-                                  ${(performanceData.patronesVenta?.diaMinVenta?.totalMonto || 62000).toLocaleString('es-CO')}
-                                </span>
+                                <div>
+                                  <p className="text-xs font-bold text-slate-800 leading-snug">
+                                    {performanceData.patronesVenta?.diaMaxVenta?.fecha}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                                    Total del día: <strong>{performanceData.patronesVenta?.diaMaxVenta?.transacciones || performanceData.patronesVenta?.ventasCount || 1} ventas</strong>
+                                  </p>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-2 pt-1 border-t border-slate-100">
+                                  {/* Horario Pico */}
+                                  <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-md p-2">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-[9px] font-extrabold uppercase text-emerald-800 flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                        Horario Pico (Mayor Venta)
+                                      </p>
+                                      {performanceData.patronesVenta?.diaMaxVenta?.transaccionesHoraPico ? (
+                                        <span className="text-[9px] font-bold text-emerald-800 bg-white border border-emerald-200 px-1 py-0.2 rounded">
+                                          {performanceData.patronesVenta.diaMaxVenta.transaccionesHoraPico} ventas
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <p className="text-[11px] font-extrabold text-emerald-950 mt-1">
+                                      {performanceData.patronesVenta?.diaMaxVenta?.horaPico || performanceData.patronesVenta?.picoHorario || '12:00 PM - 2:00 PM'}
+                                    </p>
+                                  </div>
+
+                                  {/* Horario Valle */}
+                                  <div className="bg-amber-50/70 border border-amber-200/80 rounded-md p-2">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-[9px] font-extrabold uppercase text-amber-800 flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                        Horario de Menor Venta
+                                      </p>
+                                      {performanceData.patronesVenta?.diaMinVenta?.transaccionesHoraBaja ? (
+                                        <span className="text-[9px] font-bold text-amber-800 bg-white border border-amber-200 px-1 py-0.2 rounded">
+                                          {performanceData.patronesVenta.diaMinVenta.transaccionesHoraBaja} {performanceData.patronesVenta.diaMinVenta.transaccionesHoraBaja === 1 ? 'venta' : 'ventas'}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <p className="text-[11px] font-extrabold text-amber-950 mt-1">
+                                      {performanceData.patronesVenta?.diaMinVenta?.horaBaja || performanceData.patronesVenta?.valleHorario || '08:00 AM - 10:00 AM'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <p className="text-[9px] text-slate-400 italic pt-1 border-t border-slate-100">
+                                  * Ventas concentradas en 1 día. Para comparar días de la semana distintos (ej. día récord vs día bajo), pulsa los filtros de 7 Días o 1 Mes.
+                                </p>
                               </div>
-                              <p className="text-xs font-bold text-slate-800 leading-snug">
-                                {performanceData.patronesVenta?.diaMinVenta?.fecha || 'Lunes (Apertura Semanal)'}
-                              </p>
-                              <div className="text-[10px] text-amber-950 font-medium pt-1 border-t border-amber-200/60 flex flex-wrap justify-between items-center gap-1">
-                                <span>
-                                  Horario Más Bajo: <strong className="font-extrabold text-amber-900">{performanceData.patronesVenta?.diaMinVenta?.horaBaja || performanceData.patronesVenta?.valleHorario || '08:00 AM a 10:00 AM'}</strong>
-                                </span>
-                                {performanceData.patronesVenta?.diaMinVenta?.transacciones ? (
-                                  <span className="text-slate-500 font-semibold">
-                                    {performanceData.patronesVenta.diaMinVenta.transacciones} ventas
-                                  </span>
-                                ) : null}
+                            ) : (
+                              /* CASO B: Hay 2 o más días diferentes con ventas registradas */
+                              <div className="space-y-2.5">
+                                {/* Día que MÁS vendió y a qué horas */}
+                                <div className="bg-emerald-50/80 border border-emerald-200 rounded-lg p-2.5 space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[9px] font-extrabold uppercase text-emerald-800 flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                      Día que Más Vendió
+                                    </span>
+                                    <span className="text-[11px] font-black text-emerald-700 bg-white border border-emerald-200 px-1.5 py-0.5 rounded">
+                                      ${(performanceData.patronesVenta?.diaMaxVenta?.totalMonto || 385000).toLocaleString('es-CO')}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs font-bold text-slate-800 leading-snug">
+                                    {performanceData.patronesVenta?.diaMaxVenta?.fecha || 'Viernes (Jornada Récord Comercial)'}
+                                  </p>
+                                  <div className="text-[10px] text-emerald-950 font-medium pt-1 border-t border-emerald-200/60 flex flex-wrap justify-between items-center gap-1">
+                                    <span>
+                                      Horario Pico: <strong className="font-extrabold text-emerald-900">{performanceData.patronesVenta?.diaMaxVenta?.horaPico || performanceData.patronesVenta?.picoHorario || '12:00 PM a 2:00 PM'}</strong>
+                                    </span>
+                                    {performanceData.patronesVenta?.diaMaxVenta?.transacciones ? (
+                                      <span className="text-slate-500 font-semibold">
+                                        {performanceData.patronesVenta.diaMaxVenta.transacciones} ventas del día
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                {/* Día que MENOS vendió y a qué horas */}
+                                <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[9px] font-extrabold uppercase text-amber-800 flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                                      Día que Menos Vendió
+                                    </span>
+                                    <span className="text-[11px] font-black text-amber-700 bg-white border border-amber-200 px-1.5 py-0.5 rounded">
+                                      ${(performanceData.patronesVenta?.diaMinVenta?.totalMonto || 62000).toLocaleString('es-CO')}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs font-bold text-slate-800 leading-snug">
+                                    {performanceData.patronesVenta?.diaMinVenta?.fecha || 'Lunes (Apertura Semanal)'}
+                                  </p>
+                                  <div className="text-[10px] text-amber-950 font-medium pt-1 border-t border-amber-200/60 flex flex-wrap justify-between items-center gap-1">
+                                    <span>
+                                      Horario Más Bajo: <strong className="font-extrabold text-amber-900">{performanceData.patronesVenta?.diaMinVenta?.horaBaja || performanceData.patronesVenta?.valleHorario || '08:00 AM a 10:00 AM'}</strong>
+                                    </span>
+                                    {performanceData.patronesVenta?.diaMinVenta?.transacciones ? (
+                                      <span className="text-slate-500 font-semibold">
+                                        {performanceData.patronesVenta.diaMinVenta.transacciones} ventas del día
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
+                            )}
                           </div>
                         </div>
 

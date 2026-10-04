@@ -178,10 +178,13 @@ CREATE TABLE IF NOT EXISTS public.time_entries (
   staff_id TEXT,
   empleado_id TEXT,
   empleado_nombre TEXT,
+  fecha TEXT,
   clock_in TIMESTAMPTZ DEFAULT NOW(),
   clock_out TIMESTAMPTZ,
   hora_entrada TEXT,
   hora_salida TEXT,
+  puntual BOOLEAN DEFAULT true,
+  activo BOOLEAN DEFAULT true,
   cash_expected NUMERIC DEFAULT 0,
   cash_counted NUMERIC DEFAULT 0,
   observations TEXT,
@@ -191,11 +194,44 @@ CREATE TABLE IF NOT EXISTS public.time_entries (
 );
 
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS staff_id TEXT;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS empleado_id TEXT;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS empleado_nombre TEXT;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS fecha TEXT;
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS clock_in TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS clock_out TIMESTAMPTZ;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS hora_entrada TEXT;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS hora_salida TEXT;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS puntual BOOLEAN DEFAULT true;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT true;
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS cash_expected NUMERIC DEFAULT 0;
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS cash_counted NUMERIC DEFAULT 0;
 ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS observations TEXT;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS desglose_caja JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.time_entries ADD COLUMN IF NOT EXISTS incidencias TEXT;
+
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'time_entries' AND policyname = 'Permitir acceso publico total a time_entries'
+  ) THEN
+    CREATE POLICY "Permitir acceso publico total a time_entries" 
+    ON public.time_entries 
+    FOR ALL 
+    TO public 
+    USING (true) 
+    WITH CHECK (true);
+  END IF;
+END $$;
+
+ALTER TABLE public.time_entries REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'time_entries') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.time_entries;
+  END IF;
+END $$;
 
 -- 6. Tabla: daily_tasks (Bitácora de Tareas Diarias)
 CREATE TABLE IF NOT EXISTS public.daily_tasks (
@@ -1171,45 +1207,95 @@ export async function fetchTimeEntriesFromSupabase(): Promise<FichajeRecord[] | 
     return null;
   }
   if (!data) return [];
-  return data.map((t: any) => ({
-    id: t.id,
-    usuario_id: t.staff_id || t.empleado_id,
-    empleado_id: t.staff_id || t.empleado_id,
-    empleado_nombre: t.empleado_nombre || 'Colaborador',
-    fecha: t.fecha || (t.created_at ? getLocalDateString(t.created_at) : getLocalDateString()),
-    hora_entrada: t.clock_in || t.hora_entrada,
-    hora_salida: t.clock_out || t.hora_salida,
-    desglose_caja: t.desglose_caja || { cash_expected: t.cash_expected, cash_counted: t.cash_counted },
-    incidencias: t.observations || t.incidencias,
-    puntual: true,
-    activo: !t.clock_out && !t.hora_salida
-  })) as any[];
+  return data.map((t: any) => {
+    let horaIn = t.hora_entrada;
+    if (!horaIn && t.clock_in) {
+      if (typeof t.clock_in === 'string') {
+        horaIn = t.clock_in.includes('T') ? t.clock_in.split('T')[1].slice(0, 5) : t.clock_in.slice(0, 5);
+      }
+    }
+    let horaOut = t.hora_salida;
+    if (!horaOut && t.clock_out) {
+      if (typeof t.clock_out === 'string') {
+        horaOut = t.clock_out.includes('T') ? t.clock_out.split('T')[1].slice(0, 5) : t.clock_out.slice(0, 5);
+      }
+    }
+
+    return {
+      id: t.id,
+      usuario_id: t.staff_id || t.empleado_id,
+      empleado_id: t.staff_id || t.empleado_id,
+      empleado_nombre: t.empleado_nombre || t.usuario_nombre || 'Colaborador',
+      fecha: t.fecha || (t.clock_in ? getLocalDateString(t.clock_in) : (t.created_at ? getLocalDateString(t.created_at) : getLocalDateString())),
+      hora_entrada: horaIn || '08:00',
+      hora_salida: horaOut || undefined,
+      desglose_caja: t.desglose_caja || { cash_expected: t.cash_expected, cash_counted: t.cash_counted },
+      incidencias: t.observations || t.incidencias,
+      puntual: t.puntual !== undefined ? t.puntual : true,
+      activo: t.activo !== undefined ? t.activo : (!t.clock_out && !t.hora_salida)
+    };
+  }) as any[];
+}
+
+export async function saveFichajeToSupabase(fichaje: any, empleadoNombre?: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const staffId = fichaje.usuario_id || fichaje.empleado_id;
+    const todayStr = fichaje.fecha || getLocalDateString();
+    const payload: any = {
+      id: fichaje.id || `f-${Date.now()}`,
+      staff_id: staffId,
+      empleado_id: staffId,
+      empleado_nombre: empleadoNombre || fichaje.empleado_nombre || fichaje.usuario_nombre || 'Colaborador',
+      fecha: todayStr,
+      clock_in: fichaje.hora_entrada ? `${todayStr}T${fichaje.hora_entrada}:00` : new Date().toISOString(),
+      clock_out: fichaje.hora_salida ? `${todayStr}T${fichaje.hora_salida}:00` : null,
+      hora_entrada: fichaje.hora_entrada || null,
+      hora_salida: fichaje.hora_salida || null,
+      puntual: fichaje.puntual !== undefined ? fichaje.puntual : true,
+      activo: fichaje.activo !== undefined ? fichaje.activo : (!fichaje.hora_salida),
+      cash_expected: fichaje.desglose_caja?.efectivo_esperado || fichaje.cash_expected || 0,
+      cash_counted: fichaje.desglose_caja?.efectivo_contado || fichaje.cash_counted || 0,
+      observations: fichaje.observaciones || fichaje.incidencias || null,
+      desglose_caja: fichaje.desglose_caja || {},
+      incidencias: fichaje.incidencias || null
+    };
+
+    const { error } = await client.from('time_entries').upsert(payload, { onConflict: 'id' });
+    if (error) {
+      console.warn('Supabase upsert time_entries error, trying insert:', error.message);
+      const { error: insertErr } = await client.from('time_entries').insert(payload);
+      if (insertErr) {
+        console.error('Supabase insert time_entries error:', insertErr.message);
+        return false;
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error('Error saving fichaje to Supabase:', err);
+    return false;
+  }
 }
 
 export async function insertTimeEntryInSupabase(fichaje: any): Promise<boolean> {
+  return saveFichajeToSupabase(fichaje);
+}
+
+export async function deleteTimeEntryFromSupabase(fichajeId: string): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
-  const staffId = fichaje.usuario_id || fichaje.empleado_id;
-  const { error } = await client.from('time_entries').insert({
-    id: fichaje.id,
-    staff_id: staffId,
-    empleado_id: staffId,
-    empleado_nombre: fichaje.usuario_nombre || fichaje.empleado_nombre || 'Colaborador',
-    clock_in: fichaje.hora_entrada || new Date().toISOString(),
-    clock_out: fichaje.hora_salida || null,
-    hora_entrada: fichaje.hora_entrada,
-    hora_salida: fichaje.hora_salida || null,
-    cash_expected: fichaje.desglose_caja?.efectivo_esperado || fichaje.cash_expected || 0,
-    cash_counted: fichaje.desglose_caja?.efectivo_contado || fichaje.cash_counted || 0,
-    observations: fichaje.observaciones || fichaje.incidencias || null,
-    desglose_caja: fichaje.desglose_caja || {},
-    incidencias: fichaje.incidencias || null
-  });
-  if (error) {
-    console.error('Supabase insertTimeEntry error:', error.message);
+  try {
+    const { error } = await client.from('time_entries').delete().eq('id', fichajeId);
+    if (error) {
+      console.error('Supabase deleteTimeEntry error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Error deleting time_entry in Supabase:', err);
     return false;
   }
-  return true;
 }
 
 // ------------------------------------------------------------------
@@ -1220,7 +1306,8 @@ export function subscribeToRealtimeUpdates(
   onInventoryUpdate?: () => void,
   onCampaignUpdate?: () => void,
   onAnnouncementsUpdate?: () => void,
-  onCatalogUpdate?: () => void
+  onCatalogUpdate?: () => void,
+  onTimeEntriesUpdate?: () => void
 ) {
   const client = getSupabaseClient();
   if (!client) return () => {};
@@ -1250,6 +1337,9 @@ export function subscribeToRealtimeUpdates(
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'productos_catalogo' }, () => {
       if (onCatalogUpdate) onCatalogUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, () => {
+      if (onTimeEntriesUpdate) onTimeEntriesUpdate();
     })
     .subscribe();
 
