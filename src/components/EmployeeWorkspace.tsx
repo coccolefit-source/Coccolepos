@@ -434,7 +434,7 @@ export default function EmployeeWorkspace({
   }, [fichajes, empleado.id, onRegistrarFichaje]);
 
   // Buscar fichaje de hoy
-  const miFichaje = fichajes.find(f => f.usuario_id === empleado.id && f.fecha === getLocalDateString());
+  const miFichaje = fichajes.find(f => (f.usuario_id === empleado.id || (f as any).empleado_id === empleado.id) && f.fecha === getLocalDateString());
 
   // Obtener ranking de este empleado en la vista "diario"
   const leaderboardData = calculateLeaderboard(usuarios, tareas, ventas, fichajes, localProductos, 'diario', getLocalDateString(), posVentas.length > 0 ? posVentas : ventasRegistradas, rankingWeights);
@@ -835,6 +835,13 @@ export default function EmployeeWorkspace({
                     {miFichaje?.hora_entrada ? (
                       <>
                         <span>Entrada: <strong className="text-slate-900">{miFichaje.hora_entrada}</strong></span>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${
+                          miFichaje.puntual 
+                            ? 'bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1]/70' 
+                            : 'bg-red-50 text-red-700 border border-red-200'
+                        }`}>
+                          {miFichaje.puntual ? '✓ Puntual' : '⚠️ Retraso'}
+                        </span>
                         {miFichaje.hora_salida ? (
                           <>
                             <span>| Salida: <strong className="text-slate-900">{miFichaje.hora_salida}</strong></span>

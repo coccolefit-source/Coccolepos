@@ -2122,6 +2122,95 @@ export function calcularHorasTurno(horaEntrada?: string | null, horaSalida?: str
   return { horas, minutos, totalMinutos, texto, textoCorto, enCurso };
 }
 
+/**
+ * Evalúa si el fichaje de un empleado es puntual comparándolo de manera inteligente con su turno asignado para el día.
+ * @param horaFichaje Hora en que fichó la entrada (HH:MM)
+ * @param usuarioId ID del empleado
+ * @param horarios Lista de turnos semanales
+ * @param fecha Fecha del fichaje (YYYY-MM-DD o Date)
+ * @param toleranciaMinutos Minutos de gracia tras la hora de inicio del turno (por defecto 10 min)
+ */
+export function evaluarPuntualidadFichaje(
+  horaFichaje: string,
+  usuarioId: string,
+  horarios: TurnoSemanal[] = [],
+  fecha?: string | Date,
+  toleranciaMinutos: number = 10
+): {
+  puntual: boolean;
+  horarioProgramado?: { entrada: string; salida: string; dia: string };
+  diferenciaMinutos: number; // positivo = retraso en minutos, negativo o cero = a tiempo / antes
+  mensaje: string;
+} {
+  if (!horaFichaje || typeof horaFichaje !== 'string') {
+    return {
+      puntual: true,
+      diferenciaMinutos: 0,
+      mensaje: 'Hora no especificada'
+    };
+  }
+
+  // Parsear la fecha local
+  let dateObj: Date;
+  if (fecha instanceof Date) {
+    dateObj = fecha;
+  } else if (typeof fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fecha.trim())) {
+    const [y, m, d] = fecha.trim().split('-').map(Number);
+    dateObj = new Date(y, m - 1, d);
+  } else {
+    dateObj = new Date();
+  }
+
+  const diasSemana: TurnoSemanal['dia_semana'][] = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+  const diaHoy = diasSemana[dateObj.getDay()];
+
+  const normalizeStr = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const diaHoyNorm = normalizeStr(diaHoy);
+
+  // Buscar turno asignado para hoy
+  const turnoHoy = horarios.find(t => {
+    const tEmpId = t.usuario_id || (t as any).staff_id || (t as any).empleado_id;
+    if (tEmpId !== usuarioId) return false;
+    const tDiaNorm = normalizeStr(t.dia_semana || (t as any).day_of_week || '');
+    return tDiaNorm === diaHoyNorm;
+  });
+
+  const partesFichaje = horaFichaje.trim().split(':');
+  const hFichaje = parseInt(partesFichaje[0], 10) || 0;
+  const mFichaje = parseInt(partesFichaje[1], 10) || 0;
+  const minutosFichaje = hFichaje * 60 + mFichaje;
+
+  if (turnoHoy && turnoHoy.hora_entrada && turnoHoy.hora_entrada.includes(':')) {
+    const partesTurno = turnoHoy.hora_entrada.trim().split(':');
+    const hTurno = parseInt(partesTurno[0], 10) || 0;
+    const mTurno = parseInt(partesTurno[1], 10) || 0;
+    const minutosTurno = hTurno * 60 + mTurno;
+
+    const diferenciaMinutos = minutosFichaje - minutosTurno;
+    const puntual = diferenciaMinutos <= toleranciaMinutos;
+
+    return {
+      puntual,
+      horarioProgramado: {
+        entrada: turnoHoy.hora_entrada,
+        salida: turnoHoy.hora_salida || '--:--',
+        dia: turnoHoy.dia_semana
+      },
+      diferenciaMinutos,
+      mensaje: puntual
+        ? `Puntual (Turno: ${turnoHoy.hora_entrada} | Entrada: ${horaFichaje})`
+        : `Retraso de ${diferenciaMinutos} min (Turno: ${turnoHoy.hora_entrada} | Entrada: ${horaFichaje})`
+    };
+  }
+
+  // Si no tiene turno asignado específicamente para hoy, se considera puntual (no penalizar por omisión de horario)
+  return {
+    puntual: true,
+    diferenciaMinutos: 0,
+    mensaje: `Puntual (Sin turno programado para ${diaHoy} | Entrada: ${horaFichaje})`
+  };
+}
+
 export async function generarLoteTareasPredeterminadasAutonomas(client: any, fechaTarget: string): Promise<Tarea[]> {
   try {
     const fechaLimpia = getLocalDateString(fechaTarget);

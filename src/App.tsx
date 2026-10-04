@@ -23,6 +23,7 @@ import {
   fetchTimeEntriesFromSupabase,
   saveFichajeToSupabase,
   calcularHorasTurno,
+  evaluarPuntualidadFichaje,
   deleteTimeEntryFromSupabase,
   insertSaleInSupabase,
   updateSaleInSupabase,
@@ -1172,13 +1173,15 @@ export default function App() {
     const empObj = state.usuarios.find(u => u.id === usuario_id);
     const empNombre = empObj?.nombre || 'Empleado';
 
-    let punctual = true;
-    if (horaPersonalizada) {
-      const [h, m] = horaPersonalizada.split(':').map(Number);
-      punctual = h < 8 || (h === 8 && m <= 5);
-    } else {
-      punctual = now.getHours() < 8 || (now.getHours() === 8 && now.getMinutes() <= 5);
-    }
+    // Evaluar puntualidad de manera inteligente basada en el horario asignado al trabajador para el día de hoy
+    const evaluacionPuntualidad = evaluarPuntualidadFichaje(
+      timeStr,
+      usuario_id,
+      state.horarios || [],
+      todayStr,
+      10 // 10 minutos de tolerancia tras la hora de inicio de turno
+    );
+    const punctual = evaluacionPuntualidad.puntual;
 
     let updatedFichajes = [...state.fichajes];
     let fichajeToSave: Fichaje | null = null;
@@ -1206,7 +1209,7 @@ export default function App() {
         updatedFichajes.push(newFichaje);
         fichajeToSave = newFichaje;
       }
-      pushNotification(`${empNombre} registró ENTRADA a las ${timeStr} (${punctual ? 'Puntual' : 'Retraso'}).`, punctual ? 'success' : 'info');
+      pushNotification(`${empNombre} registró ENTRADA a las ${timeStr} — ${evaluacionPuntualidad.mensaje}`, punctual ? 'success' : 'info');
     } else {
       // Salida: actualizar registro activo de hoy
       let duracionTexto = '';
