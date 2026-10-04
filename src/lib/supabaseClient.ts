@@ -2831,23 +2831,53 @@ export async function insertScheduleInSupabase(dataTurno: {
   }
 }
 
-export async function deleteScheduleFromSupabase(id: string): Promise<boolean> {
+export async function deleteScheduleFromSupabase(
+  id: string,
+  usuarioId?: string,
+  diaSemana?: string
+): Promise<boolean> {
   const client = getSupabaseClient();
+  
+  // Limpiar en almacenamiento local
   try {
     const stored = localStorage.getItem('coccole_horarios');
     if (stored) {
       const list: TurnoSemanal[] = JSON.parse(stored);
-      localStorage.setItem('coccole_horarios', JSON.stringify(list.filter(t => t.id !== id)));
+      const filtered = list.filter(t => {
+        if (t.id === id) return false;
+        if (usuarioId && diaSemana && (t.usuario_id === usuarioId || (t as any).employee_id === usuarioId) && (t.dia_semana === diaSemana || (t as any).day_of_week === diaSemana)) {
+          return false;
+        }
+        return true;
+      });
+      localStorage.setItem('coccole_horarios', JSON.stringify(filtered));
     }
   } catch (e) {}
 
   if (!client) return true;
 
   try {
-    const { error } = await client.from('schedules').delete().eq('id', id);
-    if (error) {
+    // 1. Intentar borrar por ID directo
+    if (id) {
+      await client.from('schedules').delete().eq('id', id);
       await client.from('horarios').delete().eq('id', id);
     }
+
+    // 2. Si se suministra usuario y día, asegurar borrado por combinación
+    if (usuarioId && diaSemana) {
+      await client
+        .from('schedules')
+        .delete()
+        .or(`usuario_id.eq.${usuarioId},employee_id.eq.${usuarioId},employee_name.eq.${usuarioId}`)
+        .or(`dia_semana.eq.${diaSemana},day_of_week.eq.${diaSemana}`);
+
+      await client
+        .from('horarios')
+        .delete()
+        .or(`usuario_id.eq.${usuarioId},employee_id.eq.${usuarioId},employee_name.eq.${usuarioId}`)
+        .or(`dia_semana.eq.${diaSemana},day_of_week.eq.${diaSemana}`);
+    }
+
     return true;
   } catch (err) {
     console.error('Error eliminando turno de Supabase:', err);
@@ -2889,13 +2919,25 @@ export async function fetchSchedulesFromSupabase(): Promise<TurnoSemanal[]> {
       .from('schedules')
       .select('*');
 
-    if (error || !data || data.length === 0) {
-      const { data: altData } = await client.from('horarios').select('*');
-      data = altData || [];
+    if (error) {
+      const { data: altData, error: altErr } = await client.from('horarios').select('*');
+      if (!altErr && altData) {
+        data = altData;
+        error = null;
+      }
     }
 
-    if (!data || data.length === 0) {
+    if (error) {
+      console.warn('Error consultando schedules en Supabase, usando respaldo local:', error);
       return localBackup;
+    }
+
+    // Si la consulta fue exitosa pero no hay registros (0 turnos en la nube), retornar []
+    if (!data || data.length === 0) {
+      try {
+        localStorage.setItem('coccole_horarios', JSON.stringify([]));
+      } catch (e) {}
+      return [];
     }
 
     const turnos = data.map((d: any) => ({

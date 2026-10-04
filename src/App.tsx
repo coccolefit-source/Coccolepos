@@ -495,7 +495,7 @@ export default function App() {
       },
       async () => {
         const freshSchedules = await fetchSchedulesFromSupabase();
-        if (freshSchedules && freshSchedules.length > 0) {
+        if (freshSchedules !== undefined && freshSchedules !== null) {
           setState(prev => ({
             ...prev,
             horarios: freshSchedules
@@ -1713,9 +1713,26 @@ export default function App() {
     }
   };
 
-  const handleDeleteTurno = async (id: string) => {
+  const handleDeleteTurno = async (id: string, turnoObj?: TurnoSemanal) => {
+    let usuarioId = turnoObj?.usuario_id;
+    let diaSemana = turnoObj?.dia_semana;
+
+    if (!usuarioId || !diaSemana) {
+      const match = (state.horarios || []).find(t => t.id === id);
+      if (match) {
+        usuarioId = match.usuario_id;
+        diaSemana = match.dia_semana;
+      }
+    }
+
     setState(prev => {
-      const filtered = (prev.horarios || []).filter(t => t.id !== id);
+      const filtered = (prev.horarios || []).filter(t => {
+        if (t.id === id) return false;
+        if (usuarioId && diaSemana && (t.usuario_id === usuarioId || (t as any).employee_id === usuarioId) && (t.dia_semana === diaSemana || (t as any).day_of_week === diaSemana)) {
+          return false;
+        }
+        return true;
+      });
       try {
         localStorage.setItem('coccole_horarios', JSON.stringify(filtered));
       } catch (e) {}
@@ -1724,7 +1741,7 @@ export default function App() {
     });
 
     try {
-      await deleteScheduleFromSupabase(id);
+      await deleteScheduleFromSupabase(id, usuarioId, diaSemana);
     } catch (err) {
       console.error('Error eliminando turno de Supabase:', err);
     }

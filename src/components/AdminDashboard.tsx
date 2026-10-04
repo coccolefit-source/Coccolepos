@@ -59,7 +59,7 @@ export interface AdminDashboardProps {
   onBulkSaveInventario?: (items: InventarioItem[]) => Promise<boolean | void> | boolean | void;
   onDeleteInventarioItem: (id: string) => void;
   onSaveTurno: (turno: Omit<TurnoSemanal, 'id'> & { id?: string }) => void;
-  onDeleteTurno: (id: string) => void;
+  onDeleteTurno: (id: string, turnoObj?: TurnoSemanal) => void;
   onDeleteFichaje?: (id: string) => void;
   onSaveProductoCatalogo: (producto: Omit<Producto, 'id'> & { id?: string }) => void;
   onBulkSaveProductosCatalogo?: (productos: Omit<Producto, 'id'>[]) => void;
@@ -4472,16 +4472,34 @@ export default function AdminDashboard({
                     {editingSchId ? 'Actualizar' : 'Cargar Turno'}
                   </button>
                   {editingSchId && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingSchId(null);
-                        setSchNota('');
-                      }}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg transition-colors h-9 cursor-pointer"
-                    >
-                      X
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const match = horarios.find(t => t.id === editingSchId);
+                          if (confirm('¿Desea eliminar definitivamente este turno programado?')) {
+                            onDeleteTurno(editingSchId, match);
+                            setEditingSchId(null);
+                            setSchNota('');
+                          }
+                        }}
+                        className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold py-2.5 px-3 rounded-lg transition-colors h-9 cursor-pointer whitespace-nowrap"
+                        title="Eliminar este turno"
+                      >
+                        Eliminar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSchId(null);
+                          setSchNota('');
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg transition-colors h-9 cursor-pointer"
+                        title="Cancelar edición"
+                      >
+                        X
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -4510,7 +4528,12 @@ export default function AdminDashboard({
             ) : (
               <div className="space-y-6">
                 {empleados.map(emp => {
-                  const turnosEmp = horarios.filter(t => t.usuario_id === emp.id);
+                  const turnosEmp = horarios.filter(t => 
+                    t.usuario_id === emp.id || 
+                    (t as any).employee_id === emp.id || 
+                    (t as any).employee_name === emp.nombre ||
+                    t.usuario_id === emp.nombre
+                  );
                   const dias: Array<'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo'> = [
                     'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'
                   ];
@@ -4560,18 +4583,22 @@ export default function AdminDashboard({
                                   <button
                                     type="button"
                                     onClick={() => handleEditSchClick(shift)}
-                                    className="p-1 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors animate-none"
+                                    className="p-1 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors animate-none cursor-pointer"
                                     title="Modificar turno"
                                   >
                                     <Edit2 className="w-3 h-3" />
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => onDeleteTurno(shift.id)}
-                                    className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                                    onClick={() => {
+                                      if (confirm(`¿Eliminar turno del ${shift.dia_semana} (${shift.hora_entrada} - ${shift.hora_salida}) para ${emp.nombre}?`)) {
+                                        onDeleteTurno(shift.id, shift);
+                                      }
+                                    }}
+                                    className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
                                     title="Eliminar turno"
                                   >
-                                    <Trash2 className="w-3 h-3" />
+                                    <Trash2 className="w-3 h-3 text-red-500" />
                                   </button>
                                 </div>
                               )}
