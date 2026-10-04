@@ -235,10 +235,10 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
         (window as any).sesionActual = { rol: null, nombre: null };
       }
 
-      // Limpiar almacenamiento local
+      // Limpiar almacenamiento local de sesión sin borrar configuración ni catálogos
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem('coccole_sesion');
-        localStorage.clear();
+        localStorage.removeItem('coccole_active_user_role');
       }
 
       // Forzar reinicio limpio
@@ -421,27 +421,22 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
     (window as any).iniciarModuloProductividadTiempoReal = iniciarModuloProductividadTiempoReal;
     (window as any).ejecutarModulo = iniciarModuloProductividadTiempoReal;
 
-    // Escuchador global para cualquier boton o enlace de cierre de sesion o actualizacion de datos
+    // Escuchador global únicamente para el botón específico de cierre de sesión
     if (typeof document !== 'undefined') {
       document.addEventListener('click', function (evento: any) {
         try {
           const target = evento.target;
-          const elemento = target?.closest ? (target.closest('button, a, div') || target) : target;
+          if (!target) return;
+          const logoutBtn = target.closest ? target.closest('button#btn-cerrar-sesion, button#logout-btn') : null;
 
-          if (
-            elemento &&
-            (
-              elemento.textContent?.trim().toLowerCase().includes('cerrar sesión') ||
-              elemento.textContent?.trim().toLowerCase().includes('cerrar sesion') ||
-              elemento.id === 'btn-cerrar-sesion' ||
-              elemento.id === 'logout-btn'
-            )
-          ) {
+          if (logoutBtn) {
             evento.preventDefault();
             cerrarSesion();
+            return;
           }
 
-          if (elemento && elemento.textContent && elemento.textContent.includes('Actualizar Datos')) {
+          const syncBtn = target.closest ? target.closest('button#sync-data-button') : null;
+          if (syncBtn) {
             setTimeout(cargarYRenderizarTareasGlobal, 300);
           }
         } catch (error) {

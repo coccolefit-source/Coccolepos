@@ -113,22 +113,25 @@ export default function App() {
   // Reglas de Venta Sugerida (Cross-selling)
   const [upsellRules, setUpsellRules] = useState<UpsellRule[]>(DEFAULT_UPSELL_RULES);
 
-  // Rol activo (Admin o ID de un Empleado específico)
+  // Rol activo (Admin o ID de un Empleado específico) con persistencia robusta
   const [activeUserRole, setActiveUserRole] = useState<string | null>(() => {
     try {
       if (typeof window !== 'undefined') {
-        const sesionActual = (window as any).sesionActual;
-        if (sesionActual?.rol === 'admin') return 'usr-admin';
-        if (sesionActual?.rol === 'empleado') return sesionActual.id || sesionActual.nombre || 'usr-shelsy';
-        if (sesionActual?.id) return sesionActual.id;
+        const savedRole = localStorage.getItem('coccole_active_user_role');
+        if (savedRole) return savedRole;
 
         const sesionStr = localStorage.getItem('coccole_sesion');
         if (sesionStr) {
           const parsed = JSON.parse(sesionStr);
-          if (parsed?.rol === 'admin') return 'usr-admin';
-          if (parsed?.rol === 'empleado') return parsed.id || parsed.nombre || 'usr-shelsy';
           if (parsed?.id) return parsed.id;
+          if (parsed?.rol === 'admin') return 'usr-admin';
+          if (parsed?.rol === 'empleado') return parsed.nombre || 'usr-shelsy';
         }
+
+        const sesionActual = (window as any).sesionActual;
+        if (sesionActual?.id) return sesionActual.id;
+        if (sesionActual?.rol === 'admin') return 'usr-admin';
+        if (sesionActual?.rol === 'empleado') return sesionActual.nombre || 'usr-shelsy';
       }
     } catch (e) {}
     return null;
@@ -507,16 +510,28 @@ export default function App() {
   useEffect(() => {
   }, [state]);
 
-  // Sincronizar activeUserRole con localStorage
+  // Sincronizar activeUserRole y coccole_sesion con localStorage de manera persistente
   useEffect(() => {
     if (activeUserRole) {
-      // localStorage eliminado
+      try {
+        localStorage.setItem('coccole_active_user_role', activeUserRole);
+        const user = state.usuarios.find(u => u.id === activeUserRole);
+        const rol = (user && user.rol === 'admin') || activeUserRole === 'usr-admin' ? 'admin' : 'empleado';
+        const nombre = user?.nombre || (rol === 'admin' ? 'Administrador' : 'Empleado');
+        const sesion = { rol, nombre, id: activeUserRole };
+        localStorage.setItem('coccole_sesion', JSON.stringify(sesion));
+        (window as any).sesionActual = sesion;
+      } catch (e) {}
     } else {
-      // localStorage eliminado
+      try {
+        localStorage.removeItem('coccole_active_user_role');
+        localStorage.removeItem('coccole_sesion');
+        (window as any).sesionActual = { rol: null, nombre: null };
+      } catch (e) {}
     }
-  }, [activeUserRole]);
+  }, [activeUserRole, state.usuarios]);
 
-  // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario para evitar datos obsoletos en localStorage
+  // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario
   useEffect(() => {
     if (!activeUserRole || !isSupabaseConfigured()) return;
     
@@ -537,54 +552,24 @@ export default function App() {
     loadFreshTasks();
   }, [activeUserRole]);
 
-  // Sincronizar window.sesionActual y activar el Módulo Aditivo de Productividad y Tiempo Real
+  // Sincronizar cambios de sesión entre pestañas sin loops ni deslogueos automáticos
   useEffect(() => {
-    const handleCheckSession = () => {
-      try {
-        const sesionActual = (window as any).sesionActual;
-        if (sesionActual?.rol === 'admin' && activeUserRole !== 'usr-admin') {
-          setActiveUserRole('usr-admin');
-          return;
-        } else if (sesionActual?.rol === 'empleado') {
-          const empNombre = sesionActual.nombre;
-          const match = state.usuarios.find(u => 
-            u.id === empNombre ||
-            u.nombre?.toLowerCase() === empNombre?.toLowerCase() ||
-            u.pin === empNombre
-          ) || state.usuarios.find(u => u.rol === 'empleado');
-          const targetId = match?.id || empNombre || 'usr-shelsy';
-          if (activeUserRole !== targetId) {
-            setActiveUserRole(targetId);
-            return;
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'coccole_sesion' || e.key === 'coccole_active_user_role') {
+        try {
+          const savedRole = localStorage.getItem('coccole_active_user_role');
+          if (savedRole && savedRole !== activeUserRole) {
+            setActiveUserRole(savedRole);
+          } else if (!savedRole && !localStorage.getItem('coccole_sesion') && activeUserRole !== null) {
+            setActiveUserRole(null);
           }
-        }
-
-        const sesionStr = localStorage.getItem('coccole_sesion');
-        if (sesionStr) {
-          const parsed = JSON.parse(sesionStr);
-          if (parsed?.rol === 'admin' && activeUserRole !== 'usr-admin') {
-            setActiveUserRole('usr-admin');
-          } else if (parsed?.rol === 'empleado') {
-            const empNombre = parsed.nombre;
-            const match = state.usuarios.find(u => 
-              u.id === empNombre ||
-              u.nombre?.toLowerCase() === empNombre?.toLowerCase() ||
-              u.pin === empNombre
-            ) || state.usuarios.find(u => u.rol === 'empleado');
-            const targetId = match?.id || empNombre || 'usr-shelsy';
-            if (activeUserRole !== targetId) {
-              setActiveUserRole(targetId);
-            }
-          }
-        }
-      } catch (e) {}
+        } catch (err) {}
+      }
     };
 
-    window.addEventListener('storage', handleCheckSession);
-    const interval = setInterval(handleCheckSession, 1000);
+    window.addEventListener('storage', handleStorageChange);
     return () => {
-      window.removeEventListener('storage', handleCheckSession);
-      clearInterval(interval);
+      window.removeEventListener('storage', handleStorageChange);
     };
   }, [activeUserRole]);
 

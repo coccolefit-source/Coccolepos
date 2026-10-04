@@ -114,8 +114,14 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
           // Buscar perfil coincidente en Supabase o en usuarios locales
           const adminProfile = usuarios.find(u => u.email?.toLowerCase() === cleanEmail || u.id === authData.user.id) 
             || admins[0] 
-            || { id: authData.user.id };
+            || { id: authData.user.id, nombre: 'Administrador' };
           setIsLoggingIn(false);
+          const sesion = { rol: 'admin', nombre: adminProfile.nombre || 'Administrador', id: adminProfile.id };
+          (window as any).sesionActual = sesion;
+          try {
+            localStorage.setItem('coccole_sesion', JSON.stringify(sesion));
+            localStorage.setItem('coccole_active_user_role', adminProfile.id);
+          } catch (e) {}
           onLogin(adminProfile.id);
           return;
         }
@@ -129,13 +135,25 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
 
       if (adminMatch) {
         setIsLoggingIn(false);
+        const sesion = { rol: 'admin', nombre: adminMatch.nombre || 'Administrador', id: adminMatch.id };
+        (window as any).sesionActual = sesion;
+        try {
+          localStorage.setItem('coccole_sesion', JSON.stringify(sesion));
+          localStorage.setItem('coccole_active_user_role', adminMatch.id);
+        } catch (e) {}
         onLogin(adminMatch.id);
         return;
       }
 
       if ((cleanEmail === 'carlos@coccolefit.com' || cleanEmail === 'admin@coccolefit.com' || cleanEmail === 'mariana.silva@coccolefit.com') && cleanPass === 'admin123') {
-        const defaultAdmin = admins[0] || { id: 'usr-admin' };
+        const defaultAdmin = admins[0] || { id: 'usr-admin', nombre: 'Administrador' };
         setIsLoggingIn(false);
+        const sesion = { rol: 'admin', nombre: defaultAdmin.nombre || 'Administrador', id: defaultAdmin.id };
+        (window as any).sesionActual = sesion;
+        try {
+          localStorage.setItem('coccole_sesion', JSON.stringify(sesion));
+          localStorage.setItem('coccole_active_user_role', defaultAdmin.id);
+        } catch (e) {}
         onLogin(defaultAdmin.id);
         return;
       }
@@ -260,6 +278,12 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
         const empPin = String(emp?.pin ?? '').trim();
         if (emp && (empPin === pinLimpio || (!empPin && pinLimpio === '1234'))) {
           setIsLoggingIn(false);
+          const sesion = { rol: 'empleado', nombre: emp.nombre, id: emp.id };
+          (window as any).sesionActual = sesion;
+          try {
+            localStorage.setItem('coccole_sesion', JSON.stringify(sesion));
+            localStorage.setItem('coccole_active_user_role', emp.id);
+          } catch (e) {}
           onLogin(emp.id);
           return;
         } else {
@@ -273,6 +297,12 @@ export default function Login({ usuarios, onLogin, onCreateAdmin, onRequestPinRe
         });
         if (empMatch) {
           setIsLoggingIn(false);
+          const sesion = { rol: 'empleado', nombre: empMatch.nombre, id: empMatch.id };
+          (window as any).sesionActual = sesion;
+          try {
+            localStorage.setItem('coccole_sesion', JSON.stringify(sesion));
+            localStorage.setItem('coccole_active_user_role', empMatch.id);
+          } catch (e) {}
           onLogin(empMatch.id);
           return;
         } else {
