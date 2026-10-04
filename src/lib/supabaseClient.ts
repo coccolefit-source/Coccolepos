@@ -378,10 +378,58 @@ END $$;
 
 ALTER TABLE public.campaign_products REPLICA IDENTITY FULL;
 
+-- 10. Tabla: schedules (Horarios y Turnos Semanales)
+CREATE TABLE IF NOT EXISTS public.schedules (
+  id TEXT PRIMARY KEY,
+  employee_name TEXT,
+  usuario_id TEXT,
+  employee_id TEXT,
+  dia_semana TEXT,
+  day_of_week TEXT,
+  hora_entrada TEXT,
+  start_time TEXT,
+  hora_salida TEXT,
+  end_time TEXT,
+  nota TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS employee_name TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS usuario_id TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS employee_id TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS dia_semana TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS day_of_week TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS hora_entrada TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS start_time TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS hora_salida TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS end_time TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS nota TEXT;
+ALTER TABLE public.schedules ADD COLUMN IF NOT EXISTS note TEXT;
+
+ALTER TABLE public.schedules ENABLE ROW LEVEL SECURITY;
+
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'schedules' AND policyname = 'Permitir acceso publico total a schedules'
+  ) THEN
+    CREATE POLICY "Permitir acceso publico total a schedules" 
+    ON public.schedules FOR ALL TO public USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+ALTER TABLE public.schedules REPLICA IDENTITY FULL;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'campaign_products') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.campaign_products;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'schedules') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.schedules;
   END IF;
 END $$;
 `;
@@ -1353,7 +1401,8 @@ export function subscribeToRealtimeUpdates(
   onCampaignUpdate?: () => void,
   onAnnouncementsUpdate?: () => void,
   onCatalogUpdate?: () => void,
-  onTimeEntriesUpdate?: () => void
+  onTimeEntriesUpdate?: () => void,
+  onSchedulesUpdate?: () => void
 ) {
   const client = getSupabaseClient();
   if (!client) return () => {};
@@ -1386,6 +1435,12 @@ export function subscribeToRealtimeUpdates(
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, () => {
       if (onTimeEntriesUpdate) onTimeEntriesUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules' }, () => {
+      if (onSchedulesUpdate) onSchedulesUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'horarios' }, () => {
+      if (onSchedulesUpdate) onSchedulesUpdate();
     })
     .subscribe();
 
@@ -2624,45 +2679,60 @@ export async function insertScheduleInSupabase(dataTurno: {
   nota?: string;
 }): Promise<boolean> {
   const client = getSupabaseClient();
-  if (!client) return false;
-
   const idShift = dataTurno.id || ('shift_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
 
+  const payloadCompleto = {
+    id: idShift,
+    employee_name: dataTurno.employee_name || dataTurno.usuario_id,
+    usuario_id: dataTurno.usuario_id,
+    employee_id: dataTurno.usuario_id,
+    dia_semana: dataTurno.dia_semana,
+    day_of_week: dataTurno.dia_semana,
+    hora_entrada: dataTurno.hora_entrada,
+    start_time: dataTurno.hora_entrada,
+    hora_salida: dataTurno.hora_salida,
+    end_time: dataTurno.hora_salida,
+    nota: dataTurno.nota || '',
+    note: dataTurno.nota || '',
+    updated_at: new Date().toISOString()
+  };
+
+  if (!client) {
+    // Guardado local de respaldo
+    try {
+      const stored = localStorage.getItem('coccole_horarios');
+      const list: TurnoSemanal[] = stored ? JSON.parse(stored) : [];
+      const idx = list.findIndex(t => t.id === idShift);
+      const turnoObj: TurnoSemanal = {
+        id: idShift,
+        usuario_id: dataTurno.usuario_id,
+        dia_semana: dataTurno.dia_semana,
+        hora_entrada: dataTurno.hora_entrada,
+        hora_salida: dataTurno.hora_salida,
+        nota: dataTurno.nota
+      };
+      if (idx !== -1) list[idx] = turnoObj;
+      else list.push(turnoObj);
+      localStorage.setItem('coccole_horarios', JSON.stringify(list));
+    } catch (e) {}
+    return true;
+  }
+
   try {
-    const datosAEnviar = {
-      id: idShift,
-      employee_name: dataTurno.employee_name || dataTurno.usuario_id,
-      day_of_week: dataTurno.dia_semana,
-      start_time: dataTurno.hora_entrada,
-      end_time: dataTurno.hora_salida,
-      note: dataTurno.nota || ''
-    };
-
-    const { error: directError } = await client
+    const { error: upsertErr } = await client
       .from('schedules')
-      .insert([datosAEnviar]);
+      .upsert(payloadCompleto, { onConflict: 'id' });
 
-    if (!directError) {
+    if (!upsertErr) {
       console.log('¡Turno guardado con éxito en schedules!');
       return true;
     }
 
-    console.warn('Inserción directa en schedules falló, usando payload resiliente:', directError.message);
+    console.warn('Upsert directo en schedules falló, usando payload resiliente:', upsertErr.message);
 
-    const payloadResiliente = {
-      ...datosAEnviar,
-      usuario_id: dataTurno.usuario_id,
-      employee_id: dataTurno.usuario_id,
-      dia_semana: dataTurno.dia_semana,
-      hora_entrada: dataTurno.hora_entrada,
-      hora_salida: dataTurno.hora_salida,
-      nota: dataTurno.nota || '',
-      created_at: new Date().toISOString()
-    };
-
-    let { success } = await insertWithResilientColumns(client, 'schedules', payloadResiliente);
+    let { success } = await insertWithResilientColumns(client, 'schedules', payloadCompleto);
     if (!success) {
-      const { success: altSuccess } = await insertWithResilientColumns(client, 'horarios', payloadResiliente);
+      const { success: altSuccess } = await insertWithResilientColumns(client, 'horarios', payloadCompleto);
       return altSuccess;
     }
     return true;
@@ -2672,33 +2742,90 @@ export async function insertScheduleInSupabase(dataTurno: {
   }
 }
 
+export async function deleteScheduleFromSupabase(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  try {
+    const stored = localStorage.getItem('coccole_horarios');
+    if (stored) {
+      const list: TurnoSemanal[] = JSON.parse(stored);
+      localStorage.setItem('coccole_horarios', JSON.stringify(list.filter(t => t.id !== id)));
+    }
+  } catch (e) {}
+
+  if (!client) return true;
+
+  try {
+    const { error } = await client.from('schedules').delete().eq('id', id);
+    if (error) {
+      await client.from('horarios').delete().eq('id', id);
+    }
+    return true;
+  } catch (err) {
+    console.error('Error eliminando turno de Supabase:', err);
+    return false;
+  }
+}
+
+export async function saveSchedulesBulkToSupabase(turnos: TurnoSemanal[]): Promise<boolean> {
+  const client = getSupabaseClient();
+  try {
+    localStorage.setItem('coccole_horarios', JSON.stringify(turnos));
+  } catch (e) {}
+
+  if (!client || turnos.length === 0) return true;
+
+  try {
+    for (const t of turnos) {
+      await insertScheduleInSupabase(t);
+    }
+    return true;
+  } catch (err) {
+    console.error('Error guardando lote de horarios en Supabase:', err);
+    return false;
+  }
+}
+
 export async function fetchSchedulesFromSupabase(): Promise<TurnoSemanal[]> {
   const client = getSupabaseClient();
-  if (!client) return [];
+  let localBackup: TurnoSemanal[] = [];
+  try {
+    const raw = localStorage.getItem('coccole_horarios');
+    if (raw) localBackup = JSON.parse(raw);
+  } catch (e) {}
+
+  if (!client) return localBackup;
 
   try {
     let { data, error } = await client
       .from('schedules')
       .select('*');
 
-    if (error || !data) {
+    if (error || !data || data.length === 0) {
       const { data: altData } = await client.from('horarios').select('*');
       data = altData || [];
     }
 
-    if (!data || data.length === 0) return [];
+    if (!data || data.length === 0) {
+      return localBackup;
+    }
 
-    return data.map((d: any) => ({
+    const turnos = data.map((d: any) => ({
       id: String(d.id || `shift-${Math.random()}`),
       usuario_id: String(d.usuario_id || d.employee_id || d.employee_name || ''),
-      dia_semana: (d.day_of_week || d.dia_semana || 'Lunes') as TurnoSemanal['dia_semana'],
-      hora_entrada: String(d.start_time || d.hora_entrada || '08:00'),
-      hora_salida: String(d.end_time || d.hora_salida || '16:00'),
-      nota: d.note || d.nota || undefined
+      dia_semana: (d.dia_semana || d.day_of_week || 'Lunes') as TurnoSemanal['dia_semana'],
+      hora_entrada: String(d.hora_entrada || d.start_time || '08:00'),
+      hora_salida: String(d.hora_salida || d.end_time || '16:00'),
+      nota: d.nota || d.note || undefined
     }));
+
+    try {
+      localStorage.setItem('coccole_horarios', JSON.stringify(turnos));
+    } catch (e) {}
+
+    return turnos;
   } catch (err) {
     console.error('Error cargando horarios de Supabase:', err);
-    return [];
+    return localBackup;
   }
 }
 

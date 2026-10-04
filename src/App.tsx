@@ -49,6 +49,8 @@ import {
   updateCampaignProductInSupabase,
   deleteCampaignProductFromSupabase,
   insertScheduleInSupabase,
+  deleteScheduleFromSupabase,
+  saveSchedulesBulkToSupabase,
   fetchSchedulesFromSupabase,
   fetchSchedulesForEmployeeFromSupabase,
   guardarProgresoEnSupabase,
@@ -275,7 +277,7 @@ export default function App() {
 
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
-      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries] = await Promise.all([
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries, supaSchedules] = await Promise.all([
         fetchDailyTasksFromSupabase(getLocalDateString()),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
@@ -285,7 +287,8 @@ export default function App() {
         fetchCampaignProductsFromSupabase(),
         fetchAllAnnouncementsFromSupabase(),
         fetchCatalogFromSupabase(),
-        fetchTimeEntriesFromSupabase()
+        fetchTimeEntriesFromSupabase(),
+        fetchSchedulesFromSupabase()
       ]);
 
       setState(prev => {
@@ -317,6 +320,7 @@ export default function App() {
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
+          horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
             const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
               ? String(f.fecha).trim()
@@ -381,7 +385,7 @@ export default function App() {
 
     async function syncFromSupabase() {
       try {
-        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog] = await Promise.all([
+        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog, supaSchedules] = await Promise.all([
           fetchProfilesFromSupabase(),
           fetchSalesFromSupabase(),
           fetchCustomersFromSupabase(),
@@ -389,7 +393,8 @@ export default function App() {
           fetchTimeEntriesFromSupabase(),
           fetchCampaignProductsFromSupabase(),
           fetchAllAnnouncementsFromSupabase(),
-          fetchCatalogFromSupabase()
+          fetchCatalogFromSupabase(),
+          fetchSchedulesFromSupabase()
         ]);
 
         if (supaCatalog && supaCatalog.length > 0) {
@@ -407,15 +412,21 @@ export default function App() {
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
-          fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => ({
-            id: f.id,
-            usuario_id: f.empleado_id,
-            fecha: f.hora_entrada?.split(' ')[0] || getLocalDateString(),
-            hora_entrada: f.hora_entrada,
-            hora_salida: f.hora_salida,
-            puntual: true,
-            activo: !f.hora_salida
-          })) : prev.fichajes
+          horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
+          fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
+            const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
+              ? String(f.fecha).trim()
+              : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
+            return {
+              id: f.id,
+              usuario_id: f.usuario_id || f.empleado_id,
+              fecha: cleanFecha,
+              hora_entrada: f.hora_entrada,
+              hora_salida: f.hora_salida,
+              puntual: f.puntual !== undefined ? f.puntual : true,
+              activo: !f.hora_salida
+            };
+          }) : prev.fichajes
         }));
       } catch (e) {
         console.warn('Error sincronizando con Supabase:', e);
@@ -424,7 +435,7 @@ export default function App() {
 
     syncFromSupabase();
 
-    // Suscripción Realtime en tablas sales, inventory, campaign_products, announcements y products_catalog para actualización en vivo
+    // Suscripción Realtime en tablas sales, inventory, campaign_products, announcements, products_catalog, time_entries y schedules
     const unsubscribe = subscribeToRealtimeUpdates(
       async () => {
         const sales = await fetchSalesFromSupabase();
@@ -478,6 +489,15 @@ export default function App() {
                 activo: !f.hora_salida
               };
             })
+          }));
+        }
+      },
+      async () => {
+        const freshSchedules = await fetchSchedulesFromSupabase();
+        if (freshSchedules && freshSchedules.length > 0) {
+          setState(prev => ({
+            ...prev,
+            horarios: freshSchedules
           }));
         }
       }
@@ -1523,27 +1543,31 @@ export default function App() {
     pushNotification('Confirmación de lectura enviada correctamente.', 'success');
   };
 
-  const handleDuplicarHorarios = () => {
-    setState(prev => {
-      const baseTurnos = prev.horarios && prev.horarios.length > 0 ? prev.horarios : [
-        { id: 'sch-1', usuario_id: 'usr-1', dia_semana: 'Lunes' as const, hora_entrada: '08:00', hora_salida: '16:00', nota: 'Apertura' },
-        { id: 'sch-2', usuario_id: 'usr-1', dia_semana: 'Martes' as const, hora_entrada: '08:00', hora_salida: '16:00', nota: 'Apertura' },
-        { id: 'sch-3', usuario_id: 'usr-1', dia_semana: 'Miércoles' as const, hora_entrada: '08:00', hora_salida: '16:00', nota: 'Apertura' },
-        { id: 'sch-4', usuario_id: 'usr-2', dia_semana: 'Jueves' as const, hora_entrada: '12:00', hora_salida: '20:00', nota: 'Tarde' },
-        { id: 'sch-5', usuario_id: 'usr-2', dia_semana: 'Viernes' as const, hora_entrada: '12:00', hora_salida: '20:00', nota: 'Tarde' },
-        { id: 'sch-6', usuario_id: 'usr-3', dia_semana: 'Sábado' as const, hora_entrada: '09:00', hora_salida: '17:00', nota: 'Finde' },
-      ];
-      
-      const duplicated = baseTurnos.map(t => ({
-        ...t,
-        id: `sch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
-      }));
-      
-      return {
-        ...prev,
-        horarios: duplicated
-      };
-    });
+  const handleDuplicarHorarios = async () => {
+    const baseTurnos = state.horarios && state.horarios.length > 0 ? state.horarios : [
+      { id: 'sch-1', usuario_id: 'usr-1', dia_semana: 'Lunes' as const, hora_entrada: '08:00', hora_salida: '16:00', nota: 'Apertura' },
+      { id: 'sch-2', usuario_id: 'usr-1', dia_semana: 'Martes' as const, hora_entrada: '08:00', hora_salida: '16:00', nota: 'Apertura' },
+      { id: 'sch-3', usuario_id: 'usr-1', dia_semana: 'Miércoles' as const, hora_entrada: '08:00', hora_salida: '16:00', nota: 'Apertura' },
+      { id: 'sch-4', usuario_id: 'usr-2', dia_semana: 'Jueves' as const, hora_entrada: '12:00', hora_salida: '20:00', nota: 'Tarde' },
+      { id: 'sch-5', usuario_id: 'usr-2', dia_semana: 'Viernes' as const, hora_entrada: '12:00', hora_salida: '20:00', nota: 'Tarde' },
+      { id: 'sch-6', usuario_id: 'usr-3', dia_semana: 'Sábado' as const, hora_entrada: '09:00', hora_salida: '17:00', nota: 'Finde' },
+    ];
+    
+    const duplicated = baseTurnos.map(t => ({
+      ...t,
+      id: `shift_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+    }));
+    
+    setState(prev => ({
+      ...prev,
+      horarios: duplicated
+    }));
+
+    try {
+      localStorage.setItem('coccole_horarios', JSON.stringify(duplicated));
+      await saveSchedulesBulkToSupabase(duplicated);
+    } catch (e) {}
+
     pushNotification('Se duplicaron con éxito todos los horarios de la semana anterior para la semana activa actual.', 'success');
   };
 
@@ -1641,43 +1665,66 @@ export default function App() {
 
   // --- ACTIONS: GESTIÓN DE HORARIOS Y TURNOS ---
 
-  const handleSaveTurno = (turno: Omit<TurnoSemanal, 'id'> & { id?: string }) => {
+  const handleSaveTurno = async (turno: Omit<TurnoSemanal, 'id'> & { id?: string }) => {
     const emp = state.usuarios.find(u => u.id === turno.usuario_id);
     const empNombre = emp?.nombre || turno.usuario_id;
+    const shiftId = turno.id || (`shift_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
 
-    insertScheduleInSupabase({
-      id: turno.id || ('shift_' + Date.now()),
+    const turnoFinal: TurnoSemanal = {
+      id: shiftId,
       usuario_id: turno.usuario_id,
-      employee_name: empNombre,
       dia_semana: turno.dia_semana,
       hora_entrada: turno.hora_entrada,
       hora_salida: turno.hora_salida,
       nota: turno.nota
-    });
+    };
 
+    let updatedHorarios: TurnoSemanal[] = [];
     setState(prev => {
       const turnos = prev.horarios || [];
       if (turno.id) {
-        const updated = turnos.map(t => t.id === turno.id ? { ...t, ...turno } as TurnoSemanal : t);
+        updatedHorarios = turnos.map(t => t.id === turno.id ? turnoFinal : t);
         pushNotification(`Turno de ${empNombre} actualizado para el ${turno.dia_semana}.`, 'success');
-        return { ...prev, horarios: updated };
       } else {
-        const newTurno: TurnoSemanal = {
-          ...turno,
-          id: `t-${Date.now()}`
-        };
+        updatedHorarios = [...turnos, turnoFinal];
         pushNotification(`Turno programado para ${empNombre} el ${turno.dia_semana}.`, 'success');
-        return { ...prev, horarios: [...turnos, newTurno] };
       }
+      try {
+        localStorage.setItem('coccole_horarios', JSON.stringify(updatedHorarios));
+      } catch (e) {}
+      return { ...prev, horarios: updatedHorarios };
     });
+
+    try {
+      await insertScheduleInSupabase({
+        id: shiftId,
+        usuario_id: turno.usuario_id,
+        employee_name: empNombre,
+        dia_semana: turno.dia_semana,
+        hora_entrada: turno.hora_entrada,
+        hora_salida: turno.hora_salida,
+        nota: turno.nota
+      });
+    } catch (err) {
+      console.error('Error guardando horario en Supabase:', err);
+    }
   };
 
-  const handleDeleteTurno = (id: string) => {
+  const handleDeleteTurno = async (id: string) => {
     setState(prev => {
       const filtered = (prev.horarios || []).filter(t => t.id !== id);
+      try {
+        localStorage.setItem('coccole_horarios', JSON.stringify(filtered));
+      } catch (e) {}
       pushNotification('Turno removido del calendario de la semana.', 'alert');
       return { ...prev, horarios: filtered };
     });
+
+    try {
+      await deleteScheduleFromSupabase(id);
+    } catch (err) {
+      console.error('Error eliminando turno de Supabase:', err);
+    }
   };
 
   // --- ACTIONS: ANUNCIOS ---
