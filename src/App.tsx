@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, DEFAULT_PRODUCTOS_CATALOGO } from './types';
+import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, DEFAULT_PRODUCTOS_CATALOGO, Gasto } from './types';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import Leaderboard from './components/Leaderboard';
 import AdminDashboard from './components/AdminDashboard';
@@ -12,7 +12,7 @@ import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
-import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database } from 'lucide-react';
+import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database, DollarSign } from 'lucide-react';
 import { getGlobalMetrics, formatMoney } from './utils/metrics';
 import {
   isSupabaseConfigured,
@@ -68,7 +68,10 @@ import {
   upsertCatalogProductInSupabase,
   deleteCatalogProductFromSupabase,
   upsertCatalogProductsBatchInSupabase,
-  upsertInventoryBatchInSupabase
+  upsertInventoryBatchInSupabase,
+  fetchGastosFromSupabase,
+  insertGastoInSupabase,
+  deleteGastoFromSupabase
 } from './lib/supabaseClient';
 import {
   inicializarSesionProgresoEmpleadoSeguro,
@@ -77,7 +80,7 @@ import {
 } from './lib/realtimeProductivityModule';
 
 
-export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
+export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'supabase';
 
 export default function App() {
  
@@ -94,6 +97,15 @@ export default function App() {
     } catch (e) {
       console.error('Error loading coccole_productos_catalogo:', e);
     }
+    let initialGastos: Gasto[] = [];
+    try {
+      const savedGastos = localStorage.getItem('coccole_gastos');
+      if (savedGastos) {
+        const parsed = JSON.parse(savedGastos);
+        if (Array.isArray(parsed)) initialGastos = parsed;
+      }
+    } catch (e) {}
+
     return {
       usuarios: [],
       tareas: [],
@@ -105,6 +117,7 @@ export default function App() {
       feedbacks: [],
       inventario: [],
       horarios: [],
+      gastos: initialGastos,
       productosCatalogo: initialCatalogo,
       ventasRegistradas: [],
       alertasPanico: [],
@@ -278,7 +291,7 @@ export default function App() {
 
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
-      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries, supaSchedules] = await Promise.all([
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries, supaSchedules, supaGastos] = await Promise.all([
         fetchDailyTasksFromSupabase(getLocalDateString()),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
@@ -289,7 +302,8 @@ export default function App() {
         fetchAllAnnouncementsFromSupabase(),
         fetchCatalogFromSupabase(),
         fetchTimeEntriesFromSupabase(),
-        fetchSchedulesFromSupabase()
+        fetchSchedulesFromSupabase(),
+        fetchGastosFromSupabase()
       ]);
 
       setState(prev => {
@@ -322,6 +336,7 @@ export default function App() {
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
           horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
+          gastos: supaGastos !== null ? supaGastos : prev.gastos,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
             const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
               ? String(f.fecha).trim()
@@ -386,7 +401,7 @@ export default function App() {
 
     async function syncFromSupabase() {
       try {
-        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog, supaSchedules] = await Promise.all([
+        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog, supaSchedules, supaGastos] = await Promise.all([
           fetchProfilesFromSupabase(),
           fetchSalesFromSupabase(),
           fetchCustomersFromSupabase(),
@@ -395,7 +410,8 @@ export default function App() {
           fetchCampaignProductsFromSupabase(),
           fetchAllAnnouncementsFromSupabase(),
           fetchCatalogFromSupabase(),
-          fetchSchedulesFromSupabase()
+          fetchSchedulesFromSupabase(),
+          fetchGastosFromSupabase()
         ]);
 
         if (supaCatalog && supaCatalog.length > 0) {
@@ -414,6 +430,7 @@ export default function App() {
           anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
           horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
+          gastos: supaGastos !== null ? supaGastos : prev.gastos,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
             const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
               ? String(f.fecha).trim()
@@ -499,6 +516,15 @@ export default function App() {
           setState(prev => ({
             ...prev,
             horarios: freshSchedules
+          }));
+        }
+      },
+      async () => {
+        const freshGastos = await fetchGastosFromSupabase();
+        if (freshGastos !== undefined && freshGastos !== null) {
+          setState(prev => ({
+            ...prev,
+            gastos: freshGastos
           }));
         }
       }
@@ -1747,6 +1773,50 @@ export default function App() {
     }
   };
 
+  // --- ACTIONS: GASTOS ---
+  const handleSaveGasto = async (gastoData: Omit<Gasto, 'id'> & { id?: string }) => {
+    const id = gastoData.id || `gasto-${Date.now()}`;
+    const nuevoGasto: Gasto = {
+      id,
+      fecha: gastoData.fecha || getLocalDateString(),
+      descripcion: gastoData.descripcion,
+      categoria: gastoData.categoria,
+      monto: Number(gastoData.monto) || 0,
+      metodo_pago: gastoData.metodo_pago || 'Efectivo',
+      registrado_por: gastoData.registrado_por || 'Colaborador',
+      usuario_id: gastoData.usuario_id
+    };
+
+    setState(prev => {
+      const existingIdx = (prev.gastos || []).findIndex(g => g.id === id);
+      let updated: Gasto[];
+      if (existingIdx !== -1) {
+        updated = (prev.gastos || []).map(g => g.id === id ? nuevoGasto : g);
+      } else {
+        updated = [nuevoGasto, ...(prev.gastos || [])];
+      }
+      try {
+        localStorage.setItem('coccole_gastos', JSON.stringify(updated));
+      } catch (e) {}
+      return { ...prev, gastos: updated };
+    });
+
+    pushNotification(`Gasto registrado: ${nuevoGasto.descripcion} ($${nuevoGasto.monto})`, 'success');
+    await insertGastoInSupabase(nuevoGasto);
+  };
+
+  const handleDeleteGasto = async (id: string) => {
+    setState(prev => {
+      const filtered = (prev.gastos || []).filter(g => g.id !== id);
+      try {
+        localStorage.setItem('coccole_gastos', JSON.stringify(filtered));
+      } catch (e) {}
+      return { ...prev, gastos: filtered };
+    });
+    pushNotification('Gasto eliminado exitosamente.', 'info');
+    await deleteGastoFromSupabase(id);
+  };
+
   // --- ACTIONS: ANUNCIOS ---
 
   const handleAddAnuncio = async (newAn: Anuncio | Omit<Anuncio, 'id'>) => {
@@ -2502,6 +2572,9 @@ export default function App() {
               onDuplicarHorarios={handleDuplicarHorarios}
               onUpdateVenta={handleUpdateVenta}
               onAnularVenta={handleAnularVenta}
+              gastos={state.gastos || []}
+              onSaveGasto={handleSaveGasto}
+              onDeleteGasto={handleDeleteGasto}
             />
           </div>
         ) : (
@@ -2540,6 +2613,9 @@ export default function App() {
               onRegistrarVenta={handleRegistrarVenta}
               onRegistrarCuadreCaja={handleRegistrarCuadreCaja}
               onConfirmarLecturaAnuncio={handleConfirmarLecturaAnuncio}
+              gastos={state.gastos || []}
+              onSaveGasto={handleSaveGasto}
+              onDeleteGasto={handleDeleteGasto}
             />
 
           </div>

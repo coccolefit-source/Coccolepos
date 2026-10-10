@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule } from '../types';
+import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, Gasto } from '../types';
+import GastosModule from './GastosModule';
 
 import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell, Download, Search, Percent, Tag, ArrowRight, FileSpreadsheet, Bot, Send, Copy, Check, Lightbulb, HelpCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -15,7 +16,7 @@ import { RankingWeightsConfig } from './RankingWeightsConfig';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
 
-export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'ventas' | 'supabase';
+export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'supabase';
 
 export interface AdminDashboardProps {
   usuarios: Usuario[];
@@ -71,6 +72,9 @@ export interface AdminDashboardProps {
   activeTab?: AdminTab;
   setActiveTab?: (tab: AdminTab) => void;
   onCloseTab?: (tab: AdminTab) => void;
+  gastos: Gasto[];
+  onSaveGasto: (gasto: Omit<Gasto, 'id'> & { id?: string }) => void;
+  onDeleteGasto: (id: string) => void;
 }
 
 export default function AdminDashboard({
@@ -87,6 +91,9 @@ export default function AdminDashboard({
   feedbacks,
   inventario,
   horarios,
+  gastos,
+  onSaveGasto,
+  onDeleteGasto,
   productosCatalogo,
   ventasRegistradas,
   cuadresCaja,
@@ -2506,6 +2513,7 @@ export default function AdminDashboard({
               productos: 'Ventas Sugeridas',
               inventario: 'Inventario',
               horarios: 'Horarios',
+              gastos: 'Gastos',
               calidad: 'Fichajes',
               anuncios: 'Comunicados',
               empleados: 'Trabajadores',
@@ -4615,7 +4623,19 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 8. REPORTE Y REGISTRO DE VENTAS & FIDELIZACIÓN (ADMINISTRADOR) */}
+      {/* 8. CONTROL DE GASTOS */}
+      {isTabOpen('gastos') && (
+        <div className={activeTab === 'gastos' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
+          <GastosModule
+            gastos={gastos}
+            currentUser={{ id: 'admin', nombre: 'Administrador', rol: 'admin' } as any}
+            onSaveGasto={onSaveGasto}
+            onDeleteGasto={onDeleteGasto}
+          />
+        </div>
+      )}
+
+      {/* 9. REPORTE Y REGISTRO DE VENTAS & FIDELIZACIÓN (ADMINISTRADOR) */}
       {isTabOpen('ventas') && (
         <div className={activeTab === 'ventas' ? 'w-full space-y-6' : 'hidden'}>
           {(() => {

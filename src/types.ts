@@ -363,12 +363,24 @@ export const DEFAULT_RANKING_WEIGHTS: RankingWeights = {
   ventas_sugeridas_pct: 10,
 };
 
+export interface Gasto {
+  id: string;
+  fecha: string; // YYYY-MM-DD
+  descripcion: string;
+  categoria: 'Insumos' | 'Servicios' | 'Mantenimiento' | 'Personal' | 'Otros';
+  monto: number;
+  metodo_pago: string; // Efectivo, Tarjeta, Transferencia, etc.
+  registrado_por: string; // Nombre del usuario
+  usuario_id?: string;
+  created_at?: string;
+}
+
 export interface UpsellRule {
   id: string;
   producto_base_nombre: string;
   producto_sugerido_nombre: string;
-  descuento_promocional_pct?: number;
   activa: boolean;
+  descuento_promocional_pct?: number;
 }
 
 export const DEFAULT_UPSELL_RULES: UpsellRule[] = [
@@ -397,6 +409,7 @@ export const DEFAULT_UPSELL_RULES: UpsellRule[] = [
     activa: true
   }
 ];
+
 
 
 

@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio, Producto } from '../types';
+import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio, Producto, Gasto } from '../types';
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
@@ -430,6 +430,49 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'schedules') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.schedules;
+  END IF;
+END $$;
+
+-- 11. Tabla: gastos (Gastos del Día)
+CREATE TABLE IF NOT EXISTS public.gastos (
+  id TEXT PRIMARY KEY,
+  fecha DATE DEFAULT CURRENT_DATE,
+  descripcion TEXT NOT NULL,
+  categoria TEXT DEFAULT 'Insumos',
+  monto NUMERIC NOT NULL DEFAULT 0,
+  metodo_pago TEXT DEFAULT 'Efectivo',
+  registrado_por TEXT,
+  usuario_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS fecha DATE DEFAULT CURRENT_DATE;
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS descripcion TEXT;
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS categoria TEXT;
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS monto NUMERIC;
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS metodo_pago TEXT;
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS registrado_por TEXT;
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS usuario_id TEXT;
+
+ALTER TABLE public.gastos ENABLE ROW LEVEL SECURITY;
+
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'gastos' AND policyname = 'Permitir acceso publico total a gastos'
+  ) THEN
+    CREATE POLICY "Permitir acceso publico total a gastos" 
+    ON public.gastos FOR ALL TO public USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+ALTER TABLE public.gastos REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'gastos') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.gastos;
   END IF;
 END $$;
 `;
@@ -1402,7 +1445,8 @@ export function subscribeToRealtimeUpdates(
   onAnnouncementsUpdate?: () => void,
   onCatalogUpdate?: () => void,
   onTimeEntriesUpdate?: () => void,
-  onSchedulesUpdate?: () => void
+  onSchedulesUpdate?: () => void,
+  onGastosUpdate?: () => void
 ) {
   const client = getSupabaseClient();
   if (!client) return () => {};
@@ -1441,6 +1485,9 @@ export function subscribeToRealtimeUpdates(
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'horarios' }, () => {
       if (onSchedulesUpdate) onSchedulesUpdate();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'gastos' }, () => {
+      if (onGastosUpdate) onGastosUpdate();
     })
     .subscribe();
 
@@ -3000,6 +3047,119 @@ export async function fetchSchedulesForEmployeeFromSupabase(nombreOIdEmpleado: s
     return [];
   }
 }
+
+// ------------------------------------------------------------------
+// GASTOS (GASTOS DEL DÍA) QUERIES
+// ------------------------------------------------------------------
+export async function fetchGastosFromSupabase(): Promise<Gasto[]> {
+  const client = getSupabaseClient();
+  let localBackup: Gasto[] = [];
+  try {
+    const raw = localStorage.getItem('coccole_gastos');
+    if (raw) localBackup = JSON.parse(raw);
+  } catch (e) {}
+
+  if (!client) return localBackup;
+
+  try {
+    const { data, error } = await client
+      .from('gastos')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Error consultando gastos en Supabase:', error);
+      return localBackup;
+    }
+
+    if (!data) return [];
+
+    const gastos: Gasto[] = data.map((d: any) => ({
+      id: String(d.id || `gasto-${Math.random()}`),
+      fecha: String(d.fecha || getLocalDateString()),
+      descripcion: String(d.descripcion || ''),
+      categoria: (d.categoria || 'Insumos') as Gasto['categoria'],
+      monto: Number(d.monto || 0),
+      metodo_pago: String(d.metodo_pago || 'Efectivo'),
+      registrado_por: String(d.registrado_por || ''),
+      usuario_id: d.usuario_id || undefined,
+      created_at: d.created_at || undefined
+    }));
+
+    try {
+      localStorage.setItem('coccole_gastos', JSON.stringify(gastos));
+    } catch (e) {}
+
+    return gastos;
+  } catch (err) {
+    console.error('Error cargando gastos de Supabase:', err);
+    return localBackup;
+  }
+}
+
+export async function insertGastoInSupabase(gasto: Gasto): Promise<boolean> {
+  const client = getSupabaseClient();
+  try {
+    const stored = localStorage.getItem('coccole_gastos');
+    const list: Gasto[] = stored ? JSON.parse(stored) : [];
+    const idx = list.findIndex(g => g.id === gasto.id);
+    if (idx !== -1) list[idx] = gasto;
+    else list.unshift(gasto);
+    localStorage.setItem('coccole_gastos', JSON.stringify(list));
+  } catch (e) {}
+
+  if (!client) return true;
+
+  try {
+    const { error } = await client
+      .from('gastos')
+      .upsert({
+        id: gasto.id,
+        fecha: gasto.fecha,
+        descripcion: gasto.descripcion,
+        categoria: gasto.categoria,
+        monto: gasto.monto,
+        metodo_pago: gasto.metodo_pago,
+        registrado_por: gasto.registrado_por,
+        usuario_id: gasto.usuario_id || null
+      }, { onConflict: 'id' });
+
+    if (error) {
+      console.error('Error insertando gasto en Supabase:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Error en insertGastoInSupabase:', err);
+    return false;
+  }
+}
+
+export async function deleteGastoFromSupabase(id: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  try {
+    const stored = localStorage.getItem('coccole_gastos');
+    if (stored) {
+      const list: Gasto[] = JSON.parse(stored);
+      localStorage.setItem('coccole_gastos', JSON.stringify(list.filter(g => g.id !== id)));
+    }
+  } catch (e) {}
+
+  if (!client) return true;
+
+  try {
+    const { error } = await client.from('gastos').delete().eq('id', id);
+    if (error) {
+      console.error('Error eliminando gasto de Supabase:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Error en deleteGastoFromSupabase:', err);
+    return false;
+  }
+}
+
 
 // Envía el progreso directamente a Supabase (Cero localStorage)
 export const guardarProgresoEnSupabase = async (employeeName: string, completadas: number, totales: number, fecha?: string) => {

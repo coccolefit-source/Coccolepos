@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, UpsellRule, DEFAULT_UPSELL_RULES } from '../types';
+import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, UpsellRule, DEFAULT_UPSELL_RULES, Gasto } from '../types';
 
 import { calculateLeaderboard, getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
@@ -13,6 +13,7 @@ import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgre
 import { CheckCircle2, CheckCircle, Clock, AlertTriangle, AlertCircle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera, GripVertical, Bell, ClipboardList, Megaphone } from 'lucide-react';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
+import GastosModule from './GastosModule';
 
 interface EmployeeWorkspaceProps {
   empleado: Usuario;
@@ -34,6 +35,7 @@ interface EmployeeWorkspaceProps {
   rankingWeights?: RankingWeights;
   upsellRules?: UpsellRule[];
   notifications?: Array<{ id: string; text: string; time: string; type: 'success' | 'alert' | 'info' }>;
+  gastos: Gasto[];
   onResolveIncidencia?: (id: string) => void;
   onUpdateTareaEstado: (id: string, estado: 'Pendiente' | 'En proceso' | 'Completada', foto_url?: string, nota_evidencia?: string) => void;
   onUpdateTaskOrders: (orders: {id: string, orden: number}[]) => void;
@@ -45,6 +47,8 @@ interface EmployeeWorkspaceProps {
   onRegistrarVenta: (venta: Omit<Venta, 'id'>) => void;
   onRegistrarCuadreCaja: (cuadre: Omit<CuadreCaja, 'id'>) => void;
   onConfirmarLecturaAnuncio: (anuncioId: string, usuarioId: string) => void;
+  onSaveGasto: (gasto: Omit<Gasto, 'id'> & { id?: string }) => void;
+  onDeleteGasto: (id: string) => void;
 }
 
 const PHOTO_PRESETS = [
@@ -84,6 +88,9 @@ export default function EmployeeWorkspace({
   onRegistrarVenta,
   onRegistrarCuadreCaja,
   onConfirmarLecturaAnuncio,
+  gastos = [],
+  onSaveGasto,
+  onDeleteGasto,
 }: EmployeeWorkspaceProps) {
   const [localProductos, setLocalProductos] = useState<ProductoPromocion[]>(productos);
   const [localHorarios, setLocalHorarios] = useState<TurnoSemanal[]>(horarios);
@@ -443,7 +450,7 @@ export default function EmployeeWorkspace({
   const misPuntos = leaderboardData.find(item => item.usuario.id === empleado.id)?.puntosTotales || 0;
 
   // Modales
-  const [employeeTab, setEmployeeTab] = useState<'tareas' | 'inventario' | 'horarios' | 'ventas' | 'progreso'>('tareas');
+  const [employeeTab, setEmployeeTab] = useState<'tareas' | 'inventario' | 'horarios' | 'ventas' | 'progreso' | 'gastos'>('tareas');
   const [fechaProgresoHistorial, setFechaProgresoHistorial] = useState<string>(getLocalDateString());
   const [historialProgresoData, setHistorialProgresoData] = useState<{ completadas: number; totales: number; porcentaje: number; updated_at: string } | null>(null);
   const [isLoadingProgresoHistorial, setIsLoadingProgresoHistorial] = useState<boolean>(false);
@@ -1296,6 +1303,19 @@ export default function EmployeeWorkspace({
             >
               <TrendingUp className="w-4 h-4 shrink-0" />
               <span>Progreso</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setEmployeeTab('gastos')}
+              className={`flex-1 py-2.5 px-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 min-w-[120px] ${
+                employeeTab === 'gastos'
+                  ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                  : 'text-slate-600 hover:bg-[#EBF5FB]/40 hover:text-[#2C3E50]'
+              }`}
+            >
+              <DollarSign className="w-4 h-4 shrink-0" />
+              <span>Gastos</span>
             </button>
           </div>
 
@@ -2320,6 +2340,17 @@ export default function EmployeeWorkspace({
                   <p className="text-[11px] text-slate-400 mt-1">Completa tareas desde tu checklist para generar el registro diario.</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {employeeTab === 'gastos' && (
+            <div className="flex flex-col gap-6 w-full animate-in fade-in duration-200">
+              <GastosModule
+                gastos={gastos}
+                currentUser={empleado}
+                onSaveGasto={onSaveGasto}
+                onDeleteGasto={onDeleteGasto}
+              />
             </div>
           )}
         </div>
