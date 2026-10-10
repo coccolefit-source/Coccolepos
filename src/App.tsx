@@ -12,7 +12,7 @@ import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
-import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database, DollarSign } from 'lucide-react';
+import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database, DollarSign, Monitor, Tablet } from 'lucide-react';
 import { getGlobalMetrics, formatMoney } from './utils/metrics';
 import {
   isSupabaseConfigured,
@@ -81,8 +81,26 @@ import {
 
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'supabase';
+export type DeviceView = 'pc' | 'tablet' | 'mobile';
 
 export default function App() {
+  // Selector de vista de dispositivo (PC, Tablet o Celular)
+  const [deviceView, setDeviceView] = useState<DeviceView>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const savedView = localStorage.getItem('coccole_device_view');
+        if (savedView === 'tablet' || savedView === 'mobile' || savedView === 'pc') return savedView;
+      }
+    } catch (e) {}
+    return 'pc';
+  });
+
+  const handleSetDeviceView = (view: DeviceView) => {
+    setDeviceView(view);
+    try {
+      localStorage.setItem('coccole_device_view', view);
+    } catch (e) {}
+  };
  
   const [state, setState] = useState(() => {
     let initialCatalogo: Producto[] = DEFAULT_PRODUCTOS_CATALOGO;
@@ -716,16 +734,91 @@ export default function App() {
     return newAdminId;
   };
 
-  // Si no hay usuario activo, mostramos el login
+  // Si no hay usuario activo, mostramos el login con soporte de vista de dispositivo
   if (!activeUserRole) {
     return (
-      <Login
-        usuarios={state.usuarios}
-        onLogin={setActiveUserRole}
-        onCreateAdmin={handleCreateAdmin}
-        onRequestPinResetNotification={handleRequestPinResetNotification}
-        onUpdateUserPin={handleUpdateUserPin}
-      />
+      <div className={`min-h-screen ${deviceView !== 'pc' ? 'bg-slate-300/80 p-2 sm:p-4 flex flex-col items-center justify-start transition-all duration-300' : 'bg-slate-50'}`}>
+        {/* Selector de Dispositivo Global (PC / Tablet / Celular) */}
+        <header id="device-view-selector-bar-login" className="w-full bg-[#1E293B] text-white py-1.5 px-3 sm:px-6 flex items-center justify-between text-xs sticky top-0 z-50 shadow-md">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest hidden sm:inline">Modo Pantalla:</span>
+            <span className="text-xs font-bold text-[#4B9CD3] flex items-center gap-1.5">
+              {deviceView === 'pc' && <Monitor className="w-3.5 h-3.5" />}
+              {deviceView === 'tablet' && <Tablet className="w-3.5 h-3.5" />}
+              {deviceView === 'mobile' && <Smartphone className="w-3.5 h-3.5" />}
+              <span>
+                {deviceView === 'pc' ? 'PC (Escritorio)' : deviceView === 'tablet' ? 'Tablet (768px)' : 'Celular (420px)'}
+              </span>
+            </span>
+          </div>
+
+          <div className="flex items-center bg-slate-900/90 p-0.5 rounded-lg border border-slate-700 gap-0.5">
+            <button
+              type="button"
+              id="btn-view-pc-login"
+              onClick={() => handleSetDeviceView('pc')}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                deviceView === 'pc'
+                  ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Cambiar a vista PC (Escritorio)"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span>PC</span>
+            </button>
+
+            <button
+              type="button"
+              id="btn-view-tablet-login"
+              onClick={() => handleSetDeviceView('tablet')}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                deviceView === 'tablet'
+                  ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Cambiar a vista Tablet (768px)"
+            >
+              <Tablet className="w-3.5 h-3.5" />
+              <span>Tablet</span>
+            </button>
+
+            <button
+              type="button"
+              id="btn-view-mobile-login"
+              onClick={() => handleSetDeviceView('mobile')}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                deviceView === 'mobile'
+                  ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Cambiar a vista Celular (Smartphone)"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Celular</span>
+            </button>
+          </div>
+        </header>
+
+        <div className={`mx-auto transition-all duration-300 ${
+          deviceView === 'pc' 
+            ? 'w-full' 
+            : deviceView === 'tablet' 
+              ? 'w-full max-w-[768px] my-4 rounded-2xl shadow-2xl overflow-hidden border-2 border-slate-400 bg-white' 
+              : 'w-full max-w-[420px] my-4 rounded-[32px] shadow-2xl overflow-hidden border-[6px] border-slate-800 bg-white relative'
+        }`}>
+          {deviceView === 'mobile' && (
+            <div className="w-24 h-3.5 bg-slate-800 rounded-full mx-auto my-2 shrink-0"></div>
+          )}
+          <Login
+            usuarios={state.usuarios}
+            onLogin={setActiveUserRole}
+            onCreateAdmin={handleCreateAdmin}
+            onRequestPinResetNotification={handleRequestPinResetNotification}
+            onUpdateUserPin={handleUpdateUserPin}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -2214,8 +2307,80 @@ export default function App() {
   };
 
   return (
-    <div className="w-full max-w-[1280px] mx-auto min-h-screen bg-slate-50 p-4 overflow-x-hidden text-[#2C3E50] flex flex-col antialiased font-sans">
-      <PushToastContainer toasts={activeToasts} onDismiss={handleDismissToast} />
+    <div className={`min-h-screen ${deviceView !== 'pc' ? 'bg-slate-300/80 p-2 sm:p-4 flex flex-col items-center justify-start transition-all duration-300' : 'bg-slate-50'}`}>
+      {/* Selector de Dispositivo Global (PC / Tablet / Celular) */}
+      <header id="device-view-selector-bar" className="w-full bg-[#1E293B] text-white py-1.5 px-3 sm:px-6 flex items-center justify-between text-xs sticky top-0 z-50 shadow-md">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest hidden sm:inline">Modo Pantalla:</span>
+          <span className="text-xs font-bold text-[#4B9CD3] flex items-center gap-1.5">
+            {deviceView === 'pc' && <Monitor className="w-3.5 h-3.5" />}
+            {deviceView === 'tablet' && <Tablet className="w-3.5 h-3.5" />}
+            {deviceView === 'mobile' && <Smartphone className="w-3.5 h-3.5" />}
+            <span>
+              {deviceView === 'pc' ? 'PC (Escritorio)' : deviceView === 'tablet' ? 'Tablet (768px)' : 'Celular (420px)'}
+            </span>
+          </span>
+        </div>
+
+        <div className="flex items-center bg-slate-900/90 p-0.5 rounded-lg border border-slate-700 gap-0.5">
+          <button
+            type="button"
+            id="btn-view-pc"
+            onClick={() => handleSetDeviceView('pc')}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+              deviceView === 'pc'
+                ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Cambiar a vista PC (Escritorio completo)"
+          >
+            <Monitor className="w-3.5 h-3.5" />
+            <span>PC</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-view-tablet"
+            onClick={() => handleSetDeviceView('tablet')}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+              deviceView === 'tablet'
+                ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Cambiar a vista Tablet (768px)"
+          >
+            <Tablet className="w-3.5 h-3.5" />
+            <span>Tablet</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-view-mobile"
+            onClick={() => handleSetDeviceView('mobile')}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+              deviceView === 'mobile'
+                ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Cambiar a vista Celular (Smartphone 420px)"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Celular</span>
+          </button>
+        </div>
+      </header>
+
+      <div className={`transition-all duration-300 ${
+        deviceView === 'pc' 
+          ? 'w-full max-w-[1280px] mx-auto min-h-screen bg-slate-50 p-4 overflow-x-hidden text-[#2C3E50] flex flex-col antialiased font-sans' 
+          : deviceView === 'tablet' 
+            ? 'w-full max-w-[768px] mx-auto min-h-screen bg-slate-50 p-3 sm:p-4 rounded-2xl shadow-2xl border-2 border-slate-400 overflow-x-hidden text-[#2C3E50] flex flex-col antialiased font-sans my-4' 
+            : 'w-full max-w-[420px] mx-auto min-h-screen bg-slate-50 p-2 sm:p-3 rounded-[32px] shadow-2xl border-[6px] border-slate-800 overflow-x-hidden text-[#2C3E50] flex flex-col antialiased font-sans my-4 relative'
+      }`}>
+        {deviceView === 'mobile' && (
+          <div className="w-24 h-3.5 bg-slate-800 rounded-full mx-auto mb-2 shrink-0"></div>
+        )}
+        <PushToastContainer toasts={activeToasts} onDismiss={handleDismissToast} />
       
       {/* HEADER SUPERIOR */}
       <header className="bg-white border-b border-[#E2E8F0] sticky top-0 z-30 shadow-xs w-full">
@@ -2274,8 +2439,44 @@ export default function App() {
             </div>
           </div>
 
-          {/* Derecha: Botón de reset y simulador */}
-          <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+          {/* Derecha: Selector de pantalla, alarma sonora y actualizar */}
+          <div className="flex items-center gap-2 self-end md:self-center shrink-0 flex-wrap">
+            {/* Selector de Dispositivo en Barra de Navegación */}
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-[#E2E8F0]" title="Cambiar tamaño de pantalla">
+              <button
+                type="button"
+                onClick={() => handleSetDeviceView('pc')}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
+                  deviceView === 'pc' ? 'bg-[#4B9CD3] text-white shadow-2xs font-black' : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+                title="Vista PC"
+              >
+                <Monitor className="w-3 h-3" />
+                <span className="hidden sm:inline">PC</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetDeviceView('tablet')}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
+                  deviceView === 'tablet' ? 'bg-[#4B9CD3] text-white shadow-2xs font-black' : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+                title="Vista Tablet"
+              >
+                <Tablet className="w-3 h-3" />
+                <span className="hidden sm:inline">Tablet</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetDeviceView('mobile')}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
+                  deviceView === 'mobile' ? 'bg-[#4B9CD3] text-white shadow-2xs font-black' : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+                title="Vista Celular"
+              >
+                <Smartphone className="w-3 h-3" />
+                <span className="hidden sm:inline">Celular</span>
+              </button>
+            </div>
             {/* Alarma sonora toggle button */}
             <button
               onClick={() => {
@@ -2645,6 +2846,7 @@ export default function App() {
         <p className="text-[10px] text-slate-400 mt-1">Diseñado con propósitos administrativos, control operativo, gamificación e integraciones de calidad.</p>
       </footer>
 
+      </div>
     </div>
   );
 }

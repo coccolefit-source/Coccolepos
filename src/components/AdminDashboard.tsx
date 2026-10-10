@@ -4628,6 +4628,7 @@ export default function AdminDashboard({
         <div className={activeTab === 'gastos' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
           <GastosModule
             gastos={gastos}
+            ventasRegistradas={ventasRegistradas}
             currentUser={usuarios.find(u => u.rol === 'admin') || usuarios[0] || ({ id: 'admin', nombre: 'Administrador', rol: 'admin' } as any)}
             onSaveGasto={onSaveGasto}
             onDeleteGasto={onDeleteGasto}

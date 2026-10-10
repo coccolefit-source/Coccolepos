@@ -14,8 +14,8 @@ export default defineConfig(() => {
     },
     server: {
       // In middlewareMode, do not set port/strictPort since Express handles port 3000.
-      // If DISABLE_HMR is true, disable HMR entirely to prevent client connection loops.
-      hmr: disableHmr ? false : { overlay: false },
+      // Disable HMR WebSocket in iframe preview to prevent connection error loops.
+      hmr: false,
       watch: disableHmr ? null : {},
     },
   };

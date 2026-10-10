@@ -1984,17 +1984,6 @@ export default function EmployeeWorkspace({
               {/* MÓDULO DE HISTORIAL TRANSACCIONAL DEL TURNO */}
               <div className="mt-8 pt-6 border-t border-dashed border-[#E2E8F0]">
                 <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-xs">
-                  <div className="flex items-center justify-between mb-4 pb-3 border-b border-[#F1F5F9]">
-                    <div>
-                      <h4 className="text-xs font-black text-[#2C3E50] uppercase tracking-wider">
-                        Historial Transaccional del Turno
-                      </h4>
-                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                        Registro en tiempo real de ventas procesadas durante la jornada activa.
-                      </p>
-                    </div>
-                  </div>
-
                   {(() => {
                     const todayStr = getLocalDateString();
                     const shiftSales = (ventasRegistradas || []).filter(v => {
@@ -2008,6 +1997,7 @@ export default function EmployeeWorkspace({
                       const isToday = !v.fecha || v.fecha === todayStr;
                       return matchesEmp && isToday;
                     });
+                    const totalVentasTurno = shiftSales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
 
                     const sortedSales = [...shiftSales].sort((a, b) => {
                       const timeA = `${a.fecha || ''} ${a.hora || ''}`;
@@ -2015,115 +2005,130 @@ export default function EmployeeWorkspace({
                       return timeB.localeCompare(timeA);
                     });
 
-                    if (sortedSales.length === 0) {
-                      return (
-                        <div className="py-8 text-center bg-[#F8FAFC] rounded-lg border border-dashed border-[#CBD5E1]">
-                          <p className="text-xs font-medium text-slate-400 italic">
-                            No hay ventas registradas en este turno aún.
-                          </p>
-                        </div>
-                      );
-                    }
-
                     return (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                              <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                                Hora
-                              </th>
-                              <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                                Cliente
-                              </th>
-                              <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                                Productos Registrados
-                              </th>
-                              <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                                Medio de Pago
-                              </th>
-                              <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500 text-right">
-                                Monto Total
-                              </th>
-                              <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500 text-center">
-                                Estado
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[#F1F5F9]">
-                            {sortedSales.map((v) => {
-                              const isAnulada = v.estado === 'Anulada';
-                              
-                              let payLabel = 'Efectivo';
-                              let payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                              if (isTarjeta(v.metodo_pago)) {
-                                payLabel = 'Tarjeta';
-                                payStyle = 'bg-blue-50 text-blue-700 border-blue-200';
-                              } else if (isTransferencia(v.metodo_pago)) {
-                                payLabel = 'Transferencia';
-                                payStyle = 'bg-purple-50 text-purple-700 border-purple-200';
-                              } else if (isRappi(v.metodo_pago)) {
-                                payLabel = 'Rappi';
-                                payStyle = 'bg-amber-50 text-amber-700 border-amber-200';
-                              } else if (isEfectivo(v.metodo_pago)) {
-                                payLabel = 'Efectivo';
-                                payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                              } else if (v.metodo_pago) {
-                                payLabel = v.metodo_pago;
-                              }
+                      <div className="space-y-4">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-2">
+                          <div>
+                            <h4 className="text-xs font-black text-[#2C3E50] uppercase tracking-wider">
+                              Historial Transaccional del Turno
+                            </h4>
+                            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                              Registro en tiempo real de ventas procesadas durante la jornada activa.
+                            </p>
+                          </div>
+                          <div className="text-left sm:text-right bg-[#EBF5FB]/80 border border-[#AED6F1] px-3.5 py-1.5 rounded-lg shadow-2xs">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Total Ventas del Día</span>
+                            <span className="text-sm font-black text-[#4B9CD3]">{formatMoney(totalVentasTurno)}</span>
+                          </div>
+                        </div>
 
-                              return (
-                                <tr key={v.id} className="hover:bg-[#F8FAFC]/60 transition-colors">
-                                  <td className="py-3 px-3 text-xs font-bold text-[#2C3E50] whitespace-nowrap">
-                                    {v.hora || '12:00'}
-                                  </td>
-                                  <td className="py-3 px-3 text-xs">
-                                    <div className="font-bold text-[#2C3E50]">
-                                      {v.cliente_nombre || 'Cliente General'}
-                                    </div>
-                                    {v.cliente_telefono && (
-                                      <div className="text-[10px] text-slate-400 font-medium">
-                                        {v.cliente_telefono}
-                                      </div>
-                                    )}
-                                  </td>
-                                  <td className="py-3 px-3 text-xs">
-                                    {v.productos_vendidos && v.productos_vendidos.length > 0 ? (
-                                      <div className="space-y-0.5 max-w-xs">
-                                        {v.productos_vendidos.map((prod, pIdx) => (
-                                          <div key={pIdx} className="text-xs text-[#2C3E50]">
-                                            <span className="font-extrabold text-[#4B9CD3]">{prod.cantidad}x</span> {prod.nombre}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-slate-400 italic text-[11px]">Sin productos</span>
-                                    )}
-                                  </td>
-                                  <td className="py-3 px-3 text-xs whitespace-nowrap">
-                                    <span className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${payStyle}`}>
-                                      {payLabel}
-                                    </span>
-                                  </td>
-                                  <td className="py-3 px-3 text-xs font-black text-[#2C3E50] text-right whitespace-nowrap">
-                                    {formatMoney(v.total)}
-                                  </td>
-                                  <td className="py-3 px-3 text-xs text-center whitespace-nowrap">
-                                    {isAnulada ? (
-                                      <span className="inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md bg-red-50 text-red-700 border border-red-200">
-                                        Anulada por Admin
-                                      </span>
-                                    ) : (
-                                      <span className="inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                        Registrada
-                                      </span>
-                                    )}
-                                  </td>
+                        {sortedSales.length === 0 ? (
+                          <div className="py-8 text-center bg-[#F8FAFC] rounded-lg border border-dashed border-[#CBD5E1]">
+                            <p className="text-xs font-medium text-slate-400 italic">
+                              No hay ventas registradas en este turno aún.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                                  <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                    Hora
+                                  </th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                    Cliente
+                                  </th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                    Productos Registrados
+                                  </th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                    Medio de Pago
+                                  </th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500 text-right">
+                                    Monto Total
+                                  </th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500 text-center">
+                                    Estado
+                                  </th>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                              </thead>
+                              <tbody className="divide-y divide-[#F1F5F9]">
+                                {sortedSales.map((v) => {
+                                  const isAnulada = v.estado === 'Anulada';
+                                  
+                                  let payLabel = 'Efectivo';
+                                  let payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                  if (isTarjeta(v.metodo_pago)) {
+                                    payLabel = 'Tarjeta';
+                                    payStyle = 'bg-blue-50 text-blue-700 border-blue-200';
+                                  } else if (isTransferencia(v.metodo_pago)) {
+                                    payLabel = 'Transferencia';
+                                    payStyle = 'bg-purple-50 text-purple-700 border-purple-200';
+                                  } else if (isRappi(v.metodo_pago)) {
+                                    payLabel = 'Rappi';
+                                    payStyle = 'bg-amber-50 text-amber-700 border-amber-200';
+                                  } else if (isEfectivo(v.metodo_pago)) {
+                                    payLabel = 'Efectivo';
+                                    payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                  } else if (v.metodo_pago) {
+                                    payLabel = v.metodo_pago;
+                                  }
+
+                                  return (
+                                    <tr key={v.id} className="hover:bg-[#F8FAFC]/60 transition-colors">
+                                      <td className="py-3 px-3 text-xs font-bold text-[#2C3E50] whitespace-nowrap">
+                                        {v.hora || '12:00'}
+                                      </td>
+                                      <td className="py-3 px-3 text-xs">
+                                        <div className="font-bold text-[#2C3E50]">
+                                          {v.cliente_nombre || 'Cliente General'}
+                                        </div>
+                                        {v.cliente_telefono && (
+                                          <div className="text-[10px] text-slate-400 font-medium">
+                                            {v.cliente_telefono}
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="py-3 px-3 text-xs">
+                                        {v.productos_vendidos && v.productos_vendidos.length > 0 ? (
+                                          <div className="space-y-0.5 max-w-xs">
+                                            {v.productos_vendidos.map((prod, pIdx) => (
+                                              <div key={pIdx} className="text-xs text-[#2C3E50]">
+                                                <span className="font-extrabold text-[#4B9CD3]">{prod.cantidad}x</span> {prod.nombre}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <span className="text-slate-400 italic text-[11px]">Sin productos</span>
+                                        )}
+                                      </td>
+                                      <td className="py-3 px-3 text-xs whitespace-nowrap">
+                                        <span className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${payStyle}`}>
+                                          {payLabel}
+                                        </span>
+                                      </td>
+                                      <td className="py-3 px-3 text-xs font-black text-[#2C3E50] text-right whitespace-nowrap">
+                                        {formatMoney(v.total)}
+                                      </td>
+                                      <td className="py-3 px-3 text-xs text-center whitespace-nowrap">
+                                        {isAnulada ? (
+                                          <span className="inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md bg-red-50 text-red-700 border border-red-200">
+                                            Anulada por Admin
+                                          </span>
+                                        ) : (
+                                          <span className="inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                            Registrada
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -2347,6 +2352,7 @@ export default function EmployeeWorkspace({
             <div className="flex flex-col gap-6 w-full animate-in fade-in duration-200">
               <GastosModule
                 gastos={gastos}
+                ventasRegistradas={ventasRegistradas}
                 currentUser={empleado}
                 onSaveGasto={onSaveGasto}
                 onDeleteGasto={onDeleteGasto}
