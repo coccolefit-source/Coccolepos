@@ -2373,6 +2373,22 @@ export default function App() {
                 </button>
 
                 <button
+                  id="admin-tab-gastos"
+                  onClick={() => {
+                    handleSelectTab('gastos');
+                    pushNotification('Abriendo control de gastos del día.', 'info');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    activeTab === 'gastos'
+                      ? 'bg-[#4B9CD3] text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
+                  }`}
+                >
+                  <DollarSign className="w-3.5 h-3.5" />
+                  <span>Gastos</span>
+                </button>
+
+                <button
                   id="admin-tab-calidad"
                   onClick={() => {
                     handleSelectTab('calidad');
