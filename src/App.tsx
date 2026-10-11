@@ -337,7 +337,7 @@ export default function App() {
     try {
       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
       const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries, supaSchedules, supaGastos] = await Promise.all([
-        fetchDailyTasksFromSupabase(getLocalDateString()),
+        fetchDailyTasksFromSupabase(),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
         fetchProfilesFromSupabase(),
@@ -446,7 +446,8 @@ export default function App() {
 
     async function syncFromSupabase() {
       try {
-        const [supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog, supaSchedules, supaGastos] = await Promise.all([
+        const [supaTasks, supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog, supaSchedules, supaGastos] = await Promise.all([
+          fetchDailyTasksFromSupabase(),
           fetchProfilesFromSupabase(),
           fetchSalesFromSupabase(),
           fetchCustomersFromSupabase(),
@@ -467,6 +468,7 @@ export default function App() {
 
         setState(prev => ({
           ...prev,
+          tareas: supaTasks && supaTasks.length > 0 ? supaTasks : prev.tareas,
           usuarios: supaProfiles && supaProfiles.length > 0 ? supaProfiles : prev.usuarios,
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
           clientes: supaCustomers && supaCustomers.length > 0 ? supaCustomers : prev.clientes,

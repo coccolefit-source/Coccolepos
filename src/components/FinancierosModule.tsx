@@ -55,10 +55,55 @@ export default function FinancierosModule({
   const [deckData, setDeckData] = useState<any | null>(null);
   const [isDeckModalOpen, setIsDeckModalOpen] = useState(false);
 
+  const [isChatModalOpen, setIsChatModalOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([
+    { role: 'assistant', content: 'Hola. Soy tu asistente de Gemini experto en Coccole Fit. Pregúntame cualquier detalle sobre los datos financieros, ventas, productos sin rotación, productos con menos rotación o rendimiento de colaboradores bajo el filtro actual.' }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const handleSendChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isChatLoading) return;
+    const userMsg = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    setIsChatLoading(true);
+
+    try {
+      const resp = await fetch('/api/financial-filter-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: userMsg,
+          context: {
+            startDate,
+            endDate,
+            totalVentas: filteredData.totalVentas,
+            utilidadNeta: filteredData.utilidadNeta,
+            totalOPEX: filteredData.totalOPEX,
+            margenNetoPct: filteredData.margenNetoPct,
+            transaccionesCount: filteredData.validSales.length
+          }
+        })
+      });
+      const data = await resp.json();
+      setChatMessages(prev => [...prev, { role: 'assistant', content: data.answer || 'Sin respuesta.' }]);
+    } catch (err: any) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Error al consultar con Gemini.' }]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   const handleGenerateFinancialDeck = async () => {
     setIsGeneratingDeck(true);
     try {
       const productSalesMap: Record<string, { nombre: string; cantidad: number; totalVendido: number; utilidad: number }> = {};
+      DEFAULT_PRODUCTOS_CATALOGO.forEach(p => {
+        productSalesMap[p.nombre] = { nombre: p.nombre, cantidad: 0, totalVendido: 0, utilidad: 0 };
+      });
+
       const vendorSalesMap: Record<string, { totalVendido: number; transacciones: number; productos: Record<string, number> }> = {};
       const hourSalesMap: Record<string, number> = {};
       const daySalesMap: Record<string, number> = {};
@@ -101,6 +146,18 @@ export default function FinancierosModule({
           });
         }
       });
+
+      const allProdVals = Object.values(productSalesMap);
+      const productosNoRotaron = allProdVals.filter(p => p.cantidad === 0).map(p => p.nombre);
+      const productosMenosRotaron = allProdVals
+        .filter(p => p.cantidad > 0)
+        .sort((a, b) => a.cantidad - b.cantidad)
+        .slice(0, 5)
+        .map(p => ({
+          producto: p.nombre,
+          unidades: `${p.cantidad} un.`,
+          totalVendido: formatMoney(p.totalVendido)
+        }));
 
       const topProductsVentasArr = Object.values(productSalesMap)
         .sort((a, b) => b.cantidad - a.cantidad)
@@ -167,6 +224,8 @@ export default function FinancierosModule({
           gastosCount: filteredData.validGastos.length,
           topProductsVentasArr,
           topProductsUtilidadArr,
+          productosNoRotaron,
+          productosMenosRotaron,
           topVendor,
           worstVendorObj,
           peakHourStr,
@@ -236,6 +295,14 @@ export default function FinancierosModule({
       if (!v.fecha) return false;
       if (startDate && v.fecha < startDate) return false;
       if (endDate && v.fecha > endDate) return false;
+      // Horario de operación: de 10:00 AM a 9:00 PM (21:00) hora Bogotá. Cerrados a las 00:00 o fuera de rango.
+      if (v.hora) {
+        const [hStr] = v.hora.split(':');
+        const h = parseInt(hStr, 10);
+        if (!isNaN(h)) {
+          if (h < 10 || h > 21) return false;
+        }
+      }
       return true;
     });
 
@@ -489,6 +556,13 @@ export default function FinancierosModule({
                   <Sparkles className="w-4 h-4" /> Generar Deck Financiero (Gemini)
                 </>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsChatModalOpen(true)}
+              className="px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer bg-gradient-to-r from-sky-600 to-indigo-600 text-white hover:from-sky-700 hover:to-indigo-700 shadow-md flex items-center gap-1.5"
+            >
+              <Sparkles className="w-4 h-4" /> Preguntar al Chat de Gemini (Filtro Actual)
             </button>
           </div>
         </div>
@@ -1204,6 +1278,44 @@ export default function FinancierosModule({
                 </div>
               </div>
 
+              {/* Productos que No Rotaron y que Menos Rotaron */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-rose-600 flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4" /> Productos que No Rotaron (0 Ventas)
+                  </h4>
+                  <div className="space-y-2">
+                    {Array.isArray(deckData.productosNoRotaron) && deckData.productosNoRotaron.length > 0 ? (
+                      deckData.productosNoRotaron.map((prod: string, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between p-2.5 bg-rose-50/50 rounded-xl border border-rose-100 text-xs">
+                          <span className="font-bold text-slate-800">{idx + 1}. {prod}</span>
+                          <span className="text-rose-600 font-black">0 unidades</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-500 italic">Todos los productos del catálogo tuvieron rotación en el período.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-amber-600 flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4" /> Productos que Menos Rotaron
+                  </h4>
+                  <div className="space-y-2">
+                    {Array.isArray(deckData.productosMenosRotaron) && deckData.productosMenosRotaron.map((p: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between p-2.5 bg-amber-50/50 rounded-xl border border-amber-100 text-xs">
+                        <span className="font-bold text-slate-800">{idx + 1}. {p.producto}</span>
+                        <div className="text-right">
+                          <span className="text-amber-700 font-black block">{p.totalVendido}</span>
+                          <span className="text-[10px] text-slate-500 font-medium">{p.unidades}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               {/* 4 & 6. Vendedora Estrella & Trabajador con Menos Ventas */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
@@ -1327,6 +1439,71 @@ export default function FinancierosModule({
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Chat Gemini sobre el Filtro */}
+      {isChatModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-sky-900 to-indigo-900 text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/10 rounded-xl text-sky-300">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black tracking-wide">Chat Inteligente Gemini (Filtro Activo)</h3>
+                  <p className="text-[11px] text-slate-300">Consulta sobre ventas, productos (rotación, cero rotación), gastos y horarios (10am-9pm)</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsChatModalOpen(false)}
+                className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-xs font-bold"
+              >
+                Cerrar ✕
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4 flex-1 bg-slate-50/50 max-h-[50vh]">
+              {chatMessages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] p-3.5 rounded-2xl text-xs font-medium leading-relaxed ${
+                    msg.role === 'user'
+                      ? 'bg-[#4B9CD3] text-white rounded-br-xs'
+                      : 'bg-white text-slate-800 border border-slate-200 shadow-xs rounded-bl-xs'
+                  }`}>
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+                </div>
+              ))}
+              {isChatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white text-slate-600 border border-slate-200 p-3 rounded-2xl text-xs flex items-center gap-2">
+                    <div className="w-3.5 h-3.5 border-2 border-[#4B9CD3] border-t-transparent rounded-full animate-spin" />
+                    Gemini está analizando los datos del filtro...
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleSendChat} className="p-4 bg-white border-t border-slate-200 flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Ej. ¿Qué productos no rotaron en este periodo y cuáles fueron las ventas de 10am a 9pm?"
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-[#4B9CD3]"
+              />
+              <button
+                type="submit"
+                disabled={isChatLoading || !chatInput.trim()}
+                className="px-5 py-2.5 bg-[#4B9CD3] text-white rounded-xl text-xs font-bold hover:bg-[#3a85b8] transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
+              >
+                Enviar
+              </button>
+            </form>
           </div>
         </div>
       )}
