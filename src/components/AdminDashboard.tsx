@@ -96,6 +96,7 @@ import { getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
+import { BusinessPerformanceChart } from './BusinessPerformanceChart';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'tendencia' | 'financieros' | 'supabase';
 
@@ -3587,6 +3588,10 @@ export default function AdminDashboard({
                 renderMode="progress"
               />
             </div>
+            {/* Gráfico de rendimiento comercial diario vs objetivo mensual */}
+            <div id="row-business-performance-chart" className="w-full">
+              <BusinessPerformanceChart ventas={ventasRegistradas} />
+            </div>
 
             {/* Tabla de Posiciones y Ranking */}
             <div id="row-leaderboard-admin" className="w-full">
@@ -6853,7 +6858,7 @@ export default function AdminDashboard({
                       Asistente Gemini AI — {geminiModalWorker.nombre}
                     </h3>
                     <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 border border-blue-400/30 px-2 py-0.5 rounded-full">
-                      gemini-3.8-flash
+                      gemini-2.5-flash
                     </span>
                   </div>
                   <p className="text-[11px] text-blue-200/80 mt-0.5">
@@ -7092,7 +7097,7 @@ export default function AdminDashboard({
               </form>
 
               <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-                <span>Presiona Enter para enviar. Gemini utiliza el modelo oficial gemini-3.8-flash del servidor.</span>
+                <span>Presiona Enter para enviar. Gemini utiliza el modelo oficial gemini-2.5-flash del servidor.</span>
                 <span className="font-semibold text-slate-500">
                   {geminiChatMessages.length} {geminiChatMessages.length === 1 ? 'mensaje' : 'mensajes'} en sesión
                 </span>

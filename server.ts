@@ -143,7 +143,7 @@ Productos de Baja Rotación: ${worker.productosBajos ? worker.productosBajos.joi
 Asegúrate de llenar cada sección del JSON con datos analíticos realistas inspirados en las métricas provistas. Recuerda: CERO EMOJIS, CERO ÍCONOS DECORATIVOS.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-2.5-flash',
         contents: prompt,
         config: {
           systemInstruction,
@@ -353,7 +353,7 @@ Asegúrate de responder estrictamente con el JSON solicitado, calculando o extra
       let parsedData: any = null;
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-2.5-flash',
           contents: prompt,
           config: {
             systemInstruction,
@@ -368,7 +368,7 @@ Asegúrate de responder estrictamente con el JSON solicitado, calculando o extra
       } catch (firstErr: any) {
         try {
           const fallbackResp = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
+            model: 'gemini-2.5-flash',
             contents: prompt,
             config: {
               systemInstruction,
@@ -516,7 +516,7 @@ REGLAS ESENCIALES DE RESPUESTA:
       let answer = '';
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-2.5-flash',
           contents,
           config: {
             systemInstruction,
@@ -527,7 +527,7 @@ REGLAS ESENCIALES DE RESPUESTA:
       } catch (geminiErr: any) {
         try {
           const fallbackResp = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
+            model: 'gemini-2.5-flash',
             contents,
             config: {
               systemInstruction,
@@ -589,7 +589,7 @@ ${question}
 Responde de forma concisa, precisa y analítica en español.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-2.5-flash',
         contents: prompt,
         config: { systemInstruction }
       });
