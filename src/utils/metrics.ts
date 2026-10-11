@@ -103,14 +103,27 @@ export const calculateLeaderboard = (
 
   // Pre-calcular métricas absolutas por empleado
   const rawEmployeeMetrics = empleados.map((usr) => {
-    // 1. Tareas de este usuario (soporta ID o Nombre)
-    const tareasUsuario = tareas.filter(
-      (t) =>
-        (t.asignado_a === usr.id ||
-          t.asignado_a === usr.nombre ||
-          !t.asignado_a) &&
-        isInPeriod(t.fecha)
-    );
+    // 1. Tareas de este usuario (soporta ID, Nombre exacto/case-insensitive, asignación general o unassigned)
+    const tareasUsuario = (tareas || []).filter((t) => {
+      if (!isInPeriod(t.fecha)) return false;
+
+      const matchDirecto = t.asignado_a === usr.id ||
+        t.asignado_a === usr.nombre ||
+        (Boolean(t.asignado_a) && Boolean(usr.nombre) && t.asignado_a.toLowerCase() === usr.nombre.toLowerCase()) ||
+        t.asignado_a === 'ALL' ||
+        t.asignado_a === 'staff';
+      if (matchDirecto) return true;
+
+      const hayAsignadasAEseEmpleado = (tareas || []).some((x) =>
+        isInPeriod(x.fecha) && (
+          x.asignado_a === usr.id ||
+          x.asignado_a === usr.nombre ||
+          (Boolean(x.asignado_a) && Boolean(usr.nombre) && x.asignado_a.toLowerCase() === usr.nombre.toLowerCase())
+        )
+      );
+      return !t.asignado_a && !hayAsignadasAEseEmpleado;
+    });
+
     const completadas = tareasUsuario.filter((t) => t.estado === 'Completada');
     const tareasPct =
       tareasUsuario.length > 0
