@@ -5,6 +5,8 @@
 
 export type AreaType = string;
 
+export type DeviceView = 'mobile' | 'tablet' | 'pc';
+
 export type TaskStatus = 'Pendiente' | 'En proceso' | 'Completada';
 
 export interface Tarea {
