@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { Gasto, Usuario, Venta } from '../types';
-import { DollarSign, Plus, Trash2, Calendar, Tag, CreditCard, User, FileText, CheckCircle2, Filter, X, ShoppingCart, Wallet } from 'lucide-react';
+import { DollarSign, Plus, Trash2, Calendar, Filter, X, ShoppingCart, Wallet } from 'lucide-react';
 import { formatMoney } from '../utils/metrics';
 import { getLocalDateString } from '../lib/supabaseClient';
 

@@ -7,7 +7,6 @@ import {
   validatePinInSupabase, 
   upsertProfileInSupabase,
   updatePinInSupabase,
-  actualizarPinEnSupabase,
   SUPABASE_SQL_SCHEMA,
   saveSupabaseCredentials,
   getSupabaseCredentials,

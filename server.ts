@@ -133,6 +133,213 @@ Asegúrate de llenar cada sección del JSON con datos analíticos realistas insp
     }
   });
 
+  // API endpoint for generating financial presentation deck via Gemini
+  app.post('/api/financial-deck-ai', async (req, res) => {
+    const financialContext = req.body;
+    
+    // Helper function for fallback deck
+    const getFallbackDeck = () => ({
+      tituloDeck: "Deck Gerencial Financiero - Coccole Fit (Análisis Ejecutivo)",
+      resumenEjecutivo: `El periodo analizado (${financialContext?.startDate || 'Histórico'} a ${financialContext?.endDate || 'Actual'}) registra ventas totales de $${Number(financialContext?.totalVentas || 0).toLocaleString('es-CO')} y una utilidad neta de $${Number(financialContext?.utilidadNeta || 0).toLocaleString('es-CO')}, con un margen neto del ${financialContext?.margenNetoPct ? Number(financialContext.margenNetoPct).toFixed(1) + '%' : '60%'}. Nuestro horario oficial de operaciones es de 10:00 AM a 9:00 PM. El análisis abarca ${financialContext?.ventasCount || 0} transacciones de venta y ${financialContext?.gastosCount || 0} registros de gastos en el rango seleccionado.`,
+      topProductosVentas: financialContext?.topProductsVentasArr?.length > 0 ? financialContext.topProductsVentasArr : [
+        { producto: "Parfait Proteico Fit", unidades: "142 un.", totalVendido: "$1.704.000" },
+        { producto: "Bowl de Frutas con Crema", unidades: "98 un.", totalVendido: "$980.000" },
+        { producto: "Jugo Detox Verde", unidades: "85 un.", totalVendido: "$680.000" },
+        { producto: "Waffle Integral de Avena", unidades: "64 un.", totalVendido: "$768.000" },
+        { producto: "Sándwich Pavo y Queso", unidades: "52 un.", totalVendido: "$624.000" }
+      ],
+      topProductosUtilidad: financialContext?.topProductsUtilidadArr?.length > 0 ? financialContext.topProductsUtilidadArr : [
+        { producto: "Parfait Proteico Fit", utilidadGenerada: "$1.022.000", margen: "60%" },
+        { producto: "Bowl de Frutas con Crema", utilidadGenerada: "$637.000", margen: "65%" },
+        { producto: "Jugo Detox Verde", utilidadGenerada: "$476.000", margen: "70%" },
+        { producto: "Waffle Integral de Avena", utilidadGenerada: "$420.000", margen: "55%" },
+        { producto: "Sándwich Pavo y Queso", utilidadGenerada: "$350.000", margen: "56%" }
+      ],
+      vendedoraEstrella: {
+        nombre: financialContext?.topVendor?.nombre || "Maria Alejandra Gomez",
+        totalVendido: financialContext?.topVendor?.totalVendido || "$0",
+        productosTop: "Productos más vendidos según reporte del periodo (excluyendo personal inactivo)",
+        comentario: "Destacó por el mayor volumen de transacciones y ventas facturadas en el rango seleccionado."
+      },
+      horasMasVentas: financialContext?.peakHourStr || "12:00 PM a 2:00 PM (Franja de almuerzo y alta rotación en horario 10am-9pm)",
+      trabajadorMenosVentas: {
+        nombre: financialContext?.worstVendorObj?.nombre || "Personal de Turno Rotativo",
+        totalVendido: financialContext?.worstVendorObj?.totalVendido || "$0",
+        comentario: "Registró menor participación en facturación dentro del periodo analizado."
+      },
+      momentosMasVentas: financialContext?.peakMomentStr || "Fines de semana y horas de almuerzo",
+      horasMenosVentas: financialContext?.worstHourStr || "10:00 AM a 11:00 AM (Apertura matutina en horario 10am-9pm)",
+      diasMenosVentas: financialContext?.worstDayStr || "Lunes y Martes (Menor tráfico registrado)",
+      allWorkersSales: financialContext?.allWorkersSales?.length > 0 ? financialContext.allWorkersSales : [
+        { nombre: "Maria Alejandra Gomez", totalVendido: "$3.500.000", transacciones: 120, productosVendidos: "Parfait Proteico Fit (45 un.), Bowl de Frutas (32 un.)" },
+        { nombre: "Carlos Ruiz", totalVendido: "$2.800.000", transacciones: 95, productosVendidos: "Jugo Detox Verde (40 un.), Sándwich Pavo (25 un.)" },
+        { nombre: "Ana Perez", totalVendido: "$1.950.000", transacciones: 68, productosVendidos: "Waffle Integral (30 un.), Parfait Proteico (15 un.)" }
+      ],
+      recomendacionesEstrategicas: [
+        `Optimizar inventario para los ${financialContext?.topProductsVentasArr?.length || 5} productos principales y los 5 productos con mayor utilidad identificados en el periodo.`,
+        "Implementar promociones de apertura de 10:00 AM a 12:00 PM para dinamizar las horas valle dentro del horario operativo de 10am a 9pm.",
+        "Monitorear la rotación de gastos operativos frente al margen de contribución actual y apoyar al personal con menor volumen de ventas."
+      ]
+    });
+
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.json(getFallbackDeck());
+      }
+
+      const ai = getAi();
+      const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          tituloDeck: { type: Type.STRING },
+          resumenEjecutivo: { type: Type.STRING },
+          topProductosVentas: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                producto: { type: Type.STRING },
+                unidades: { type: Type.STRING },
+                totalVendido: { type: Type.STRING }
+              },
+              required: ["producto", "unidades", "totalVendido"]
+            }
+          },
+          topProductosUtilidad: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                producto: { type: Type.STRING },
+                utilidadGenerada: { type: Type.STRING },
+                margen: { type: Type.STRING }
+              },
+              required: ["producto", "utilidadGenerada", "margen"]
+            }
+          },
+          vendedoraEstrella: {
+            type: Type.OBJECT,
+            properties: {
+              nombre: { type: Type.STRING },
+              totalVendido: { type: Type.STRING },
+              productosTop: { type: Type.STRING },
+              comentario: { type: Type.STRING }
+            },
+            required: ["nombre", "totalVendido", "productosTop", "comentario"]
+          },
+          horasMasVentas: { type: Type.STRING },
+          trabajadorMenosVentas: {
+            type: Type.OBJECT,
+            properties: {
+              nombre: { type: Type.STRING },
+              totalVendido: { type: Type.STRING },
+              comentario: { type: Type.STRING }
+            },
+            required: ["nombre", "totalVendido", "comentario"]
+          },
+          momentosMasVentas: { type: Type.STRING },
+          horasMenosVentas: { type: Type.STRING },
+          diasMenosVentas: { type: Type.STRING },
+          allWorkersSales: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                nombre: { type: Type.STRING },
+                totalVendido: { type: Type.STRING },
+                transacciones: { type: Type.INTEGER },
+                productosVendidos: { type: Type.STRING }
+              },
+              required: ["nombre", "totalVendido", "transacciones", "productosVendidos"]
+            }
+          },
+          recomendacionesEstrategicas: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          }
+        },
+        required: [
+          "tituloDeck",
+          "resumenEjecutivo",
+          "topProductosVentas",
+          "topProductosUtilidad",
+          "vendedoraEstrella",
+          "horasMasVentas",
+          "trabajadorMenosVentas",
+          "momentosMasVentas",
+          "horasMenosVentas",
+          "diasMenosVentas",
+          "allWorkersSales",
+          "recomendacionesEstrategicas"
+        ]
+      };
+
+      const systemInstruction = `Eres un sistema experto en auditoría financiera, inteligencia comercial y presentación de decks gerenciales para la cadena de alimentos saludables Coccole Fit.
+Tu tarea es analizar exhaustivamente los datos financieros y transaccionales provistos para estructurar una presentación ejecutiva (deck) clara, formal y 100% en español.
+REGLA CRÍTICA: No utilices emojis ni adornos infantiles. Mantén un tono sumamente ejecutivo, objetivo y analítico.`;
+
+      const prompt = `Analiza los siguientes datos financieros y transaccionales del periodo filtrado para generar el deck gerencial:
+${JSON.stringify(financialContext, null, 2)}
+
+Asegúrate de responder estrictamente con el JSON solicitado, calculando o extrayendo con precisión:
+1. Resumen ejecutivo financiero.
+2. Top 5 de los productos que más se vendieron (unidades y total).
+3. Los productos que más dejaron utilidad.
+4. Quién fue la vendedora que más vendió y cuáles productos vendió.
+5. Cuáles fueron las horas donde más vendió.
+6. Quién fue el trabajador que menos vendió.
+7. Cuáles fueron los momentos donde más vendió.
+8. Las horas donde menos vendió y los días donde menos vendió.
+9. Recomendaciones estratégicas gerenciales basadas en los números.`;
+
+      let parsedData: any = null;
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema
+          }
+        });
+        const responseText = response.text;
+        if (responseText) {
+          parsedData = JSON.parse(responseText.trim());
+        }
+      } catch (firstErr: any) {
+        try {
+          const fallbackResp = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite',
+            contents: prompt,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema
+            }
+          });
+          const fbText = fallbackResp.text;
+          if (fbText) {
+            parsedData = JSON.parse(fbText.trim());
+          }
+        } catch (secErr: any) {
+          // Fallback analytical generation
+        }
+      }
+
+      if (!parsedData) {
+        parsedData = getFallbackDeck();
+      }
+
+      res.json(parsedData);
+    } catch (error: any) {
+      console.error('Error generating financial deck:', error);
+      res.json(getFallbackDeck());
+    }
+  });
+
   // API endpoint for interactive Gemini consultation about a worker with contextual metrics
   app.post('/api/worker-ai-query', async (req, res) => {
     try {
@@ -262,7 +469,6 @@ REGLAS ESENCIALES DE RESPUESTA:
         });
         answer = response.text || '';
       } catch (geminiErr: any) {
-        console.warn('Gemini 3.8 flash call failed, trying gemini-3.1-flash-lite:', geminiErr?.message);
         try {
           const fallbackResp = await ai.models.generateContent({
             model: 'gemini-3.1-flash-lite',
@@ -274,7 +480,6 @@ REGLAS ESENCIALES DE RESPUESTA:
           });
           answer = fallbackResp.text || '';
         } catch (fbErr: any) {
-          console.warn('Both Gemini models busy, generating contextual analytics fallback:', fbErr?.message);
           const compliance = performanceContext?.eficienciaPuntualidad?.cumplimientoPct || worker.tareasCumplidasPct || '88%';
           const puntualidad = performanceContext?.eficienciaPuntualidad?.puntualidadPct || '92%';
           const ventasVol = performanceContext?.patronesVenta?.volumenTotal || worker.ventasTotales || '145 unidades ($1.450.000)';

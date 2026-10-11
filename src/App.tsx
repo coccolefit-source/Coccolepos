@@ -4,7 +4,32 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Usuario, Tarea, DeviceView, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, AlertaPanico, CuadreCaja, ToastNotification, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, DEFAULT_PRODUCTOS_CATALOGO, Gasto } from './types';
+import {
+  Usuario,
+  Tarea,
+  DeviceView,
+  ProductoPromocion,
+  RegistroVenta,
+  Fichaje,
+  Incidencia,
+  Anuncio,
+  Feedback,
+  InventarioItem,
+  TurnoSemanal,
+  Producto,
+  Venta,
+  AlertaPanico,
+  CuadreCaja,
+  ToastNotification,
+  RankingWeights,
+  DEFAULT_RANKING_WEIGHTS,
+  UpsellRule,
+  DEFAULT_UPSELL_RULES,
+  DEFAULT_PRODUCTOS_CATALOGO,
+  Gasto
+} from './types';
+
+// Componentes
 import AnalyticsPanel from './components/AnalyticsPanel';
 import Leaderboard from './components/Leaderboard';
 import AdminDashboard from './components/AdminDashboard';
@@ -12,9 +37,25 @@ import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
-import { Salad, User, RotateCcw, Sparkles, Trophy, TrendingUp, ClipboardList, Bell, Smartphone, ShieldCheck, HelpCircle, Boxes, Calendar, UserCheck, Megaphone, CheckCircle, Clock, AlertCircle, AlertTriangle, Database, DollarSign, Monitor, Tablet } from 'lucide-react';
+
+// Iconos Lucide
+import {
+  User,
+  RotateCcw,
+  Sparkles,
+  TrendingUp,
+  ClipboardList,
+  Boxes,
+  AlertTriangle,
+  DollarSign,
+  BarChart3,
+  Wallet
+} from 'lucide-react';
+
 import { getGlobalMetrics, formatMoney } from './utils/metrics';
 import { useDevice } from './hooks/useDevice';
+
+// Servicios de Supabase
 import {
   isSupabaseConfigured,
   fetchProfilesFromSupabase,
@@ -32,7 +73,6 @@ import {
   upsertInventoryInSupabase,
   deleteInventoryFromSupabase,
   upsertProfileInSupabase,
-  updatePinInSupabase,
   actualizarPinEnSupabase,
   insertTimeEntryInSupabase,
   subscribeToRealtimeUpdates,
@@ -41,12 +81,10 @@ import {
   fetchUpsellRulesFromSupabase,
   saveUpsellRulesToSupabase,
   fetchDailyTasksFromSupabase,
-  fetchPinResetRequestsFromSupabase,
   insertDailyTaskInSupabase,
   updateDailyTaskStatusInSupabase,
   deleteDailyTaskFromSupabase,
   fetchCampaignProductsFromSupabase,
-  clearOldCampaignProductsInSupabase,
   insertCampaignProductInSupabase,
   updateCampaignProductInSupabase,
   deleteCampaignProductFromSupabase,
@@ -54,14 +92,11 @@ import {
   deleteScheduleFromSupabase,
   saveSchedulesBulkToSupabase,
   fetchSchedulesFromSupabase,
-  fetchSchedulesForEmployeeFromSupabase,
   guardarProgresoEnSupabase,
-  getSupabaseClient,
   updateTaskOrdersInSupabase,
   getLocalDateString,
   deleteAllDailyTasksFromSupabase,
   fetchAllAnnouncementsFromSupabase,
-  fetchActiveAnnouncementsFromSupabase,
   insertAnnouncementInSupabase,
   updateAnnouncementInSupabase,
   deleteAnnouncementFromSupabase,
@@ -74,14 +109,15 @@ import {
   insertGastoInSupabase,
   deleteGastoFromSupabase
 } from './lib/supabaseClient';
+
+// Módulo de Productividad en Tiempo Real
 import {
   inicializarSesionProgresoEmpleadoSeguro,
-  renderizarSeccionProductividadAdminSeguro,
   activarSuscripcionTiempoRealSegura
 } from './lib/realtimeProductivityModule';
 
 
-export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'supabase';
+export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'tendencia' | 'financieros' | 'supabase';
 
 export default function App() {
   const detectedDevice = useDevice();
@@ -169,10 +205,14 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<AdminTab>('tareas');
 
   const handleSelectTab = (tab: AdminTab) => {
-    if (!openTabs.includes(tab)) {
-      setOpenTabs(prev => [...prev, tab]);
+    let targetTab = tab;
+    if (tab === 'calidad' || tab === 'horarios') targetTab = 'empleados';
+    if (tab === 'anuncios') targetTab = 'productos';
+    if (tab === 'supabase') targetTab = 'tareas';
+    if (!openTabs.includes(targetTab)) {
+      setOpenTabs(prev => [...prev.filter(t => t !== 'calidad' && t !== 'anuncios' && t !== 'horarios' && t !== 'supabase'), targetTab]);
     }
-    setActiveTab(tab);
+    setActiveTab(targetTab);
   };
 
   const handleCloseTab = (tabToClose: AdminTab) => {
@@ -598,9 +638,6 @@ export default function App() {
     }
   }, [state.alertasPanico, soundEnabled, activeUserRole]);
 
-  // Sincronizar cambios del estado general con localStorage
-  useEffect(() => {
-  }, [state]);
 
   // Sincronizar activeUserRole y coccole_sesion con localStorage de manera persistente
   useEffect(() => {
@@ -2336,10 +2373,10 @@ export default function App() {
                   id="admin-tab-productos"
                   onClick={() => {
                     handleSelectTab('productos');
-                    pushNotification('Revisando el módulo de ventas sugeridas.', 'info');
+                    pushNotification('Revisando el módulo de ventas sugeridas y comunicados.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'productos'
+                    activeTab === 'productos' || activeTab === 'anuncios'
                       ? 'bg-[#4B9CD3] text-white shadow-xs'
                       : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
                   }`}
@@ -2365,22 +2402,6 @@ export default function App() {
                 </button>
 
                 <button
-                  id="admin-tab-horarios"
-                  onClick={() => {
-                    handleSelectTab('horarios');
-                    pushNotification('Abriendo la agenda de horarios y turnos semanales.', 'info');
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'horarios'
-                      ? 'bg-[#4B9CD3] text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
-                  }`}
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Horarios</span>
-                </button>
-
-                <button
                   id="admin-tab-gastos"
                   onClick={() => {
                     handleSelectTab('gastos');
@@ -2397,45 +2418,13 @@ export default function App() {
                 </button>
 
                 <button
-                  id="admin-tab-calidad"
-                  onClick={() => {
-                    handleSelectTab('calidad');
-                    pushNotification('Consultando el log de control de fichajes.', 'info');
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'calidad'
-                      ? 'bg-[#4B9CD3] text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
-                  }`}
-                >
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>Fichajes</span>
-                </button>
-
-                <button
-                  id="admin-tab-anuncios"
-                  onClick={() => {
-                    handleSelectTab('anuncios');
-                    pushNotification('Entrando al pizarrón de anuncios y comunicados.', 'info');
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'anuncios'
-                      ? 'bg-[#4B9CD3] text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
-                  }`}
-                >
-                  <Megaphone className="w-3.5 h-3.5" />
-                  <span>Comunicados</span>
-                </button>
-
-                <button
                   id="admin-tab-empleados"
                   onClick={() => {
                     handleSelectTab('empleados');
-                    pushNotification('Visualizando nómina de trabajadores.', 'info');
+                    pushNotification('Visualizando nómina de trabajadores, horarios y fichajes.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'empleados'
+                    activeTab === 'empleados' || activeTab === 'horarios' || activeTab === 'calidad'
                       ? 'bg-[#4B9CD3] text-white shadow-xs'
                       : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
                   }`}
@@ -2461,19 +2450,35 @@ export default function App() {
                 </button>
 
                 <button
-                  id="admin-tab-supabase"
+                  id="admin-tab-tendencia"
                   onClick={() => {
-                    handleSelectTab('supabase');
-                    pushNotification('Abriendo módulo de auditoría y diagnóstico de Supabase DB.', 'info');
+                    handleSelectTab('tendencia');
+                    pushNotification('Abriendo panel de tendencia y reportes visuales.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'supabase'
+                    activeTab === 'tendencia'
                       ? 'bg-[#4B9CD3] text-white shadow-xs'
                       : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
                   }`}
                 >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>Auditoría DB</span>
+                  <BarChart3 className="w-3.5 h-3.5" />
+                  <span>Tendencia</span>
+                </button>
+
+                <button
+                  id="admin-tab-financieros"
+                  onClick={() => {
+                    handleSelectTab('financieros');
+                    pushNotification('Abriendo panel financiero y rentabilidad.', 'info');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    activeTab === 'financieros'
+                      ? 'bg-[#4B9CD3] text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
+                  }`}
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>Financieros</span>
                 </button>
               </nav>
             </div>

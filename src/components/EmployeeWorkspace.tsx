@@ -4,13 +4,73 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, UpsellRule, DEFAULT_UPSELL_RULES, Gasto } from '../types';
+import {
+  Usuario,
+  Tarea,
+  ProductoPromocion,
+  RegistroVenta,
+  Fichaje,
+  Incidencia,
+  Anuncio,
+  Feedback,
+  InventarioItem,
+  TurnoSemanal,
+  Producto,
+  Venta,
+  CuadreCaja,
+  Cliente,
+  isEfectivo,
+  isTarjeta,
+  isTransferencia,
+  isRappi,
+  RankingWeights,
+  UpsellRule,
+  DEFAULT_UPSELL_RULES,
+  Gasto
+} from '../types';
 
 import { calculateLeaderboard, getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import { compressImage } from '../utils/imageCompressor';
-import { getSupabaseClient, fetchSchedulesForEmployeeFromSupabase, guardarProgresoEnSupabase, mostrarProgresoEmpleadoActual, actualizarVistaProductividadEmpleado, renderizarSeccionProductividadEmpleado, inicializarSesionProgresoEmpleado, updateEmployeeAvatarInSupabase, fetchDailyTasksFromSupabase, fetchCampaignProductsFromSupabase, getLocalDateString, calcularHorasTurno, fetchActiveAnnouncementsFromSupabase, subscribeToAnnouncementsRealtime, formatFechaLegible } from '../lib/supabaseClient';
-import { CheckCircle2, CheckCircle, Clock, AlertTriangle, AlertCircle, ShieldCheck, Plus, ShoppingCart, Image as ImageIcon, Sparkles, Send, Award, MessageSquare, FileText, Boxes, Calendar, ChevronRight, TrendingUp, Trash2, History, PlusCircle, MinusCircle, DollarSign, Check, Camera, GripVertical, Bell, ClipboardList, Megaphone } from 'lucide-react';
+import {
+  getSupabaseClient,
+  fetchSchedulesForEmployeeFromSupabase,
+  guardarProgresoEnSupabase,
+  mostrarProgresoEmpleadoActual,
+  actualizarVistaProductividadEmpleado,
+  renderizarSeccionProductividadEmpleado,
+  inicializarSesionProgresoEmpleado,
+  updateEmployeeAvatarInSupabase,
+  fetchDailyTasksFromSupabase,
+  fetchCampaignProductsFromSupabase,
+  getLocalDateString,
+  calcularHorasTurno,
+  fetchActiveAnnouncementsFromSupabase,
+  subscribeToAnnouncementsRealtime,
+  formatFechaLegible
+} from '../lib/supabaseClient';
+
+import {
+  CheckCircle2,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  Plus,
+  ShoppingCart,
+  Sparkles,
+  Boxes,
+  Calendar,
+  TrendingUp,
+  Trash2,
+  PlusCircle,
+  MinusCircle,
+  DollarSign,
+  Check,
+  Camera,
+  GripVertical,
+  Megaphone,
+  ImageIcon
+} from 'lucide-react';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
 import GastosModule from './GastosModule';

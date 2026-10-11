@@ -4,19 +4,100 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Usuario, Tarea, ProductoPromocion, RegistroVenta, Fichaje, Incidencia, Anuncio, AreaType, TaskStatus, Feedback, InventarioItem, TurnoSemanal, Producto, Venta, CuadreCaja, AlertaPanico, Cliente, isEfectivo, isTarjeta, isTransferencia, isRappi, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, Gasto } from '../types';
+import {
+  Usuario,
+  Tarea,
+  ProductoPromocion,
+  RegistroVenta,
+  Fichaje,
+  Incidencia,
+  Anuncio,
+  AreaType,
+  TaskStatus,
+  Feedback,
+  InventarioItem,
+  TurnoSemanal,
+  Producto,
+  Venta,
+  CuadreCaja,
+  AlertaPanico,
+  Cliente,
+  isEfectivo,
+  isTarjeta,
+  isTransferencia,
+  isRappi,
+  RankingWeights,
+  DEFAULT_RANKING_WEIGHTS,
+  UpsellRule,
+  Gasto
+} from '../types';
 import GastosModule from './GastosModule';
+import FichajesAsistenciaModule from './FichajesAsistenciaModule';
+import TendenciaModule from './TendenciaModule';
+import FinancierosModule from './FinancierosModule';
 
-import { Plus, Trash2, Edit2, CheckCircle, Clock, AlertTriangle, AlertCircle, FileText, ClipboardList, Megaphone, CheckSquare, Sparkles, UserCheck, User, MessageSquare, Award, X, Boxes, Calendar, Phone, Mail, Link, Upload, Database, TrendingUp, DollarSign, BarChart3, Filter, CalendarRange, RefreshCw, ShieldCheck, Sliders, GripVertical, Bell, Download, Search, Percent, Tag, ArrowRight, FileSpreadsheet, Bot, Send, Copy, Check, Lightbulb, HelpCircle } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  Edit2,
+  CheckCircle,
+  Clock,
+  AlertTriangle,
+  AlertCircle,
+  FileText,
+  ClipboardList,
+  Megaphone,
+  CheckSquare,
+  Sparkles,
+  UserCheck,
+  User,
+  MessageSquare,
+  Award,
+  X,
+  Boxes,
+  Calendar,
+  Phone,
+  Mail,
+  Link,
+  Upload,
+  Database,
+  TrendingUp,
+  DollarSign,
+  BarChart3,
+  Filter,
+  RefreshCw,
+  GripVertical,
+  Download,
+  Search,
+  FileSpreadsheet,
+  Bot,
+  Send,
+  Copy,
+  Check,
+  Lightbulb
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { calcularTiempoTarea } from '../lib/taskUtils';
-import { auditSupabaseDatabase, DatabaseAuditSummary, TableAuditReport, SUPABASE_SQL_SCHEMA, isSupabaseConfigured, mostrarProductividadAdmin, cargarProgresoSupabase, fetchWorkerCompleteMetricsFromSupabase, getSupabaseClient, getLocalDateString, calcularHorasTurno, fetchDailyTasksFromSupabase, deleteAllDailyTasksFromSupabase, formatFechaLegible, insertAnnouncementInSupabase, updateAnnouncementInSupabase, deleteAnnouncementFromSupabase, formatFechaSemana, ProductoRendimientoItem, DiaVentaResumen } from '../lib/supabaseClient';
+import {
+  fetchWorkerCompleteMetricsFromSupabase,
+  getSupabaseClient,
+  getLocalDateString,
+  fetchDailyTasksFromSupabase,
+  deleteAllDailyTasksFromSupabase,
+  formatFechaLegible,
+  insertAnnouncementInSupabase,
+  updateAnnouncementInSupabase,
+  deleteAnnouncementFromSupabase,
+  formatFechaSemana,
+  ProductoRendimientoItem,
+  DiaVentaResumen
+} from '../lib/supabaseClient';
 import { getGlobalMetrics, formatMoney } from '../utils/metrics';
 import { RankingWeightsConfig } from './RankingWeightsConfig';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
 
-export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'supabase';
+export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'tendencia' | 'financieros' | 'supabase';
 
 export interface AdminDashboardProps {
   usuarios: Usuario[];
@@ -143,6 +224,20 @@ export default function AdminDashboard({
   const setActiveTab = propSetActiveTab || setLocalActiveTab;
 
   const [selectedPreviewPhoto, setSelectedPreviewPhoto] = useState<string | null>(null);
+  // Sub-pestaña dentro de Horarios y Asistencia ('turnos' | 'fichajes' | 'ambos')
+  const [horariosSubTab, setHorariosSubTab] = useState<'turnos' | 'fichajes' | 'ambos'>('turnos');
+  // Sub-pestaña dentro de Ventas Sugeridas ('ventas' | 'comunicados' | 'ambos')
+  const [productosSubTab, setProductosSubTab] = useState<'ventas' | 'comunicados' | 'ambos'>('ventas');
+  // Sub-pestaña dentro de Trabajadores ('personal' | 'turnos' | 'fichajes' | 'ambos')
+  const [empleadosSubTab, setEmpleadosSubTab] = useState<'personal' | 'turnos' | 'fichajes' | 'ambos'>('personal');
+
+  useEffect(() => {
+    if (activeTab === 'horarios') {
+      setEmpleadosSubTab('turnos');
+    } else if (activeTab === 'calidad') {
+      setEmpleadosSubTab('fichajes');
+    }
+  }, [activeTab]);
 
   // Estado para edición y eliminación de productos de campaña
   const [editingCampProd, setEditingCampProd] = useState<ProductoPromocion | null>(null);
@@ -706,8 +801,8 @@ export default function AdminDashboard({
     motivo: ''
   });
 
-  // Sub-pestaña de Ventas, Fidelización y Auditoría DB
-  const [ventasSubTab, setVentasSubTab] = useState<'reportes' | 'fidelizacion' | 'auditoria_db'>('reportes');
+  // Sub-pestaña de Ventas y Fidelización
+  const [ventasSubTab, setVentasSubTab] = useState<'reportes' | 'fidelizacion'>('reportes');
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
@@ -755,29 +850,6 @@ export default function AdminDashboard({
   };
   const [clienteSegmentoFilter, setClienteSegmentoFilter] = useState<'todos' | 'frecuentes' | 'inactivos' | 'nuevos'>('todos');
   const [clienteSearch, setClienteSearch] = useState('');
-
-  // Estados para Auditoría y Diagnóstico de Tablas Supabase
-  const [dbAuditReport, setDbAuditReport] = useState<DatabaseAuditSummary | null>(null);
-  const [isRunningAudit, setIsRunningAudit] = useState(false);
-  const [copiedSqlAdmin, setCopiedSqlAdmin] = useState(false);
-
-  const handleRunDatabaseHealthCheck = async () => {
-    setIsRunningAudit(true);
-    try {
-      const summary = await auditSupabaseDatabase();
-      setDbAuditReport(summary);
-    } catch (err) {
-      console.error('Error durante la auditoría de BD:', err);
-    } finally {
-      setIsRunningAudit(false);
-    }
-  };
-
-  useEffect(() => {
-    if (ventasSubTab === 'auditoria_db' && !dbAuditReport) {
-      handleRunDatabaseHealthCheck();
-    }
-  }, [ventasSubTab]);
 
   // --- NUEVOS ESTADOS PARA RENDIMIENTO DEL TRABAJADOR CON GEMINI Y SUPABASE ---
   const [selectedPerformanceWorker, setSelectedPerformanceWorker] = useState<Usuario | null>(null);
@@ -2495,7 +2567,15 @@ export default function AdminDashboard({
     );
   };
 
-  const isTabOpen = (t: AdminTab) => openTabs ? openTabs.includes(t) : activeTab === t;
+  const isTabOpen = (t: AdminTab) => {
+    if (t === 'calidad') return false; // Fichajes está unificado dentro de Trabajadores
+    if (t === 'anuncios') return false; // Comunicados está unificado dentro de Ventas Sugeridas
+    if (t === 'horarios') return false; // Horarios está unificado dentro de Trabajadores
+    if (t === 'supabase') return false; // Pestaña de Auditoría DB eliminada
+    if (t === 'empleados' && (activeTab === 'horarios' || activeTab === 'calidad' || (openTabs && (openTabs.includes('horarios') || openTabs.includes('calidad'))))) return true;
+    if (t === 'productos' && (activeTab === 'anuncios' || (openTabs && openTabs.includes('anuncios')))) return true;
+    return openTabs ? openTabs.includes(t) : activeTab === t;
+  };
 
   return (
     <div id="admin-dashboard" className="space-y-6 w-full">
@@ -2506,18 +2586,20 @@ export default function AdminDashboard({
           <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider px-2 border-r border-slate-200 mr-1">
             Pestañas Activas:
           </div>
-          {openTabs.map((t) => {
-            const isActive = activeTab === t;
+          {openTabs.filter(t => t !== 'calidad' && t !== 'anuncios' && t !== 'horarios' && t !== 'supabase').map((t) => {
+            const isActive = activeTab === t || (t === 'empleados' && (activeTab === 'horarios' || activeTab === 'calidad')) || (t === 'productos' && activeTab === 'anuncios');
             const labelMap: Record<AdminTab, string> = {
               tareas: 'Tareas Diarias',
               productos: 'Ventas Sugeridas',
               inventario: 'Inventario',
-              horarios: 'Horarios',
+              horarios: 'Trabajadores',
               gastos: 'Gastos',
-              calidad: 'Fichajes',
-              anuncios: 'Comunicados',
+              calidad: 'Trabajadores',
+              anuncios: 'Ventas Sugeridas',
               empleados: 'Trabajadores',
               ventas: 'POS y Reportes',
+              tendencia: 'Tendencia',
+              financieros: 'Financieros',
               supabase: 'Auditoría Supabase'
             };
             return (
@@ -2556,6 +2638,27 @@ export default function AdminDashboard({
 
       {/* CONTENIDO DE TABS */}
       <div className="w-full space-y-6">
+
+      {/* TENDENCIA / REPORTES VISUALES DE NEGOCIO */}
+      {isTabOpen('tendencia') && (
+        <div className={activeTab === 'tendencia' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
+          <TendenciaModule
+            ventasRegistradas={ventasRegistradas}
+            productosCatalogo={productosCatalogo}
+          />
+        </div>
+      )}
+
+      {/* FINANCIEROS Y RENTABILIDAD */}
+      {isTabOpen('financieros') && (
+        <div className={activeTab === 'financieros' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
+          <FinancierosModule
+            ventasRegistradas={ventasRegistradas}
+            gastos={gastos}
+            productosCatalogo={productosCatalogo}
+          />
+        </div>
+      )}
 
       {/* 1. GESTOR DE TAREAS */}
       {isTabOpen('tareas') && (
@@ -2985,15 +3088,83 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 2. GESTOR DE PRODUCTOS A PROMOCIONAR */}
+      {/* 2. GESTOR DE PRODUCTOS A PROMOCIONAR Y COMUNICADOS */}
       {isTabOpen('productos') && (
-        <div className={activeTab === 'productos' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
-          {/* Formulario de Producto */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
-              <Sparkles className="w-4 h-4 text-[#4B9CD3]" />
-              Impulsar Producto Fit
-            </h3>
+        <div className={(activeTab === 'productos' || activeTab === 'anuncios') ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
+          {/* Header y Selector de Sub-pestañas: Ventas Sugeridas y Comunicados */}
+          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#EBF5FB] text-[#4B9CD3] flex items-center justify-center font-bold text-lg shrink-0">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-[#2C3E50] tracking-tight flex items-center gap-2">
+                  <span>Ventas Sugeridas y Comunicados</span>
+                  <span className="text-[10px] bg-[#EBF5FB] text-[#4B9CD3] px-2 py-0.5 rounded-full font-bold">
+                    Supabase DB
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Impulso de productos en caja, metas de campaña y directrices operativas del equipo.
+                </p>
+              </div>
+            </div>
+
+            {/* Selector de Vistas: Ventas Sugeridas vs Comunicados */}
+            <div className="flex items-center bg-[#EBF5FB] p-1 rounded-xl border border-[#AED6F1]/60 gap-1 w-full sm:w-auto">
+              <button
+                type="button"
+                id="btn-subtab-ventas-sugeridas"
+                onClick={() => setProductosSubTab('ventas')}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  productosSubTab === 'ventas'
+                    ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                    : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Productos Sugeridos ({productos.length})</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-subtab-comunicados"
+                onClick={() => setProductosSubTab('comunicados')}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  productosSubTab === 'comunicados'
+                    ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                    : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+              >
+                <Megaphone className="w-3.5 h-3.5" />
+                <span>Comunicados del Día ({anuncios.length})</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-subtab-ambos-productos"
+                onClick={() => setProductosSubTab('ambos')}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  productosSubTab === 'ambos'
+                    ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                    : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+                title="Ver productos sugeridos y comunicados en una sola pantalla"
+              >
+                <span>Ver Todo</span>
+              </button>
+            </div>
+          </div>
+
+          {/* SECCIÓN 1: PRODUCTOS EN CAMPAÑA Y VENTAS SUGERIDAS */}
+          {(productosSubTab === 'ventas' || productosSubTab === 'ambos') && (
+            <div className="space-y-6 w-full animate-in fade-in duration-150">
+              {/* Formulario de Producto */}
+              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+                <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
+                  <Sparkles className="w-4 h-4 text-[#4B9CD3]" />
+                  Impulsar Producto Fit
+                </h3>
             
             <form onSubmit={handleProdSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
               <div className="md:col-span-2">
@@ -3108,427 +3279,205 @@ export default function AdminDashboard({
               </div>
             )}
           </div>
-        </div>
-      )}
+            </div>
+          )}
 
-      {/* 3. CONTROL DE CALIDAD Y INGRESO / ASISTENCIA */}
-      {isTabOpen('calidad') && (
-        <div className={activeTab === 'calidad' ? 'space-y-6 w-full' : 'hidden'}>
-          {/* Fichajes de hoy */}
-          <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5">
-              <UserCheck className="w-4.5 h-4.5 text-[#4B9CD3]" />
-              Asistencia y Fichaje del Turno (Hoy)
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {empleados.map(emp => {
-                const fichaje = fichajes.find(f => {
-                  const fId = f.usuario_id || (f as any).empleado_id;
-                  const fNom = ((f as any).empleado_nombre || (f as any).usuario_nombre || '').toLowerCase().trim();
-                  const empNom = emp.nombre.toLowerCase().trim();
-                  return ((fId && fId === emp.id) || (fNom && fNom === empNom)) && f.fecha === getLocalDateString();
-                });
-                return (
-                  <div key={emp.id} className="border border-[#E2E8F0] p-3.5 rounded-xl flex items-center gap-3 bg-[#FFFDF6]/40">
-                    <img
-                      src={emp.foto_avatar}
-                      alt={emp.nombre}
-                      className="w-10 h-10 rounded-full object-cover border border-[#E2E8F0]"
-                      referrerPolicy="no-referrer"
+          {/* SECCIÓN 2: TABLERO DE COMUNICADOS (MOVIDO DESDE COMUNICADOS) */}
+          {(productosSubTab === 'comunicados' || productosSubTab === 'ambos') && (
+            <div className="space-y-6 w-full animate-in fade-in duration-150">
+              {/* Formulario de Anuncio */}
+              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+                <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
+                  <Megaphone className="w-4 h-4 text-[#4B9CD3]" />
+                  Publicar Comunicado del Día
+                </h3>
+                
+                <form onSubmit={handleAnuncioSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                  <div className="md:col-span-4">
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Título del Comunicado</label>
+                    <input
+                      type="text"
+                      placeholder="Ej. ¡Hoy priorizamos parfaits!"
+                      value={anuncioTitulo}
+                      onChange={(e) => setAnuncioTitulo(e.target.value)}
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                      required
                     />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-[#2C3E50] text-xs truncate">{emp.nombre}</p>
-                      {fichaje ? (
-                        (() => {
-                          const dur = calcularHorasTurno(fichaje.hora_entrada, fichaje.hora_salida);
-                          return (
-                            <div className="space-y-1 mt-1">
-                              <div className="flex items-center gap-2">
-                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
-                                  fichaje.puntual ? 'bg-[#EBF5FB] text-[#4B9CD3]' : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {fichaje.puntual ? 'Puntual' : 'Retraso'}
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-semibold">
-                                  In: {fichaje.hora_entrada || '--:--'} {fichaje.hora_salida ? `| Out: ${fichaje.hora_salida}` : ''}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className={`text-[10px] font-black px-1.5 py-0.2 rounded ${
-                                  fichaje.hora_salida 
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                                    : 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
-                                }`}>
-                                  {fichaje.hora_salida ? `⏱️ Turno: ${dur.textoCorto}` : `⏱️ En curso: ${dur.textoCorto}`}
-                                </span>
+                  </div>
+
+                  <div className="md:col-span-6">
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Mensaje Directo</label>
+                    <input
+                      type="text"
+                      placeholder="Escribe la directriz o motivación para el equipo..."
+                      value={anuncioContenido}
+                      onChange={(e) => setAnuncioContenido(e.target.value)}
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                      required
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <button
+                      type="submit"
+                      disabled={isSubmittingAnuncio}
+                      className="w-full bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSubmittingAnuncio ? 'Publicando...' : 'Publicar Anuncio'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Listado de Anuncios Publicados */}
+              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+                <div className="flex justify-between items-center mb-4 border-b border-slate-50 pb-2">
+                  <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
+                    <Megaphone className="w-4.5 h-4.5 text-[#4B9CD3]" />
+                    Tablero de Comunicados y Anuncios
+                  </h3>
+                  <span className="text-xs text-[#4B9CD3] font-bold bg-[#EBF5FB] px-2.5 py-1 rounded-md">
+                    {anuncios.filter(a => a.activo !== false).length} Activos / {anuncios.length} Totales
+                  </span>
+                </div>
+
+                {anuncios.length === 0 ? (
+                  <p className="text-center py-12 text-slate-400 text-xs">No hay comunicados publicados en el sistema.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {anuncios.map(an => {
+                      const esActivo = an.activo !== false;
+                      return (
+                        <div 
+                          key={an.id} 
+                          className={`border p-4 rounded-xl relative flex flex-col justify-between transition-all ${
+                            esActivo 
+                              ? 'border-[#AED6F1] bg-[#FFFDF6]/40 hover:border-[#4B9CD3] shadow-xs' 
+                              : 'border-slate-200 bg-slate-50/70 opacity-75'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex justify-between items-start gap-2 mb-2">
+                              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                esActivo 
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                                  : 'bg-slate-200 text-slate-600 border border-slate-300'
+                              }`}>
+                                {esActivo ? '● Activo' : '○ Inactivo'}
+                              </span>
+
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleAnuncio(an)}
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                                    esActivo 
+                                      ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/60' 
+                                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60'
+                                  }`}
+                                  title={esActivo ? 'Desactivar comunicado para empleados' : 'Activar comunicado'}
+                                >
+                                  {esActivo ? 'Desactivar' : 'Activar'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteAnuncioClick(an)}
+                                  className="p-1 hover:bg-rose-100 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                                  title="Eliminar comunicado permanentemente"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             </div>
-                          );
-                        })()
-                      ) : (
-                        <p className="text-[10px] text-slate-400 mt-1">Sin registrar ingreso hoy</p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Registro Completo de Ingresos y Salidas al Administrador */}
-          <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-4">
-              <div>
-                <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
-                  <UserCheck className="w-4.5 h-4.5 text-[#4B9CD3]" />
-                  Registro de Ingresos y Salidas al Administrador
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Lista histórica y en tiempo real de todas las asistencias, horas de entrada y de salida reportadas por el personal de barra.
-                </p>
-              </div>
-              <span className="text-xs bg-[#EBF5FB] text-[#4B9CD3] px-2.5 py-1 rounded-md font-bold self-start sm:self-auto">
-                Total Registros: {fichajes.length}
-              </span>
-            </div>
-
-            <div className="overflow-x-auto border border-[#E2E8F0] rounded-xl">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-[#FFFDF6] border-b border-[#E2E8F0] text-slate-600 font-bold">
-                    <th className="p-3">Empleado</th>
-                    <th className="p-3">Fecha</th>
-                    <th className="p-3">Hora de Ingreso</th>
-                    <th className="p-3">Hora de Salida</th>
-                    <th className="p-3">Horas de Turno</th>
-                    <th className="p-3">Puntualidad</th>
-                    <th className="p-3 text-right">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E2E8F0]/40">
-                  {fichajes.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-400 font-bold">
-                        No hay registros de asistencia en este momento. Los ingresos registrados se mostrarán aquí inmediatamente.
-                      </td>
-                    </tr>
-                  ) : (
-                    [...fichajes]
-                      .sort((a, b) => {
-                        const dDiff = b.fecha.localeCompare(a.fecha);
-                        if (dDiff !== 0) return dDiff;
-                        return (b.hora_entrada || '').localeCompare(a.hora_entrada || '');
-                      })
-                      .map(f => {
-                        const emp = usuarios.find(u => u.id === f.usuario_id || u.id === (f as any).empleado_id) || {
-                          id: f.usuario_id || (f as any).empleado_id || 'emp',
-                          nombre: (f as any).empleado_nombre || (f as any).usuario_nombre || 'Empleado',
-                          foto_avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
-                        };
-                        const dur = calcularHorasTurno(f.hora_entrada, f.hora_salida);
-                        return (
-                          <tr key={f.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 flex items-center gap-2.5">
-                              <img
-                                src={emp?.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'}
-                                alt={emp?.nombre}
-                                className="w-7 h-7 rounded-full object-cover border border-[#E2E8F0]"
-                                referrerPolicy="no-referrer"
-                              />
-                              <span className="font-extrabold text-[#2C3E50]">{emp?.nombre || 'Empleado'}</span>
-                            </td>
-                            <td className="p-3 text-slate-700 font-bold">
-                              {(() => {
-                                const raw = f.fecha ? String(f.fecha).trim() : '';
-                                if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-                                  const [yyyy, mm, dd] = raw.split('-');
-                                  return (
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
-                                        {dd}/{mm}/{yyyy}
-                                      </span>
-                                    </div>
-                                  );
-                                }
-                                if (raw.includes('T')) {
-                                  const datePart = raw.split('T')[0];
-                                  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-                                    const [yyyy, mm, dd] = datePart.split('-');
-                                    return (
-                                      <span className="bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
-                                        {dd}/{mm}/{yyyy}
-                                      </span>
-                                    );
-                                  }
-                                }
-                                // Si contenía una hora u otro valor corrupto, obtener fecha local de hoy
-                                const [yyyy, mm, dd] = getLocalDateString().split('-');
-                                return (
-                                  <span className="bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
-                                    {dd}/{mm}/{yyyy}
-                                  </span>
-                                );
-                              })()}
-                            </td>
-                            <td className="p-3">
-                              <span className="font-black text-slate-800 bg-sky-50 text-sky-800 px-2.5 py-1 rounded-md border border-sky-200/50">
-                                {f.hora_entrada || 'Sin registrar'}
-                              </span>
-                            </td>
-                            <td className="p-3">
-                              {f.hora_salida ? (
-                                <span className="font-black text-slate-800 bg-red-50 text-red-800 px-2.5 py-1 rounded-md border border-red-200/50">
-                                  {f.hora_salida}
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-orange-600 font-extrabold bg-orange-50 px-2 py-0.5 rounded-md border border-orange-200/50 animate-pulse">
-                                  En servicio...
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3">
-                              {f.hora_entrada ? (
-                                <div className="flex flex-col">
-                                  <span className={`font-black text-[11px] px-2 py-0.5 rounded-md inline-block w-fit border ${
-                                    f.hora_salida 
-                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
-                                      : 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse'
-                                  }`}>
-                                    {dur.textoCorto}
-                                  </span>
-                                  <span className="text-[9px] text-slate-500 font-semibold mt-0.5">
-                                    {f.hora_salida ? `Total: ${dur.texto}` : 'En curso'}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400">--</span>
-                              )}
-                            </td>
-                            <td className="p-3">
-                              <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${
-                                f.puntual ? 'bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1]/50' : 'bg-red-50 text-red-600 border border-red-200/50'
-                              }`}>
-                                {f.puntual ? 'Puntual' : 'Retraso'}
-                              </span>
-                            </td>
-                            <td className="p-3 text-right">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (confirm('¿Desea eliminar este registro de asistencia?')) {
-                                    onDeleteFichaje?.(f.id);
-                                  }
-                                }}
-                                className="text-red-500 hover:text-red-700 text-[10px] font-bold underline cursor-pointer font-black"
-                              >
-                                Eliminar
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Calidad de Evidencias */}
-          <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5">
-              <CheckCircle className="w-4.5 h-4.5 text-[#4B9CD3]" />
-              Mesa de Control y Calidad (Fotos de Evidencia)
-            </h3>
-
-            {tareas.filter(t => t.requiere_foto && t.estado === 'Completada').length === 0 ? (
-              <p className="text-center py-10 text-slate-400 text-xs">
-                No se han registrado evidencias fotográficas completadas hoy.
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {tareas.filter(t => t.requiere_foto && t.estado === 'Completada').map(t => (
-                  <div key={t.id} className="border border-[#E2E8F0] rounded-xl overflow-hidden flex flex-col justify-between bg-white">
-                    <div className="relative h-40 bg-[#FFFDF6] flex items-center justify-center overflow-hidden">
-                      {t.foto_url ? (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPreviewPhoto(t.foto_url || null)}
-                          className="w-full h-full cursor-pointer hover:opacity-90 transition-opacity focus:outline-hidden"
-                          title="Click para ver en tamaño completo"
-                        >
-                          <img
-                            src={t.foto_url}
-                            alt={t.titulo}
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-                        </button>
-                      ) : (
-                        <div className="p-4 text-center text-slate-400 text-xs flex flex-col items-center">
-                          <FileText className="w-8 h-8 text-slate-300 mb-1" />
-                          <span>Sin foto cargada (Solo notas registradas)</span>
-                        </div>
-                      )}
-                      <div className="absolute top-2 left-2 bg-[#2C3E50]/80 backdrop-blur-xs text-white px-2.5 py-1 text-[9px] font-bold rounded-md">
-                        {t.area}
-                      </div>
-                    </div>
-
-                    <div className="p-4 flex-1 flex flex-col justify-between">
-                      <div>
-                        <p className="text-[10px] text-slate-400">Evidencia de {getEmpleadoNombre(t.asignado_a)}</p>
-                        <h4 className="font-extrabold text-[#2C3E50] text-xs mt-1">{t.titulo}</h4>
-                        <p className="text-[10px] text-slate-600 italic mt-2 border-l-2 border-[#4B9CD3] pl-2 bg-[#EBF5FB]/30 py-1">
-                          "{t.nota_evidencia || 'Sin comentarios adicionales'}"
-                        </p>
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center">
-                        <span className="text-[10px] text-slate-400 font-semibold">Completada a las {t.hora_fin || '--:--'}</span>
-                        <span className="text-[10px] bg-[#EBF5FB] text-[#4B9CD3] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
-                          ✓ Aprobado
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 4. ANUNCIOS DEL TABLERO */}
-      {isTabOpen('anuncios') && (
-        <div className={activeTab === 'anuncios' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
-          {/* Formulario de Anuncio */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
-              <Megaphone className="w-4 h-4 text-[#4B9CD3]" />
-              Publicar Comunicado del Día
-            </h3>
-            
-            <form onSubmit={handleAnuncioSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-              <div className="md:col-span-4">
-                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Título del Comunicado</label>
-                <input
-                  type="text"
-                  placeholder="Ej. ¡Hoy priorizamos parfaits!"
-                  value={anuncioTitulo}
-                  onChange={(e) => setAnuncioTitulo(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                  required
-                />
-              </div>
-
-              <div className="md:col-span-6">
-                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Mensaje Directo</label>
-                <input
-                  type="text"
-                  placeholder="Escribe la directriz o motivación para el equipo..."
-                  value={anuncioContenido}
-                  onChange={(e) => setAnuncioContenido(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                  required
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <button
-                  type="submit"
-                  disabled={isSubmittingAnuncio}
-                  className="w-full bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer disabled:opacity-50"
-                >
-                  {isSubmittingAnuncio ? 'Publicando...' : 'Publicar Anuncio'}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Listado de Anuncios Publicados */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <div className="flex justify-between items-center mb-4 border-b border-slate-50 pb-2">
-              <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
-                <Megaphone className="w-4.5 h-4.5 text-[#4B9CD3]" />
-                Tablero de Comunicados y Anuncios
-              </h3>
-              <span className="text-xs text-[#4B9CD3] font-bold bg-[#EBF5FB] px-2.5 py-1 rounded-md">
-                {anuncios.filter(a => a.activo !== false).length} Activos / {anuncios.length} Totales
-              </span>
-            </div>
-
-            {anuncios.length === 0 ? (
-              <p className="text-center py-12 text-slate-400 text-xs">No hay comunicados publicados en el sistema.</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {anuncios.map(an => {
-                  const esActivo = an.activo !== false;
-                  return (
-                    <div 
-                      key={an.id} 
-                      className={`border p-4 rounded-xl relative flex flex-col justify-between transition-all ${
-                        esActivo 
-                          ? 'border-[#AED6F1] bg-[#FFFDF6]/40 hover:border-[#4B9CD3] shadow-xs' 
-                          : 'border-slate-200 bg-slate-50/70 opacity-75'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex justify-between items-start gap-2 mb-2">
-                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                            esActivo 
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                              : 'bg-slate-200 text-slate-600 border border-slate-300'
-                          }`}>
-                            {esActivo ? '● Activo' : '○ Inactivo'}
-                          </span>
-
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleAnuncio(an)}
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
-                                esActivo 
-                                  ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/60' 
-                                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60'
-                              }`}
-                              title={esActivo ? 'Desactivar comunicado para empleados' : 'Activar comunicado'}
-                            >
-                              {esActivo ? 'Desactivar' : 'Activar'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteAnuncioClick(an)}
-                              className="p-1 hover:bg-rose-100 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
-                              title="Eliminar comunicado permanentemente"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <h4 className="font-extrabold text-[#2C3E50] text-xs pr-2">{an.titulo}</h4>
+                            <p className="text-[11px] text-slate-600 mt-2 whitespace-pre-line leading-relaxed">{an.contenido}</p>
+                          </div>
+                          
+                          <div className="mt-3.5 pt-2 border-t border-[#E2E8F0]/50 flex justify-between text-[10px] text-slate-400">
+                            <span>Por {an.creador_nombre || 'Mariana Silva (Admin)'}</span>
+                            <span>{formatFechaLegible(an.fecha_creacion || an.fecha)}</span>
                           </div>
                         </div>
-
-                        <h4 className="font-extrabold text-[#2C3E50] text-xs pr-2">{an.titulo}</h4>
-                        <p className="text-[11px] text-slate-600 mt-2 whitespace-pre-line leading-relaxed">{an.contenido}</p>
-                      </div>
-                      
-                      <div className="mt-3.5 pt-2 border-t border-[#E2E8F0]/50 flex justify-between text-[10px] text-slate-400">
-                        <span>Por {an.creador_nombre || 'Mariana Silva (Admin)'}</span>
-                        <span>{formatFechaLegible(an.fecha_creacion || an.fecha)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 5. SECCIÓN DE PERSONAL Y CONFIGURACIÓN DE PONDERACIÓN DEL RANKING */}
+      {/* 5. SECCIÓN DE TRABAJADORES (INTEGRADO: PERSONAL, HORARIOS Y FICHAJES) */}
       {isTabOpen('empleados') && (
-        <div className={activeTab === 'empleados' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
-          {/* BARRA DE MÉTRICAS RÁPIDAS Y FILTRO DE TIEMPO (RESUMEN OPERATIVO DEL PERSONAL) */}
-          <div id="admin-worker-kpi-bar" className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-xs">
+        <div className={(activeTab === 'empleados' || activeTab === 'horarios' || activeTab === 'calidad') ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
+          {/* Selector de Sub-pestañas: Trabajadores, Horarios y Control de Fichajes */}
+          <div className="w-full flex items-center justify-between sm:justify-end bg-white border border-[#E2E8F0] rounded-xl p-2 sm:p-2.5 shadow-xs">
+            <div className="flex items-center bg-[#EBF5FB] p-1 rounded-xl border border-[#AED6F1]/60 gap-1 w-full sm:w-auto flex-wrap">
+              <button
+                type="button"
+                id="btn-subtab-personal"
+                onClick={() => setEmpleadosSubTab('personal')}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  empleadosSubTab === 'personal'
+                    ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                    : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Equipo y Rendimiento ({empleados.length})</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-subtab-turnos"
+                onClick={() => setEmpleadosSubTab('turnos')}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  empleadosSubTab === 'turnos'
+                    ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                    : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Horarios y Turnos ({horarios.length})</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-subtab-fichajes"
+                onClick={() => setEmpleadosSubTab('fichajes')}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  empleadosSubTab === 'fichajes'
+                    ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                    : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Control de Fichajes ({fichajes.length})</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-subtab-ambos-empleados"
+                onClick={() => setEmpleadosSubTab('ambos')}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  empleadosSubTab === 'ambos'
+                    ? 'bg-[#4B9CD3] text-white shadow-xs font-black'
+                    : 'text-slate-600 hover:text-[#2C3E50]'
+                }`}
+                title="Ver personal, turnos y fichajes en una sola vista"
+              >
+                <span>Ver Todo</span>
+              </button>
+            </div>
+          </div>
+
+          {/* SUB-SECCIÓN 1: PERSONAL, MÉTRICAS, RANKING Y BITÁCORA */}
+          {(empleadosSubTab === 'personal' || empleadosSubTab === 'ambos') && (
+            <div className="space-y-6 w-full animate-in fade-in duration-150">
+              {/* BARRA DE MÉTRICAS RÁPIDAS Y FILTRO DE TIEMPO (RESUMEN OPERATIVO DEL PERSONAL) */}
+              <div id="admin-worker-kpi-bar" className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-xs">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-2.5 mb-3">
               <div>
                 <h3 className="font-extrabold text-xs text-[#4B9CD3] uppercase tracking-wider flex items-center gap-1.5">
@@ -3971,6 +3920,262 @@ export default function AdminDashboard({
               </div>
             )}
           </div>
+            </div>
+          )}
+
+          {/* SUB-SECCIÓN 2: PLANIFICACIÓN DE TURNOS Y HORARIOS SEMANALES */}
+          {(empleadosSubTab === 'turnos' || empleadosSubTab === 'ambos') && (
+            <div className="space-y-6 w-full animate-in fade-in duration-150">
+              {/* Carga de Horarios */}
+              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+                <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-[#FFFDF6] pb-2">
+                  <Calendar className="w-4.5 h-4.5 text-[#4B9CD3]" />
+                  {editingSchId ? 'Modificar Turno de Personal' : 'Programar Turno Semanal'}
+                </h3>
+
+                <form onSubmit={handleSchSubmit}>
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                    {/* Seleccionar Colaborador */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Colaborador</label>
+                      <select
+                        id="selectColaborador"
+                        value={schUsuarioId}
+                        onChange={(e) => setSchUsuarioId(e.target.value)}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                        required
+                      >
+                        <option value="" disabled>Selecciona un empleado...</option>
+                        {empleados.map(emp => (
+                          <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Día del Turno */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Día del Turno</label>
+                      <select
+                        id="selectDia"
+                        value={schDia}
+                        onChange={(e) => setSchDia(e.target.value as any)}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                      >
+                        <option value="Lunes">Lunes</option>
+                        <option value="Martes">Martes</option>
+                        <option value="Miércoles">Miércoles</option>
+                        <option value="Jueves">Jueves</option>
+                        <option value="Viernes">Viernes</option>
+                        <option value="Sábado">Sábado</option>
+                        <option value="Domingo">Domingo</option>
+                      </select>
+                    </div>
+
+                    {/* Hora de Entrada */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Hora de Entrada</label>
+                      <input
+                        id="inputHoraEntrada"
+                        type="time"
+                        value={schHoraEntrada}
+                        onChange={(e) => setSchHoraEntrada(e.target.value)}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                        required
+                      />
+                    </div>
+
+                    {/* Hora de Salida */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Hora de Salida</label>
+                      <input
+                        id="inputHoraSalida"
+                        type="time"
+                        value={schHoraSalida}
+                        onChange={(e) => setSchHoraSalida(e.target.value)}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                        required
+                      />
+                    </div>
+
+                    {/* Nota del Turno / Tarea Especial */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nota del Turno / Especialidad</label>
+                      <input
+                        id="inputNotaTurno"
+                        type="text"
+                        placeholder="Ej. Apertura, Cierre, etc."
+                        value={schNota}
+                        onChange={(e) => setSchNota(e.target.value)}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                      />
+                    </div>
+
+                    {/* Botón de Carga */}
+                    <div className="flex gap-1.5">
+                      <button
+                        id="btnCargarTurno"
+                        type="submit"
+                        className="flex-1 bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer whitespace-nowrap"
+                      >
+                        {editingSchId ? 'Actualizar' : 'Cargar Turno'}
+                      </button>
+                      {editingSchId && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const match = horarios.find(t => t.id === editingSchId);
+                              if (confirm('¿Desea eliminar definitivamente este turno programado?')) {
+                                onDeleteTurno(editingSchId, match);
+                                setEditingSchId(null);
+                                setSchNota('');
+                              }
+                            }}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold py-2.5 px-3 rounded-lg transition-colors h-9 cursor-pointer whitespace-nowrap"
+                            title="Eliminar este turno"
+                          >
+                            Eliminar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingSchId(null);
+                              setSchNota('');
+                            }}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg transition-colors h-9 cursor-pointer"
+                            title="Cancelar edición"
+                          >
+                            X
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+              {/* Calendario Semanal de Turnos */}
+              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b border-[#FFFDF6] mb-4 gap-2">
+                  <div>
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider text-[#4B9CD3]">Matriz Semanal de Trabajo</h4>
+                    <p className="text-xs text-slate-500">Programación detallada de turnos semanales por colaborador.</p>
+                  </div>
+                  <button
+                    type="button"
+                    id="duplicate-schedules-btn"
+                    onClick={onDuplicarHorarios}
+                    className="w-full sm:w-auto bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Duplicar Horarios de la Semana Anterior
+                  </button>
+                </div>
+
+                {empleados.length === 0 ? (
+                  <p className="text-center py-12 text-slate-400 text-xs">Registra colaboradores en el gestor para asignarles horarios.</p>
+                ) : (
+                  <div className="space-y-6">
+                    {empleados.map(emp => {
+                      const turnosEmp = horarios.filter(t => 
+                        t.usuario_id === emp.id || 
+                        (t as any).employee_id === emp.id || 
+                        (t as any).employee_name === emp.nombre ||
+                        t.usuario_id === emp.nombre
+                      );
+                      const dias: Array<'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo'> = [
+                        'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'
+                      ];
+
+                      return (
+                        <div key={emp.id} className="border border-[#E2E8F0] rounded-xl p-4 bg-slate-50/50">
+                          <div className="flex items-center gap-3 mb-3 border-b border-slate-100 pb-2">
+                            <img
+                              src={emp.foto_avatar}
+                              alt={emp.nombre}
+                              referrerPolicy="no-referrer"
+                              className="w-8 h-8 rounded-full object-cover border border-[#E2E8F0]"
+                            />
+                            <div>
+                              <h5 className="font-extrabold text-xs text-[#2C3E50]">{emp.nombre}</h5>
+                              <p className="text-[10px] text-[#4B9CD3] font-semibold">{emp.area_preferida || 'Cocina'}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-7 gap-2.5">
+                            {dias.map(dia => {
+                              const shift = turnosEmp.find(t => t.dia_semana === dia);
+                              return (
+                                <div key={dia} className={`p-2.5 rounded-lg border text-center flex flex-col justify-between min-h-[90px] ${
+                                  shift 
+                                    ? 'bg-[#EBF5FB]/60 border-[#AED6F1] text-[#2C3E50]' 
+                                    : 'bg-white border-dashed border-slate-200 text-slate-300'
+                                }`}>
+                                  <div>
+                                    <p className="text-[9px] font-black uppercase tracking-wider text-[#4B9CD3]/80">{dia}</p>
+                                    {shift ? (
+                                      <div className="mt-1.5 space-y-1">
+                                        <p className="text-[11px] font-extrabold text-slate-900">{shift.hora_entrada} - {shift.hora_salida}</p>
+                                        {shift.nota && (
+                                          <p className="text-[9px] font-semibold text-[#4B9CD3] leading-tight bg-white border border-[#E2E8F0] px-1 py-0.5 rounded-sm truncate" title={shift.nota}>
+                                            {shift.nota}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <p className="text-[10px] italic font-medium mt-3">Libre</p>
+                                    )}
+                                  </div>
+
+                                  {shift && (
+                                    <div className="mt-2 pt-1 border-t border-slate-100/50 flex justify-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditSchClick(shift)}
+                                        className="p-1 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors animate-none cursor-pointer"
+                                        title="Modificar turno"
+                                      >
+                                        <Edit2 className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (confirm(`¿Eliminar turno del ${shift.dia_semana} (${shift.hora_entrada} - ${shift.hora_salida}) para ${emp.nombre}?`)) {
+                                            onDeleteTurno(shift.id, shift);
+                                          }
+                                        }}
+                                        className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                        title="Eliminar turno"
+                                      >
+                                        <Trash2 className="w-3 h-3 text-red-500" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SUB-SECCIÓN 3: CONTROL DE ASISTENCIA Y FICHAJES */}
+          {(empleadosSubTab === 'fichajes' || empleadosSubTab === 'ambos') && (
+            <div className="space-y-6 w-full animate-in fade-in duration-150">
+              <FichajesAsistenciaModule
+                empleados={empleados}
+                fichajes={fichajes}
+                usuarios={usuarios}
+                tareas={tareas}
+                onDeleteFichaje={onDeleteFichaje}
+                onPreviewPhoto={(url) => setSelectedPreviewPhoto(url)}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -4383,245 +4588,8 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 7. GESTIÓN DE HORARIOS Y TURNOS (VISTA ADMIN) */}
-      {isTabOpen('horarios') && (
-        <div className={activeTab === 'horarios' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
-          {/* Carga de Horarios */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-[#FFFDF6] pb-2">
-              <Calendar className="w-4.5 h-4.5 text-[#4B9CD3]" />
-              {editingSchId ? 'Modificar Turno de Personal' : 'Programar Turno Semanal'}
-            </h3>
 
-            <form onSubmit={handleSchSubmit}>
-              <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                {/* Seleccionar Colaborador */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Colaborador</label>
-                  <select
-                    id="selectColaborador"
-                    value={schUsuarioId}
-                    onChange={(e) => setSchUsuarioId(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                    required
-                  >
-                    <option value="" disabled>Selecciona un empleado...</option>
-                    {empleados.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                    ))}
-                  </select>
-                </div>
 
-                {/* Día del Turno */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Día del Turno</label>
-                  <select
-                    id="selectDia"
-                    value={schDia}
-                    onChange={(e) => setSchDia(e.target.value as any)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                  >
-                    <option value="Lunes">Lunes</option>
-                    <option value="Martes">Martes</option>
-                    <option value="Miércoles">Miércoles</option>
-                    <option value="Jueves">Jueves</option>
-                    <option value="Viernes">Viernes</option>
-                    <option value="Sábado">Sábado</option>
-                    <option value="Domingo">Domingo</option>
-                  </select>
-                </div>
-
-                {/* Hora de Entrada */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Hora de Entrada</label>
-                  <input
-                    id="inputHoraEntrada"
-                    type="time"
-                    value={schHoraEntrada}
-                    onChange={(e) => setSchHoraEntrada(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                    required
-                  />
-                </div>
-
-                {/* Hora de Salida */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Hora de Salida</label>
-                  <input
-                    id="inputHoraSalida"
-                    type="time"
-                    value={schHoraSalida}
-                    onChange={(e) => setSchHoraSalida(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                    required
-                  />
-                </div>
-
-                {/* Nota del Turno / Tarea Especial */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nota del Turno / Especialidad</label>
-                  <input
-                    id="inputNotaTurno"
-                    type="text"
-                    placeholder="Ej. Apertura, Cierre, etc."
-                    value={schNota}
-                    onChange={(e) => setSchNota(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                  />
-                </div>
-
-                {/* Botón de Carga */}
-                <div className="flex gap-1.5">
-                  <button
-                    id="btnCargarTurno"
-                    type="submit"
-                    className="flex-1 bg-[#4B9CD3] text-white text-xs font-bold py-2.5 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer whitespace-nowrap"
-                  >
-                    {editingSchId ? 'Actualizar' : 'Cargar Turno'}
-                  </button>
-                  {editingSchId && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const match = horarios.find(t => t.id === editingSchId);
-                          if (confirm('¿Desea eliminar definitivamente este turno programado?')) {
-                            onDeleteTurno(editingSchId, match);
-                            setEditingSchId(null);
-                            setSchNota('');
-                          }
-                        }}
-                        className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold py-2.5 px-3 rounded-lg transition-colors h-9 cursor-pointer whitespace-nowrap"
-                        title="Eliminar este turno"
-                      >
-                        Eliminar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingSchId(null);
-                          setSchNota('');
-                        }}
-                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg transition-colors h-9 cursor-pointer"
-                        title="Cancelar edición"
-                      >
-                        X
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </form>
-          </div>
-
-          {/* Calendario Semanal de Turnos */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b border-[#FFFDF6] mb-4 gap-2">
-              <div>
-                <h4 className="font-extrabold text-xs uppercase tracking-wider text-[#4B9CD3]">Matriz Semanal de Trabajo</h4>
-                <p className="text-xs text-slate-500">Programación detallada de turnos semanales por colaborador.</p>
-              </div>
-              <button
-                type="button"
-                id="duplicate-schedules-btn"
-                onClick={onDuplicarHorarios}
-                className="w-full sm:w-auto bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
-              >
-                Duplicar Horarios de la Semana Anterior
-              </button>
-            </div>
-
-            {empleados.length === 0 ? (
-              <p className="text-center py-12 text-slate-400 text-xs">Registra colaboradores en el gestor para asignarles horarios.</p>
-            ) : (
-              <div className="space-y-6">
-                {empleados.map(emp => {
-                  const turnosEmp = horarios.filter(t => 
-                    t.usuario_id === emp.id || 
-                    (t as any).employee_id === emp.id || 
-                    (t as any).employee_name === emp.nombre ||
-                    t.usuario_id === emp.nombre
-                  );
-                  const dias: Array<'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo'> = [
-                    'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'
-                  ];
-
-                  return (
-                    <div key={emp.id} className="border border-[#E2E8F0] rounded-xl p-4 bg-slate-50/50">
-                      <div className="flex items-center gap-3 mb-3 border-b border-slate-100 pb-2">
-                        <img
-                          src={emp.foto_avatar}
-                          alt={emp.nombre}
-                          referrerPolicy="no-referrer"
-                          className="w-8 h-8 rounded-full object-cover border border-[#E2E8F0]"
-                        />
-                        <div>
-                          <h5 className="font-extrabold text-xs text-[#2C3E50]">{emp.nombre}</h5>
-                          <p className="text-[10px] text-[#4B9CD3] font-semibold">{emp.area_preferida || 'Cocina'}</p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-7 gap-2.5">
-                        {dias.map(dia => {
-                          const shift = turnosEmp.find(t => t.dia_semana === dia);
-                          return (
-                            <div key={dia} className={`p-2.5 rounded-lg border text-center flex flex-col justify-between min-h-[90px] ${
-                              shift 
-                                ? 'bg-[#EBF5FB]/60 border-[#AED6F1] text-[#2C3E50]' 
-                                : 'bg-white border-dashed border-slate-200 text-slate-300'
-                            }`}>
-                              <div>
-                                <p className="text-[9px] font-black uppercase tracking-wider text-[#4B9CD3]/80">{dia}</p>
-                                {shift ? (
-                                  <div className="mt-1.5 space-y-1">
-                                    <p className="text-[11px] font-extrabold text-slate-900">{shift.hora_entrada} - {shift.hora_salida}</p>
-                                    {shift.nota && (
-                                      <p className="text-[9px] font-semibold text-[#4B9CD3] leading-tight bg-white border border-[#E2E8F0] px-1 py-0.5 rounded-sm truncate" title={shift.nota}>
-                                        {shift.nota}
-                                      </p>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <p className="text-[10px] italic font-medium mt-3">Libre</p>
-                                )}
-                              </div>
-
-                              {shift && (
-                                <div className="mt-2 pt-1 border-t border-slate-100/50 flex justify-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleEditSchClick(shift)}
-                                    className="p-1 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors animate-none cursor-pointer"
-                                    title="Modificar turno"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (confirm(`¿Eliminar turno del ${shift.dia_semana} (${shift.hora_entrada} - ${shift.hora_salida}) para ${emp.nombre}?`)) {
-                                        onDeleteTurno(shift.id, shift);
-                                      }
-                                    }}
-                                    className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                                    title="Eliminar turno"
-                                  >
-                                    <Trash2 className="w-3 h-3 text-red-500" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* 8. CONTROL DE GASTOS */}
       {isTabOpen('gastos') && (
@@ -4810,18 +4778,6 @@ export default function AdminDashboard({
               >
                 Programa de Fidelización
               </button>
-              <button
-                type="button"
-                onClick={() => setVentasSubTab('auditoria_db')}
-                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 ${
-                  ventasSubTab === 'auditoria_db'
-                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-extrabold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Auditoría DB Supabase
-              </button>
             </div>
 
             {ventasSubTab === 'fidelizacion' ? (
@@ -4963,182 +4919,6 @@ export default function AdminDashboard({
                       )}
                     </tbody>
                   </table>
-                </div>
-
-              </div>
-            ) : ventasSubTab === 'auditoria_db' ? (
-              /* VISTA DE AUDITORÍA Y DIAGNÓSTICO DE BASE DE DATOS SUPABASE */
-              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-6">
-                
-                {/* Cabecera y Botón de Prueba de Salud */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-widest block">
-                        Control de Salud e Integridad del Backend
-                      </span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${dbAuditReport?.allOk ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                        {dbAuditReport?.allOk ? '✅ 100% Integra (5/5 Tablas OK)' : '⚠️ Revisión Recomendada'}
-                      </span>
-                    </div>
-                    <h3 className="text-base font-extrabold text-[#2C3E50]">
-                      Auditoría de Base de Datos & Verificación de Tablas Supabase
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Diagnóstico interactivo para validar las 5 tablas principales (<span className="font-mono font-bold">profiles, customers, sales, inventory, time_entries</span>) y su estructura de columnas.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                    <button
-                      type="button"
-                      onClick={handleRunDatabaseHealthCheck}
-                      disabled={isRunningAudit}
-                      className="flex-1 sm:flex-none px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isRunningAudit ? 'animate-spin' : ''}`} />
-                      {isRunningAudit ? 'Ejecutando Health Check...' : 'Ejecutar Prueba de Salud'}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-                        setCopiedSqlAdmin(true);
-                        setTimeout(() => setCopiedSqlAdmin(false), 2500);
-                      }}
-                      className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      {copiedSqlAdmin ? '¡Script Copiado!' : 'Copiar Script SQL'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* RESUMEN DE LA AUDITORÍA DE SALUD */}
-                {dbAuditReport && (
-                  <div className="p-4 bg-[#EBF5FB]/60 border border-[#AED6F1] rounded-xl space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-[#2C3E50] uppercase tracking-wider">
-                        Resultado del Diagnóstico en Tiempo Real
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-500">
-                        Verificado: {new Date(dbAuditReport.timestamp).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <p className="text-xs font-medium text-[#2C3E50]">
-                      {dbAuditReport.summaryText}
-                    </p>
-                  </div>
-                )}
-
-                {/* TARJETAS DE LAS 5 TABLAS AUDITADAS */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {dbAuditReport && (Object.entries(dbAuditReport.tables) as [string, TableAuditReport][]).map(([tableName, report]) => {
-                    const isOk = report.status === 'OK';
-                    const isWarn = report.status === 'WARNING';
-                    
-                    return (
-                      <div 
-                        key={tableName} 
-                        className={`p-4 rounded-xl border space-y-3 bg-white transition-all shadow-2xs ${
-                          isOk ? 'border-emerald-200 hover:border-emerald-300' : isWarn ? 'border-amber-300 bg-amber-50/10' : 'border-rose-300 bg-rose-50/10'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start border-b border-slate-100 pb-2.5">
-                          <div>
-                            <span className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-wider block">
-                              Tabla Supabase
-                            </span>
-                            <h4 className="font-mono font-extrabold text-sm text-[#2C3E50]">
-                              {tableName}
-                            </h4>
-                          </div>
-
-                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black ${
-                            isOk ? 'bg-emerald-100 text-emerald-800' : isWarn ? 'bg-amber-100 text-amber-900' : 'bg-rose-100 text-rose-800'
-                          }`}>
-                            {isOk ? 'ESTRUCTURA OK' : isWarn ? 'ADVERTENCIA' : 'TABLA FALTANTE'}
-                          </span>
-                        </div>
-
-                        {/* Métrica y Estado */}
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="text-slate-500 font-semibold">Registros Almacenados:</span>
-                          <span className="font-mono font-black text-[#4B9CD3] text-sm">
-                            {report.count}
-                          </span>
-                        </div>
-
-                        {/* Chequeo de Columnas Requeridas */}
-                        <div className="space-y-1.5 pt-1">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                            Verificación de Columnas:
-                          </span>
-                          <div className="flex flex-wrap gap-1">
-                            {report.columnsChecked.map(col => (
-                              <span 
-                                key={col.name} 
-                                className={`font-mono text-[9px] px-2 py-0.5 rounded-md font-bold ${
-                                  col.present 
-                                    ? 'bg-slate-100 text-slate-700' 
-                                    : 'bg-rose-100 text-rose-700 border border-rose-300'
-                                }`}
-                              >
-                                {col.present ? `✓ ${col.name}` : `✗ ${col.name}`}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Mensaje Informativo */}
-                        <p className="text-[11px] text-slate-500 font-medium pt-1 border-t border-slate-100">
-                          {report.message}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* CONSOLE DIAGNOSTIC NOTICE */}
-                <div className="p-3 bg-slate-900 text-slate-300 rounded-xl text-xs flex justify-between items-center font-mono">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Los logs de auditoría detallados han sido registrados en la consola del navegador (<span className="text-emerald-400 font-bold">console.group</span>).</span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 uppercase font-sans font-bold">Consola F12</span>
-                </div>
-
-                {/* SCRIPT SQL COMPLETO PARA REPARACIÓN / INSTALACIÓN */}
-                <div className="pt-2 border-t border-[#E2E8F0] space-y-3">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h4 className="text-xs font-extrabold text-[#2C3E50] uppercase tracking-wider">
-                        Script SQL Completo de Tablas y Publicaciones Realtime
-                      </h4>
-                      <p className="text-[11px] text-slate-500 font-medium">
-                        Copia y ejecuta este script en el <span className="font-bold text-[#4B9CD3]">SQL Editor de Supabase</span> para garantizar la creación e integridad de las 5 tablas.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-                        setCopiedSqlAdmin(true);
-                        setTimeout(() => setCopiedSqlAdmin(false), 2500);
-                      }}
-                      className="px-3 py-1.5 bg-[#EBF5FB] hover:bg-[#D4E6F1] text-[#4B9CD3] font-extrabold text-xs rounded-lg transition-colors cursor-pointer border border-[#AED6F1]"
-                    >
-                      {copiedSqlAdmin ? '¡Script Copiado!' : 'Copiar SQL'}
-                    </button>
-                  </div>
-
-                  <textarea
-                    rows={8}
-                    readOnly
-                    value={SUPABASE_SQL_SCHEMA}
-                    className="w-full text-[11px] font-mono p-3 bg-slate-900 text-emerald-400 rounded-xl border border-slate-700 focus:outline-none select-all"
-                  />
                 </div>
 
               </div>
@@ -6328,93 +6108,7 @@ export default function AdminDashboard({
       </div>
       )}
 
-      {/* 9. DIAGNÓSTICO Y AUDITORÍA DE BASE DE DATOS SUPABASE */}
-      {isTabOpen('supabase') && (
-        <div className={activeTab === 'supabase' ? 'w-full space-y-6' : 'hidden'}>
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-widest block">
-                    Control de Salud e Integridad del Backend
-                  </span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${dbAuditReport?.allOk ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                    {dbAuditReport?.allOk ? '100% Integra (5/5 Tablas OK)' : 'Revisión Recomendada'}
-                  </span>
-                </div>
-                <h3 className="text-base font-extrabold text-[#2C3E50]">
-                  Auditoría de Base de Datos & Verificación de Tablas Supabase
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Diagnóstico interactivo para validar las 5 tablas principales (<span className="font-mono font-bold">profiles, customers, sales, inventory, time_entries</span>) y su estructura de columnas.
-                </p>
-              </div>
 
-              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                <button
-                  type="button"
-                  onClick={handleRunDatabaseHealthCheck}
-                  disabled={isRunningAudit}
-                  className="flex-1 sm:flex-none px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRunningAudit ? 'animate-spin' : ''}`} />
-                  {isRunningAudit ? 'Ejecutando Health Check...' : 'Ejecutar Prueba de Salud'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-                    setCopiedSqlAdmin(true);
-                    setTimeout(() => setCopiedSqlAdmin(false), 2500);
-                  }}
-                  className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  {copiedSqlAdmin ? '¡Script Copiado!' : 'Copiar Script SQL'}
-                </button>
-              </div>
-            </div>
-
-            {dbAuditReport && (
-              <div className="p-4 bg-[#EBF5FB]/60 border border-[#AED6F1] rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-[#2C3E50] uppercase tracking-wider">
-                    Resultado del Diagnóstico en Tiempo Real
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-500">
-                    Verificado: {new Date(dbAuditReport.timestamp).toLocaleTimeString()}
-                  </span>
-                </div>
-                <p className="text-xs font-medium text-[#2C3E50]">
-                  {dbAuditReport.summaryText}
-                </p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {dbAuditReport && (Object.entries(dbAuditReport.tables) as [string, TableAuditReport][]).map(([tableName, report]) => {
-                const isOk = report.status === 'OK';
-                return (
-                  <div key={tableName} className="p-4 rounded-xl border space-y-3 bg-white shadow-2xs">
-                    <div className="flex justify-between items-center">
-                      <span className="font-mono font-bold text-xs text-[#2C3E50]">{tableName}</span>
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${isOk ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                        {report.status}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-600">{report.message}</p>
-                    {report.missingColumns && report.missingColumns.length > 0 && (
-                      <div className="text-[10px] text-amber-700 font-mono">
-                        Faltan columnas: {report.missingColumns.join(', ')}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modal para Agregar Feedback */}
       {showFeedbackModal && (

@@ -13,6 +13,9 @@ export interface EmployeeScore {
   puntosFichaje: number;
   puntosVentas: number;
   puntosTareas: number;
+  puntosMonto?: number;
+  puntosCantidad?: number;
+  puntosCaptura?: number;
   puntosTotales: number;
   porcentajeEficiencia: number;
   montoVentasTotal?: number;
@@ -27,6 +30,7 @@ export interface EmployeeScore {
     scoreTareas: number;
     scoreCaptura: number;
     scorePuntualidad: number;
+    scoreVentasSugeridas: number;
   };
 }
 
@@ -65,17 +69,24 @@ export const calculateLeaderboard = (
   filtro: 'diario' | 'semanal' | 'mensual',
   fechaReferencia: string = getTodayLocal(),
   posVentas: Venta[] = [],
-  rankingWeights: RankingWeights = DEFAULT_RANKING_WEIGHTS
+  rankingWeights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
+  startDate?: string,
+  endDate?: string
 ): EmployeeScore[] => {
   const refDate = new Date(fechaReferencia);
 
-  // Filtrar datos según el periodo
+  // Filtrar datos según el periodo o rango de fechas personalizado
   const isInPeriod = (fechaStr: string): boolean => {
+    if (!fechaStr) return false;
+    const itemDateStr = fechaStr.split('T')[0];
+    if (startDate && endDate) {
+      return itemDateStr >= startDate && itemDateStr <= endDate;
+    }
     const itemDate = new Date(fechaStr);
     if (isNaN(itemDate.getTime())) return false;
 
     if (filtro === 'diario') {
-      return fechaStr === fechaReferencia;
+      return itemDateStr === fechaReferencia;
     } else if (filtro === 'semanal') {
       const diffTime = Math.abs(refDate.getTime() - itemDate.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -92,8 +103,14 @@ export const calculateLeaderboard = (
 
   // Pre-calcular métricas absolutas por empleado
   const rawEmployeeMetrics = empleados.map((usr) => {
-    // 1. Tareas de este usuario
-    const tareasUsuario = tareas.filter((t) => t.asignado_a === usr.id && isInPeriod(t.fecha));
+    // 1. Tareas de este usuario (soporta ID o Nombre)
+    const tareasUsuario = tareas.filter(
+      (t) =>
+        (t.asignado_a === usr.id ||
+          t.asignado_a === usr.nombre ||
+          !t.asignado_a) &&
+        isInPeriod(t.fecha)
+    );
     const completadas = tareasUsuario.filter((t) => t.estado === 'Completada');
     const tareasPct =
       tareasUsuario.length > 0
@@ -147,12 +164,12 @@ export const calculateLeaderboard = (
     const montoTotal = posVentasEmp.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
     const cantVentasTotal = posVentasEmp.length;
 
-    // 5. Captura de clientes
+    // 5. Captura de clientes (Fidelización) - 0% si no hay ventas en el periodo
     const ventasConCliente = posVentasEmp.filter(
       (pv) => Boolean(pv.cliente_id) || Boolean(pv.cliente_telefono) || Boolean(pv.cliente_nombre)
     ).length;
     const capturaClientesPct =
-      cantVentasTotal > 0 ? Math.round((ventasConCliente / cantVentasTotal) * 100) : 100;
+      cantVentasTotal > 0 ? Math.round((ventasConCliente / cantVentasTotal) * 100) : 0;
 
     return {
       usr,
@@ -187,35 +204,31 @@ export const calculateLeaderboard = (
       const scoreVentasSugeridas = maxVentasSugeridas > 0 ? Math.round((m.ventasSugeridasCount / maxVentasSugeridas) * 100) : 100;
 
       const weights = rankingWeights || DEFAULT_RANKING_WEIGHTS;
-      const totalWeightSum =
-        (weights.ventas_monto_pct || 0) +
-        (weights.ventas_cantidad_pct || 0) +
-        (weights.tareas_cumplimiento_pct || 0) +
-        (weights.captura_clientes_pct || 0) +
-        (weights.puntualidad_fichaje_pct || 0) +
-        (weights.ventas_sugeridas_pct || 0);
 
-      const normalizedWeightSum = totalWeightSum > 0 ? totalWeightSum : 100;
+      const ventasConClienteCount = Math.round((m.capturaClientesPct / 100) * m.cantVentasTotal);
 
-      const weightedScore = Math.round(
-        (scoreMonto * (weights.ventas_monto_pct || 0) +
-          scoreCant * (weights.ventas_cantidad_pct || 0) +
-          scoreTareas * (weights.tareas_cumplimiento_pct || 0) +
-          scoreCaptura * (weights.captura_clientes_pct || 0) +
-          scorePuntualidad * (weights.puntualidad_fichaje_pct || 0) +
-          scoreVentasSugeridas * (weights.ventas_sugeridas_pct || 0)) /
-          normalizedWeightSum
-      );
+      // Calcular puntos para las 6 categorías según configuración global de rendimiento
+      const puntosMonto = Math.round((m.montoTotal / 100) * (weights.ventas_monto_pct / 25));
+      const puntosCantidad = Math.round((m.cantVentasTotal * 10) * (weights.ventas_cantidad_pct / 20));
+      const puntosTareas = Math.round(m.puntosTareas * (weights.tareas_cumplimiento_pct / 20));
+      const puntosCaptura = Math.round((ventasConClienteCount * 15) * (weights.captura_clientes_pct / 15));
+      const puntosVentas = Math.round(m.puntosVentas * (weights.ventas_sugeridas_pct / 10));
+      const puntosFichaje = Math.round(m.puntosFichaje * (weights.puntualidad_fichaje_pct / 10));
+
+      const sumatoriaPuntos = puntosMonto + puntosCantidad + puntosTareas + puntosCaptura + puntosVentas + puntosFichaje;
 
       return {
         usuario: m.usr,
         tareasCompletadas: m.completadas.length,
         tareasTotales: m.tareasUsuario.length,
         ventasSugeridas: m.ventasSugeridasCount,
-        puntosFichaje: m.puntosFichaje,
-        puntosVentas: m.puntosVentas,
-        puntosTareas: m.puntosTareas,
-        puntosTotales: weightedScore,
+        puntosFichaje,
+        puntosVentas,
+        puntosTareas,
+        puntosMonto,
+        puntosCantidad,
+        puntosCaptura,
+        puntosTotales: sumatoriaPuntos,
         porcentajeEficiencia: m.tareasPct,
         montoVentasTotal: m.montoTotal,
         cantidadVentasTotal: m.cantVentasTotal,
