@@ -2352,9 +2352,9 @@ export default function App() {
         </div>
         {/* Abajo del Header: Menú principal con las pestañas (solo visible si es Admin) */}
         {currentUser.rol === 'admin' && (
-          <div className="border-t border-slate-100 bg-slate-50/50">
-            <div className="max-w-7xl mx-auto px-2 sm:px-4 py-1.5 overflow-x-auto">
-              <nav className="flex flex-wrap items-center gap-1.5 w-full">
+          <div className="border-t border-slate-100 bg-slate-50/50 w-full overflow-hidden">
+            <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 overflow-x-auto touch-pan-x scrollbar-none">
+              <nav className="flex items-center gap-1.5 min-w-max flex-nowrap">
                 <button
                   id="admin-tab-ventas"
                   onClick={() => {

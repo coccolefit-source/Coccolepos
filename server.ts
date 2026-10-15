@@ -13,20 +13,25 @@ async function startServer() {
   app.use(express.json());
 
   let aiClient: GoogleGenAI | null = null;
-  const getAi = () => {
+  const getAi = (): GoogleGenAI | null => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
+      return null;
+    }
     if (!aiClient) {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error('GEMINI_API_KEY environment variable is required');
-      }
-      aiClient = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
+      try {
+        aiClient = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
           }
-        }
-      });
+        });
+      } catch (err) {
+        console.error('Error instantiating GoogleGenAI:', err);
+        return null;
+      }
     }
     return aiClient;
   };
@@ -66,12 +71,10 @@ async function startServer() {
         return res.status(400).json({ error: 'Worker data is required' });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
+      const ai = getAi();
+      if (!ai) {
         return res.json(getFallbackWorkerPerformance(worker));
       }
-
-      const ai = getAi();
 
       const responseSchema = {
         type: Type.OBJECT,
@@ -220,13 +223,10 @@ Asegúrate de llenar cada sección del JSON con datos analíticos realistas insp
     });
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
-
-      if (!apiKey) {
+      const ai = getAi();
+      if (!ai) {
         return res.json(getFallbackDeck());
       }
-
-      const ai = getAi();
       const responseSchema = {
         type: Type.OBJECT,
         properties: {
@@ -404,8 +404,8 @@ Asegúrate de responder estrictamente con el JSON solicitado, calculando o extra
         return res.status(400).json({ error: 'Se requieren los datos del trabajador y la pregunta' });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
+      const ai = getAi();
+      if (!ai) {
         // Fallback analítico si no hay clave API configurada
         const compliance = performanceContext?.eficienciaPuntualidad?.cumplimientoPct || worker.tareasCumplidasPct || '88%';
         const ventasVol = performanceContext?.patronesVenta?.volumenTotal || worker.ventasTotales || '145 unidades';
@@ -422,8 +422,6 @@ Asegúrate de responder estrictamente con el JSON solicitado, calculando o extra
             `• **Respuesta a su consulta:** Con base en estos registros, para responder a "${question}", la recomendación clave es enfocar al colaborador en la venta cruzada de productos complementarios durante sus horas valle y reforzar el reconocimiento de sus resultados destacados.`
         });
       }
-
-      const ai = getAi();
 
       // Construcción del contexto detallado del colaborador
       const altaRotacionDetalle = (performanceContext?.rendimientoProductos?.productosAltaRotacionDetalle || [])

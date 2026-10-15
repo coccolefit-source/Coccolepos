@@ -2579,7 +2579,7 @@ export default function AdminDashboard({
 
       {/* Banderola Superior de Pestañas Interiores (Multi-Tab Admin) */}
       {openTabs && openTabs.length > 0 && (
-        <div className="w-full bg-[#FFFDF6] p-2 rounded-xl border border-[#E2E8F0] shadow-xs flex flex-wrap items-center gap-1.5 mb-2">
+        <div className="w-full bg-[#FFFDF6] p-2 rounded-xl border border-[#E2E8F0] shadow-xs flex items-center gap-1.5 mb-2 overflow-x-auto touch-pan-x flex-nowrap pb-1 scrollbar-none">
           <div className="text-[10px] font-black uppercase text-slate-400 tracking-wider px-2 border-r border-slate-200 mr-1">
             Pestañas Activas:
           </div>
@@ -2786,7 +2786,7 @@ export default function AdminDashboard({
           <div className="space-y-6 w-full" id="ventas-dashboard-tab-panel">
             
             {/* BARRA DE NAVEGACIÓN SUB-PESTAÑAS (VENTAS VS FIDELIZACIÓN VS AUDITORÍA DB) */}
-            <div className="flex bg-[#EBF5FB] p-1.5 rounded-xl gap-2 border border-[#AED6F1] w-full">
+            <div className="flex bg-[#EBF5FB] p-1.5 rounded-xl gap-2 border border-[#AED6F1] w-full overflow-x-auto touch-pan-x min-w-full">
               <button
                 type="button"
                 onClick={() => setVentasSubTab('reportes')}
