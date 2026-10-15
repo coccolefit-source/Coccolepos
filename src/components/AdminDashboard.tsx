@@ -3171,8 +3171,9 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              {/* Renderizado de Gráfico de Barras y Líneas Dinámico en SVG */}
-              <div className="h-64 w-full bg-slate-50/50 rounded-xl border border-dashed border-slate-200/80 p-4 relative flex flex-col justify-between">
+              {/* Renderizado de Gráfico de Barras y Líneas Dinámico en SVG (Permite desplazamiento horizontal en móviles y tabletas) */}
+              <div className="w-full overflow-x-auto touch-pan-x pb-2 scrollbar-thin">
+                <div className="h-64 min-w-[620px] sm:min-w-full bg-slate-50/50 rounded-xl border border-dashed border-slate-200/80 p-4 relative flex flex-col justify-between">
                 <div className="flex-1 flex items-end justify-between gap-2.5 pt-4 px-2">
                   {chartData.map((d, index) => {
                     const pct = (d.value / maxVal) * 100;
@@ -3206,6 +3207,7 @@ export default function AdminDashboard({
                 <div className="absolute left-4 right-4 top-2/4 h-px border-t border-slate-100 pointer-events-none"></div>
                 <div className="absolute left-4 right-4 top-3/4 h-px border-t border-slate-100 pointer-events-none"></div>
               </div>
+            </div>
             </div>
 
 {/* TABLA / LOG DE TRANSACCIONES AUDITABLES */}
