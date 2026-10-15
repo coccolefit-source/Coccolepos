@@ -756,11 +756,7 @@ export default function AdminDashboard({
     }
   };
 
-  const [salesStartDate, setSalesStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    return getLocalDateString(d);
-  });
+  const [salesStartDate, setSalesStartDate] = useState(() => getLocalDateString());
   const [salesEndDate, setSalesEndDate] = useState(() => getLocalDateString());
   const [salesSeller, setSalesSeller] = useState('');
   const [salesSearch, setSalesSearch] = useState('');
@@ -2640,7 +2636,1968 @@ export default function AdminDashboard({
       {/* CONTENIDO DE TABS */}
       <div className="w-full space-y-6">
 
-      {/* TENDENCIA / REPORTES VISUALES DE NEGOCIO */}
+      {isTabOpen('ventas') && (
+        <div className={activeTab === 'ventas' ? 'w-full space-y-6' : 'hidden'}>
+          {(() => {
+        // --- CÁLCULOS PARA LA PESTAÑA DE FIDELIZACIÓN ---
+        const allClientes = clientes || [];
+        const todayStr = getLocalDateString();
+        const monthStartStr = todayStr.substring(0, 7);
+
+        const filteredClientes = allClientes.filter(c => {
+          if (clienteSearch.trim()) {
+            const q = clienteSearch.toLowerCase();
+            const matchName = c.nombre.toLowerCase().includes(q);
+            const matchPhone = c.telefono.includes(q);
+            if (!matchName && !matchPhone) return false;
+          }
+
+          if (clienteSegmentoFilter === 'frecuentes') {
+            return c.total_compras_count > 3;
+          }
+          if (clienteSegmentoFilter === 'inactivos') {
+            if (!c.ultima_fecha_compra) return true;
+            const lastDate = new Date(c.ultima_fecha_compra).getTime();
+            const now = new Date(todayStr).getTime();
+            const diffDays = (now - lastDate) / (1000 * 3600 * 24);
+            return diffDays > 30;
+          }
+          if (clienteSegmentoFilter === 'nuevos') {
+            return c.fecha_registro.startsWith(monthStartStr);
+          }
+          return true;
+        });
+
+        const totalClientesCount = allClientes.length;
+        const recurrentesCount = allClientes.filter(c => c.total_compras_count > 3).length;
+        const totalMontoComprado = allClientes.reduce((sum, c) => sum + c.total_compras_monto, 0);
+        const ticketPromedioCliente = totalClientesCount > 0 ? totalMontoComprado / totalClientesCount : 0;
+
+        const handleExportClientesCSV = () => {
+          const headers = ['Nombre del Cliente', 'Teléfono Móvil', 'Fecha de Registro', 'Total Compras ($)', 'Frecuencia de Visita', 'Última Fecha de Compra'];
+          const rows = filteredClientes.map(c => [
+            c.nombre,
+            c.telefono,
+            c.fecha_registro,
+            c.total_compras_monto.toFixed(2),
+            c.total_compras_count,
+            c.ultima_fecha_compra
+          ]);
+          downloadCSV('fidelizacion_clientes_coccolefit.csv', headers, rows);
+        };
+
+        // --- CALCULOS DE FILTROS PARA EL REPORTE DE VENTAS ---
+        const filteredSales = (ventasRegistradas || []).filter(v => {
+          const saleDate = v.fecha; // 'YYYY-MM-DD'
+          const matchesStartDate = !salesStartDate || saleDate >= salesStartDate;
+          const matchesEndDate = !salesEndDate || saleDate <= salesEndDate;
+          const matchesSeller = !salesSeller || v.usuario_id === salesSeller;
+          
+          // Buscar en productos de la venta, cliente o nombre del vendedor
+          const q = salesSearch.toLowerCase();
+          const matchesSearch = !salesSearch.trim() || 
+            v.vendedor_nombre.toLowerCase().includes(q) ||
+            (v.cliente_nombre && v.cliente_nombre.toLowerCase().includes(q)) ||
+            (v.cliente_telefono && v.cliente_telefono.includes(q)) ||
+            v.productos_vendidos.some(p => p.nombre.toLowerCase().includes(q) || p.codigo.toLowerCase().includes(q));
+          
+          const matchesPaymentMethod = !salesPaymentMethod || 
+            (salesPaymentMethod === 'efectivo' ? isEfectivo(v.metodo_pago) :
+             salesPaymentMethod === 'tarjeta' ? isTarjeta(v.metodo_pago) :
+             salesPaymentMethod === 'transferencia' ? isTransferencia(v.metodo_pago) :
+             salesPaymentMethod === 'rappi' ? isRappi(v.metodo_pago) :
+             v.metodo_pago === salesPaymentMethod);
+            
+          return matchesStartDate && matchesEndDate && matchesSeller && matchesSearch && matchesPaymentMethod;
+        });
+
+        // Ventas activas (excluye las anuladas para los totales financieros de caja)
+        const activeFilteredSales = filteredSales.filter(v => v.estado !== 'Anulada');
+        
+        const totalEfectivoFiltered = activeFilteredSales.filter(v => isEfectivo(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
+        const totalTarjetaFiltered = activeFilteredSales.filter(v => isTarjeta(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
+        const totalTransferenciaFiltered = activeFilteredSales.filter(v => isTransferencia(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
+        const totalRappiFiltered = activeFilteredSales.filter(v => isRappi(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
+
+        const totalFilteredAmount = activeFilteredSales.reduce((acc, curr) => acc + curr.total, 0);
+        const ticketPromedio = activeFilteredSales.length > 0 ? totalFilteredAmount / activeFilteredSales.length : 0;
+
+        // Encontrar el vendedor estrella en los registros filtrados activos
+        const sellerTotals: Record<string, number> = {};
+        activeFilteredSales.forEach(s => {
+          sellerTotals[s.vendedor_nombre] = (sellerTotals[s.vendedor_nombre] || 0) + s.total;
+        });
+        let starSellerName = 'Ninguno';
+        let starSellerTotal = 0;
+        Object.entries(sellerTotals).forEach(([name, tot]) => {
+          if (tot > starSellerTotal) {
+            starSellerTotal = tot;
+            starSellerName = name;
+          }
+        });
+
+        // --- CÁLCULO DE DATOS PARA LAS GRÁFICAS DE TENDENCIA ---
+        let chartData: Array<{ label: string; value: number }> = [];
+        
+        if (chartView === '7days') {
+          const days = [];
+          for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days.push(getLocalDateString(d));
+          }
+          chartData = days.map(d => {
+            const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
+            const total = daySales.reduce((sum, s) => sum + s.total, 0);
+            const parts = d.split('-');
+            const label = `${parts[2]}/${parts[1]}`;
+            return { label, value: total };
+          });
+        } else if (chartView === '15days') {
+          const days = [];
+          for (let i = 14; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days.push(getLocalDateString(d));
+          }
+          chartData = days.map(d => {
+            const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
+            const total = daySales.reduce((sum, s) => sum + s.total, 0);
+            const parts = d.split('-');
+            const label = `${parts[2]}/${parts[1]}`;
+            return { label, value: total };
+          });
+        } else {
+          const months = [
+            { key: '2026-06', name: 'Junio' },
+            { key: '2026-07', name: 'Julio' },
+            { key: '2026-08', name: 'Agosto' }
+          ];
+          chartData = months.map(m => {
+            const monthSales = (ventasRegistradas || []).filter(v => v.fecha.startsWith(m.key) && v.estado !== 'Anulada');
+            const total = monthSales.reduce((sum, s) => sum + s.total, 0);
+            return { label: m.name, value: total };
+          });
+        }
+
+        const maxVal = Math.max(...chartData.map(d => d.value), 100);
+
+        return (
+          <div className="space-y-6 w-full" id="ventas-dashboard-tab-panel">
+            
+            {/* BARRA DE NAVEGACIÓN SUB-PESTAÑAS (VENTAS VS FIDELIZACIÓN VS AUDITORÍA DB) */}
+            <div className="flex bg-[#EBF5FB] p-1.5 rounded-xl gap-2 border border-[#AED6F1] w-full">
+              <button
+                type="button"
+                onClick={() => setVentasSubTab('reportes')}
+                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
+                  ventasSubTab === 'reportes'
+                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                }`}
+              >
+                Resumen de Ventas & Catálogo POS
+              </button>
+              <button
+                type="button"
+                onClick={() => setVentasSubTab('fidelizacion')}
+                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
+                  ventasSubTab === 'fidelizacion'
+                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                }`}
+              >
+                Programa de Fidelización
+              </button>
+            </div>
+
+            {ventasSubTab === 'fidelizacion' ? (
+              /* VISTA DE PROGRAMA DE FIDELIZACIÓN DE CLIENTES */
+              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-6">
+                
+                {/* Encabezado y Acción de Exportación */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
+                  <div>
+                    <h3 className="text-base font-extrabold text-[#2C3E50]">
+                      Programa de Fidelización de Clientes
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Monitoreo de consumos, frecuencia y métricas de recurrencia de la comunidad COCCOLE FIT.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleExportClientesCSV}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
+                  >
+                    Exportar Base de Datos (CSV)
+                  </button>
+                </div>
+
+                {/* Métricas Clave */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+                  <div className="bg-[#FFFDF6] border border-[#E2E8F0] p-4 rounded-xl space-y-1">
+                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
+                      Total de Clientes
+                    </span>
+                    <p className="text-2xl font-black text-[#2C3E50]">{totalClientesCount}</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Clientes registrados en base de datos</p>
+                  </div>
+
+                  <div className="bg-[#FFFDF6] border border-[#E2E8F0] p-4 rounded-xl space-y-1">
+                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
+                      Clientes Recurrentes
+                    </span>
+                    <p className="text-2xl font-black text-[#2C3E50]">{recurrentesCount}</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Clientes con más de 3 compras acumuladas</p>
+                  </div>
+
+                  <div className="bg-[#FFFDF6] border border-[#E2E8F0] p-4 rounded-xl space-y-1">
+                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
+                      Ticket Promedio por Cliente
+                    </span>
+                    <p className="text-2xl font-black text-[#4B9CD3]">{formatMoney(ticketPromedioCliente)}</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Consumo acumulado promedio por usuario</p>
+                  </div>
+                </div>
+
+                {/* Filtros de Segmentación y Búsqueda */}
+                <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 pt-2 w-full">
+                  <div className="flex flex-wrap bg-[#EBF5FB] p-1 rounded-lg gap-1 border border-[#AED6F1]">
+                    <button
+                      type="button"
+                      onClick={() => setClienteSegmentoFilter('todos')}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                        clienteSegmentoFilter === 'todos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Todos ({allClientes.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClienteSegmentoFilter('frecuentes')}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                        clienteSegmentoFilter === 'frecuentes' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Top / Frecuentes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClienteSegmentoFilter('inactivos')}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                        clienteSegmentoFilter === 'inactivos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Inactivos (&gt;30 días)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClienteSegmentoFilter('nuevos')}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                        clienteSegmentoFilter === 'nuevos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Nuevos del Mes
+                    </button>
+                  </div>
+
+                  <div className="w-full md:w-72">
+                    <input
+                      type="text"
+                      value={clienteSearch}
+                      onChange={(e) => setClienteSearch(e.target.value)}
+                      placeholder="Buscar por nombre o teléfono..."
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] font-medium text-[#2C3E50] bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Tabla de Clientes Registrados */}
+                <div className="overflow-x-auto border border-[#E2E8F0] rounded-xl w-full">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-[#FFFDF6] border-b border-[#E2E8F0] text-[#2C3E50] uppercase font-black tracking-wider text-[10px]">
+                        <th className="p-3">Nombre del Cliente</th>
+                        <th className="p-3">Teléfono Móvil</th>
+                        <th className="p-3">Total Compras ($)</th>
+                        <th className="p-3">Frecuencia de Visita</th>
+                        <th className="p-3">Última Fecha de Compra</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      {filteredClientes.length > 0 ? (
+                        filteredClientes.map((cli) => (
+                          <tr key={cli.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-3 font-bold text-[#2C3E50]">{cli.nombre}</td>
+                            <td className="p-3 text-slate-600">{cli.telefono}</td>
+                            <td className="p-3 font-bold text-[#4B9CD3]">{formatMoney(cli.total_compras_monto)}</td>
+                            <td className="p-3">
+                              <span className="inline-block px-2 py-0.5 bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] font-bold rounded-md text-[11px]">
+                                {cli.total_compras_count} compras
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-500">{cli.ultima_fecha_compra || 'N/A'}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={5} className="p-8 text-center text-slate-400 font-semibold">
+                            No se encontraron clientes registrados para esta búsqueda o filtro.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+            ) : (
+              /* VISTA DE REPORTES DE VENTAS & CATÁLOGO POS ORIGINAL */
+              <>
+              <div className="flex flex-col gap-6 w-full">
+                <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-5 flex flex-col">
+  {/* FILTROS DE CONSULTA */}
+                <div className="space-y-3 bg-[#FFFDF6]/45 p-4 rounded-xl border border-[#E2E8F0]/60">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-1">
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Filter className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                      Filtros de Reporte por Fecha, Vendedor o Ítems
+                    </h4>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const todayStr = getLocalDateString();
+                          setSalesStartDate(todayStr);
+                          setSalesEndDate(todayStr);
+                        }}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer ${salesStartDate === getLocalDateString() && salesEndDate === getLocalDateString() ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      >
+                        Hoy (Predeterminado)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date();
+                          const endStr = getLocalDateString(d);
+                          d.setDate(d.getDate() - 7);
+                          setSalesStartDate(getLocalDateString(d));
+                          setSalesEndDate(endStr);
+                        }}
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all cursor-pointer"
+                      >
+                        Últimos 7 Días
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date();
+                          const endStr = getLocalDateString(d);
+                          d.setDate(1);
+                          setSalesStartDate(getLocalDateString(d));
+                          setSalesEndDate(endStr);
+                        }}
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all cursor-pointer"
+                      >
+                        Este Mes
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Fecha de Inicio</label>
+                      <input
+                        type="date"
+                        value={salesStartDate}
+                        onChange={(e) => setSalesStartDate(e.target.value)}
+                        className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Fecha de Término</label>
+                      <input
+                        type="date"
+                        value={salesEndDate}
+                        onChange={(e) => setSalesEndDate(e.target.value)}
+                        className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Filtrar Vendedor</label>
+                      <select
+                        value={salesSeller}
+                        onChange={(e) => setSalesSeller(e.target.value)}
+                        className="w-full text-xs px-2 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
+                      >
+                        <option value="">-- Todos los Staffs --</option>
+                        {usuarios.map(u => (
+                          <option key={u.id} value={u.id}>{u.nombre} ({u.rol === 'admin' ? 'Admin' : 'Staff'})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Medio Pago</label>
+                      <select
+                        value={salesPaymentMethod}
+                        onChange={(e) => setSalesPaymentMethod(e.target.value)}
+                        className="w-full text-xs px-2 py-1.5 border border-[#E2E8F0] rounded-lg bg-white capitalize"
+                      >
+                        <option value="">-- Todos --</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="tarjeta">Tarjeta (Datáfono)</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="rappi">Rappi</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        placeholder="Buscar por vendedor, nombre de producto, o código..."
+                        value={salesSearch}
+                        onChange={(e) => setSalesSearch(e.target.value)}
+                        className="w-full text-xs px-3 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const todayStr = getLocalDateString();
+                        setSalesStartDate(todayStr);
+                        setSalesEndDate(todayStr);
+                        setSalesSeller('');
+                        setSalesSearch('');
+                        setSalesPaymentMethod('');
+                      }}
+                      className="border border-[#E2E8F0] text-slate-600 px-3 text-xs font-bold rounded-lg hover:bg-slate-50 bg-white transition-colors"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
+                </div>
+
+                {/* KPI DESGLOSE MEDIOS DE PAGO */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-4">
+                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Efectivo</span>
+                    <span className="text-sm font-black text-[#4B9CD3] mt-0.5 block">{formatMoney(totalEfectivoFiltered)}</span>
+                  </div>
+                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Tarjeta</span>
+                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalTarjetaFiltered)}</span>
+                  </div>
+                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Transferencia</span>
+                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalTransferenciaFiltered)}</span>
+                  </div>
+                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Rappi</span>
+                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalRappiFiltered)}</span>
+                  </div>
+                </div>
+
+                {/* KPIs DEL RANGO FILTRADO */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                  <div className="bg-[#EBF5FB]/60 border border-[#AED6F1] p-3 rounded-lg text-center">
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Total Vendido</span>
+                    <span className="text-base font-black text-[#4B9CD3] mt-0.5 block">{formatMoney(totalFilteredAmount)}</span>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-center">
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Tickets Emitidos</span>
+                    <span className="text-base font-black text-slate-800 mt-0.5 block">{filteredSales.length} trans.</span>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-center">
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Ticket Promedio</span>
+                    <span className="text-base font-black text-slate-800 mt-0.5 block">{formatMoney(ticketPromedio)}</span>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-center">
+                    <span className="block text-[9px] font-extrabold text-amber-800 uppercase tracking-widest">Vendedor Estrella</span>
+                    <span className="text-xs font-black text-amber-950 mt-1 block truncate" title={starSellerName}>
+                      {starSellerName}
+                    </span>
+                  </div>
+                </div>
+</div>
+
+<div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+<div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-[#4B9CD3]" />
+                    Panel de Tendencias de Ventas
+                  </h3>
+                  <p className="text-xs text-slate-500">Visualiza el comportamiento de ventas por rango temporal o comparativas mensuales.</p>
+                </div>
+
+                <div className="flex bg-[#EBF5FB] p-1 rounded-lg gap-1 border border-[#AED6F1] self-stretch md:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setChartView('7days')}
+                    className={`flex-1 md:flex-initial text-xs font-bold px-3 py-1.5 rounded-md transition-all ${
+                      chartView === '7days' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Últimos 7 Días
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChartView('15days')}
+                    className={`flex-1 md:flex-initial text-xs font-bold px-3 py-1.5 rounded-md transition-all ${
+                      chartView === '15days' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Últimos 15 Días
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChartView('monthly')}
+                    className={`flex-1 md:flex-initial text-xs font-bold px-3 py-1.5 rounded-md transition-all ${
+                      chartView === 'monthly' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Mes tras Mes
+                  </button>
+                </div>
+              </div>
+
+              {/* Renderizado de Gráfico de Barras y Líneas Dinámico en SVG */}
+              <div className="h-64 w-full bg-slate-50/50 rounded-xl border border-dashed border-slate-200/80 p-4 relative flex flex-col justify-between">
+                <div className="flex-1 flex items-end justify-between gap-2.5 pt-4 px-2">
+                  {chartData.map((d, index) => {
+                    const pct = (d.value / maxVal) * 100;
+                    return (
+                                            <div key={index} className="flex-1 flex flex-col items-center group relative h-full justify-end">
+                        {/* Total de venta del día (ARRIBA DE LA BARRA - SIEMPRE VISIBLE) */}
+                        <div className="text-[10px] font-black text-[#2C3E50] mb-1 font-mono tracking-tight text-center whitespace-nowrap bg-white/95 px-1.5 py-0.5 rounded-md border border-slate-200/80 shadow-2xs z-10">
+                          {formatMoney(d.value)}
+                        </div>
+
+                        {/* Columna de la barra */}
+                        <div 
+                          style={{ height: `${Math.max(pct, 4)}%` }}
+                          className="w-full max-w-[48px] bg-gradient-to-t from-[#4B9CD3] to-[#4c8f44] rounded-t-md hover:brightness-110 transition-all duration-300 relative flex items-start justify-center shadow-xs"
+                        />
+
+                        {/* Label de fecha */}
+                        <span className="text-[10px] text-slate-500 font-bold mt-2 truncate max-w-full">
+                          {d.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Eje horizontal */}
+                <div className="w-full h-px bg-slate-200 mt-1"></div>
+
+                {/* Gridlines indicativos de fondo */}
+                <div className="absolute left-4 right-4 top-1/4 h-px border-t border-slate-100 pointer-events-none"></div>
+                <div className="absolute left-4 right-4 top-2/4 h-px border-t border-slate-100 pointer-events-none"></div>
+                <div className="absolute left-4 right-4 top-3/4 h-px border-t border-slate-100 pointer-events-none"></div>
+              </div>
+            </div>
+
+{/* TABLA / LOG DE TRANSACCIONES AUDITABLES */}
+                <div className="w-full border border-slate-200 rounded-xl overflow-hidden shadow-xs bg-white">
+                  <div className="p-3 bg-[#FFFDF6] border-b border-slate-200 flex justify-between items-center">
+                    <h4 className="font-extrabold text-xs text-[#2C3E50] uppercase tracking-wider">
+                      Historial de Transacciones del Día (Vista de Auditoría Administrador)
+                    </h4>
+                    <span className="text-[10px] font-bold bg-[#EBF5FB] text-[#4B9CD3] px-2.5 py-1 rounded-full border border-[#AED6F1]">
+                      {filteredSales.length} Registro(s)
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <table className="w-full text-xs text-left text-slate-600">
+                      <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
+                        <tr>
+                          <th className="px-4 py-3">Hora y Fecha</th>
+                          <th className="px-4 py-3">Colaborador</th>
+                          <th className="px-4 py-3">Cliente (Teléfono/Nombre)</th>
+                          <th className="px-4 py-3">Productos Vendidos</th>
+                          <th className="px-4 py-3 text-center">Medio de Pago</th>
+                          <th className="px-4 py-3 text-right">Monto Total</th>
+                          <th className="px-4 py-3 text-center">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredSales.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="text-center py-12 text-slate-400 font-medium">
+                              Ninguna venta coincide con los criterios de filtrado.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredSales.map(v => {
+                            const isAnulada = v.estado === 'Anulada';
+                            return (
+                              <tr key={v.id} className={`transition-colors ${isAnulada ? 'bg-red-50/30' : 'hover:bg-slate-50/60 bg-white'}`}>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className="font-bold text-slate-800 block">{v.hora}</span>
+                                  <span className="block text-[10px] text-slate-400">{v.fecha}</span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-700">
+                                  {v.vendedor_nombre}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className="font-extrabold text-[#2C3E50] block">{v.cliente_nombre || 'Cliente General'}</span>
+                                  <span className="block text-[10px] font-semibold text-[#4B9CD3]">{v.cliente_telefono || 'Sin teléfono'}</span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="space-y-1 max-w-[280px]">
+                                    {v.productos_vendidos.map((prod, pIdx) => (
+                                      <div key={pIdx} className="text-[11px] text-slate-700 font-semibold flex justify-between gap-2">
+                                        <span className="truncate">{prod.nombre} x{prod.cantidad}</span>
+                                        <span className="text-slate-400 font-mono text-[10px] shrink-0">{formatMoney(prod.precio * prod.cantidad)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-center whitespace-nowrap">
+                                  <span className="inline-block px-2.5 py-1 text-[10px] font-extrabold rounded-md uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 capitalize">
+                                    {v.metodo_pago || 'Efectivo'}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right whitespace-nowrap font-extrabold">
+                                  {isAnulada ? (
+                                    <div className="text-right">
+                                      <span className="text-slate-400 line-through block font-medium">{formatMoney(v.total)}</span>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-2 py-0.5 rounded-md inline-block">
+                                        Anulada
+                                      </span>
+                                      {v.motivo_anulacion && (
+                                        <span className="block text-[9px] text-slate-500 font-normal max-w-[130px] text-right truncate" title={v.motivo_anulacion}>
+                                          Motivo: {v.motivo_anulacion}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[#4B9CD3] text-sm">{formatMoney(v.total)}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-center whitespace-nowrap">
+                                  {!isAnulada ? (
+                                    <div className="flex gap-1.5 justify-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingVentaModal({
+                                          open: true,
+                                          venta: v,
+                                          metodo_pago: v.metodo_pago || 'efectivo',
+                                          cliente_nombre: v.cliente_nombre || '',
+                                          cliente_telefono: v.cliente_telefono || '',
+                                          items: (v.productos_vendidos || []).map(p => ({ ...p })),
+                                          selectedProdIdToAdd: ''
+                                        })}
+                                        className="px-2.5 py-1.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer shrink-0"
+                                      >
+                                        Editar Venta
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setAnnullingVentaModal({
+                                          open: true,
+                                          venta: v,
+                                          motivo: ''
+                                        })}
+                                        className="px-2.5 py-1.5 bg-red-500 hover:bg-red-600 text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer shrink-0"
+                                      >
+                                        Anular / Eliminar Venta
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-slate-400 italic">
+                                      Transacción Anulada
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="space-y-6 w-full">
+  {/* EXPORTADOR DE REPORTES CONSOLIDADOS (CSV) */}
+                <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="border-b border-[#FFFDF6] pb-2">
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider text-[#4B9CD3]">Exportador de Reportes Operativos Consolidados</h4>
+                    <p className="text-xs text-slate-500">Descarga de reportes en formato CSV con valores numéricos puros para el análisis de rendimiento, inventario o ventas.</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      id="export-sales-btn"
+                      onClick={handleExportVentas}
+                      className="bg-white border border-[#E2E8F0] hover:border-[#4B9CD3] text-[#2C3E50] text-xs font-bold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-center"
+                    >
+                      Descargar Métricas de Ventas (CSV)
+                    </button>
+                    <button
+                      type="button"
+                      id="export-inventory-btn"
+                      onClick={handleExportInventario}
+                      className="bg-white border border-[#E2E8F0] hover:border-[#4B9CD3] text-[#2C3E50] text-xs font-bold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-center"
+                    >
+                      Descargar Historial de Inventario (CSV)
+                    </button>
+                    <button
+                      type="button"
+                      id="export-performance-btn"
+                      onClick={handleExportRendimiento}
+                      className="bg-white border border-[#E2E8F0] hover:border-[#4B9CD3] text-[#2C3E50] text-xs font-bold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-center"
+                    >
+                      Descargar Rendimiento de Personal (CSV)
+                    </button>
+                  </div>
+                </div>
+
+                {/* HISTORIAL DE CUADRES DE CAJA / CORTES DIARIOS */}
+                <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="border-b border-[#FFFDF6] pb-2">
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider text-[#4B9CD3]">Cortes de Caja de la Jornada (Cuadre Diario)</h4>
+                    <p className="text-xs text-slate-500">Historial de rendición de caja y observaciones de entrega de turno reportados por el staff.</p>
+                  </div>
+
+                  {cuadresCaja.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic text-center py-6">No se han registrado cortes de caja en esta jornada.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left text-slate-600">
+                        <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
+                          <tr>
+                            <th className="px-4 py-3">Fecha y Hora</th>
+                            <th className="px-4 py-3">Colaborador</th>
+                            <th className="px-4 py-3 text-right">Efectivo Contado</th>
+                            <th className="px-4 py-3 text-right">Datáfono / Transf.</th>
+                            <th className="px-4 py-3">Observaciones de Entrega</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {cuadresCaja.map(c => (
+                            <tr key={c.id} className="hover:bg-slate-50 bg-white transition-colors">
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <span className="font-bold text-slate-800">{c.fecha}</span>
+                                <span className="block text-[10px] text-slate-400">{c.hora}</span>
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-700">{c.usuario_nombre}</td>
+                              <td className="px-4 py-3 text-right font-mono font-bold text-sky-700">{formatMoney(c.efectivo_contado)}</td>
+                              <td className="px-4 py-3 text-right font-mono font-bold text-slate-700">{formatMoney(c.tarjeta_esperado)}</td>
+                              <td className="px-4 py-3 text-slate-600 font-medium max-w-[250px] truncate" title={c.observaciones}>{c.observaciones}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+
+                <div className="space-y-6 w-full">
+  {/* FILA A: REGISTRO Y EDICIÓN DE PRODUCTOS DEL CATÁLOGO (ESTRUCTURA FINANCIERA COMPLETA) */}
+              <div id="form-registro-producto" className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#2C3E50] flex items-center gap-1.5 uppercase tracking-wide text-[#4B9CD3]">
+                      <Plus className="w-4.5 h-4.5" />
+                      {editingCatProdId ? 'Editar Producto del Catálogo' : 'Registrar Nuevo Producto'}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Estructura financiera y fiscal: Código producto, Nombre, Valor bruto, Descuento, Subtotal, Impuesto cargo, Total y Precio Costo.
+                    </p>
+                  </div>
+                  {editingCatProdId && (
+                    <span className="self-start sm:self-auto text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-full flex items-center gap-1">
+                      <Edit2 className="w-3 h-3" /> Editando: {catProdCodigo}
+                    </span>
+                  )}
+                </div>
+
+                <form onSubmit={handleCatProdSubmit} className="space-y-4">
+                  {/* SECCIÓN 1: IDENTIFICACIÓN Y CATEGORÍA */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        Código Producto <span className="text-red-500">*</span>
+                      </label>
+                      <div className="flex gap-1.5 font-mono">
+                        <input
+                          type="text"
+                          placeholder="Ej. JUIC-05"
+                          value={catProdCodigo}
+                          onChange={(e) => setCatProdCodigo(e.target.value)}
+                          className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 uppercase font-bold h-9"
+                          required
+                        />
+                        {!editingCatProdId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rand = Math.floor(10 + Math.random() * 90);
+                              setCatProdCodigo(`PROD-${rand}`);
+                            }}
+                            className="bg-[#EBF5FB] hover:bg-[#cbe2ca] border border-[#AED6F1] text-[#4B9CD3] text-[10px] font-extrabold px-2.5 rounded-lg transition-colors whitespace-nowrap h-9 cursor-pointer"
+                            title="Generar código aleatorio"
+                          >
+                            Auto
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        Nombre Producto <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Parfait Berry Chía Slim"
+                        value={catProdNombre}
+                        onChange={(e) => setCatProdNombre(e.target.value)}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9 font-medium"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Categoría</label>
+                      <select
+                        value={catProdCategoria}
+                        onChange={(e) => {
+                          if (e.target.value === '___MANAGE___') {
+                            setActiveCategoryType('productosFit');
+                            setShowCategoryModal(true);
+                          } else {
+                            setCatProdCategoria(e.target.value);
+                          }
+                        }}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9 font-medium"
+                      >
+                        {categorias.productosFit.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                        <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN 2: DESGLOSE FINANCIERO Y TRIBUTARIO */}
+                  <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] rounded-xl p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                        <DollarSign className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        Estructura de Precios e Impuestos
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                        Subtotal = Valor bruto - Descuento | Total = Subtotal + Impuesto cargo
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+                      {/* 1. Valor bruto */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Valor Bruto ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdValorBruto}
+                          onChange={(e) => handleCatProdValorBrutoChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-semibold"
+                        />
+                      </div>
+
+                      {/* 2. Descuento */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Descuento ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdDescuento}
+                          onChange={(e) => handleCatProdDescuentoChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                        />
+                      </div>
+
+                      {/* 3. Subtotal */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Subtotal ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdSubtotal}
+                          onChange={(e) => handleCatProdSubtotalChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-slate-50 font-bold h-9 text-slate-700"
+                        />
+                      </div>
+
+                      {/* 4. Impuesto cargo */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase">
+                            Impuesto Cargo ($)
+                          </label>
+                          <div className="flex gap-0.5 text-[9px]">
+                            <button
+                              type="button"
+                              onClick={() => handleCatProdImpuestoTipoSelect('0')}
+                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '0' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                              title="0% Exento"
+                            >
+                              0%
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCatProdImpuestoTipoSelect('8')}
+                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '8' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                              title="8% Impoconsumo"
+                            >
+                              8%
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCatProdImpuestoTipoSelect('19')}
+                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '19' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                              title="19% IVA"
+                            >
+                              19%
+                            </button>
+                          </div>
+                        </div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdImpuestoCargo}
+                          onChange={(e) => handleCatProdImpuestoCargoChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                        />
+                      </div>
+
+                      {/* 5. Total (Precio Venta Final) */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#4B9CD3] uppercase mb-1 flex items-center justify-between">
+                          <span>Total Venta ($)</span>
+                          <span className="text-[9px] font-black text-white bg-[#4B9CD3] px-1 rounded">P. Venta</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdTotal || catProdPrecio}
+                          onChange={(e) => handleCatProdTotalChange(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border-2 border-[#AED6F1] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-black text-[#2C3E50]"
+                          required
+                        />
+                      </div>
+
+                      {/* 6. Precio Costo */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                          Precio Costo ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={catProdPrecioCosto}
+                          onChange={(e) => setCatProdPrecioCosto(e.target.value)}
+                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-semibold text-slate-700"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN 3: RESUMEN FINANCIERO EN TIEMPO REAL & BOTONES */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                    {/* Live Financial Badges */}
+                    {(() => {
+                      const vb = parseFloat(catProdValorBruto) || 0;
+                      const desc = parseFloat(catProdDescuento) || 0;
+                      const subt = parseFloat(catProdSubtotal) || Math.max(0, vb - desc);
+                      const imp = parseFloat(catProdImpuestoCargo) || 0;
+                      const tot = parseFloat(catProdTotal) || parseFloat(catProdPrecio) || (subt + imp);
+                      const costo = parseFloat(catProdPrecioCosto) || 0;
+                      const ganancia = tot - costo;
+                      const margenPct = tot > 0 && costo > 0 ? Math.round((ganancia / tot) * 100) : 0;
+
+                      return (
+                        <div className="flex flex-wrap items-center gap-2 text-xs w-full sm:w-auto">
+                          <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Subtotal:</span>
+                            <span className="font-extrabold text-slate-800">{formatMoney(subt)}</span>
+                          </div>
+                          <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Impuesto:</span>
+                            <span className="font-extrabold text-slate-800">{formatMoney(imp)}</span>
+                          </div>
+                          <div className="bg-[#EBF5FB] border border-[#AED6F1] px-2.5 py-1 rounded-lg">
+                            <span className="text-[10px] text-[#4B9CD3] font-bold uppercase mr-1">Total:</span>
+                            <span className="font-black text-[#2C3E50]">{formatMoney(tot)}</span>
+                          </div>
+                          {costo > 0 && (
+                            <div className={`border px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${ganancia >= 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                              <span className="text-[10px] font-bold uppercase">Utilidad:</span>
+                              <span className="font-black">{formatMoney(ganancia)}</span>
+                              <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-white/70">
+                                {margenPct}% margen
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Botones de Acción */}
+                    <div className="flex gap-2 w-full sm:w-auto justify-end">
+                      {editingCatProdId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCatProdCodigo('');
+                            setCatProdNombre('');
+                            setCatProdPrecio('');
+                            setCatProdValorBruto('');
+                            setCatProdDescuento('0');
+                            setCatProdSubtotal('');
+                            setCatProdImpuestoTipo('0');
+                            setCatProdImpuestoCargo('0');
+                            setCatProdTotal('');
+                            setCatProdPrecioCosto('');
+                            setCatProdCategoria('Parfaits');
+                            setEditingCatProdId(null);
+                          }}
+                          className="border border-[#E2E8F0] text-slate-600 hover:bg-slate-100 text-xs font-bold px-3 py-2 rounded-lg transition-colors h-9 cursor-pointer whitespace-nowrap"
+                        >
+                          Cancelar Edición
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-bold px-5 py-2 rounded-lg transition-colors shadow-xs h-9 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
+                      >
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        {editingCatProdId ? 'Guardar Cambios' : 'Registrar Producto'}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+
+                {/* TABLA DE PRODUCTOS REGISTRADOS EN EL CATÁLOGO (ESTRUCTURA DE COLUMNAS SOLICITADA) */}
+                <div className="border-t border-slate-100 pt-5 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <Database className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        Catálogo de Productos ({productosCatalogo.length})
+                      </h4>
+                      <span className="text-[10px] font-bold bg-[#EBF5FB] text-[#4B9CD3] px-2 py-0.5 rounded-full border border-[#AED6F1]">
+                        Activos en Tienda
+                      </span>
+                    </div>
+
+                    {/* Buscador y Exportador */}
+                    <div className="flex gap-2 items-center">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Buscar código, nombre o categoría..."
+                          value={catCatalogSearch}
+                          onChange={(e) => setCatCatalogSearch(e.target.value)}
+                          className="text-xs pl-7 pr-3 py-1.5 border border-[#E2E8F0] rounded-lg bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] w-56 sm:w-64"
+                        />
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" />
+                        {catCatalogSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setCatCatalogSearch('')}
+                            className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowCsvModal(true)}
+                        className="bg-[#4B9CD3] hover:bg-[#3B8CB3] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                        title="Importar productos de manera masiva desde un archivo CSV"
+                      >
+                        <Upload className="w-3.5 h-3.5 text-white" />
+                        <span>Carga Masiva CSV</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (productosCatalogo.length === 0) return;
+                          const headers = ['Código producto', 'Nombre producto', 'Categoría', 'Valor bruto', 'Descuento', 'Subtotal', 'Impuesto cargo', 'Total', 'Precio Costo', 'Margen Ganancia ($)', 'Margen (%)'];
+                          const rows = productosCatalogo.map(p => {
+                            const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
+                            const desc = p.descuento != null ? p.descuento : 0;
+                            const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
+                            const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
+                            const tot = p.total != null ? p.total : p.precio;
+                            const costo = p.precio_costo != null ? p.precio_costo : 0;
+                            const ganancia = tot - costo;
+                            const pct = tot > 0 && costo > 0 ? ((tot - costo) / tot * 100).toFixed(1) + '%' : '0%';
+                            return [
+                              `"${p.codigo}"`,
+                              `"${p.nombre.replace(/"/g, '""')}"`,
+                              `"${p.categoria || ''}"`,
+                              vb.toFixed(2),
+                              desc.toFixed(2),
+                              subt.toFixed(2),
+                              imp.toFixed(2),
+                              tot.toFixed(2),
+                              costo.toFixed(2),
+                              ganancia.toFixed(2),
+                              `"${pct}"`
+                            ].join(',');
+                          });
+                          const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows].join('\n');
+                          const encodedUri = encodeURI(csvContent);
+                          const link = document.createElement('a');
+                          link.setAttribute('href', encodedUri);
+                          link.setAttribute('download', `catalogo_productos_${new Date().toISOString().split('T')[0]}.csv`);
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }}
+                        className="border border-[#E2E8F0] hover:bg-slate-50 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                        title="Exportar a archivo CSV"
+                      >
+                        <Download className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        <span className="hidden sm:inline">Exportar CSV</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Resumen Financiero Rápido del Catálogo */}
+                  {(() => {
+                    const totalVenta = productosCatalogo.reduce((acc, p) => acc + (p.total != null ? p.total : p.precio), 0);
+                    const totalCosto = productosCatalogo.reduce((acc, p) => acc + (p.precio_costo || 0), 0);
+                    const avgVenta = productosCatalogo.length > 0 ? totalVenta / productosCatalogo.length : 0;
+                    const avgCosto = productosCatalogo.length > 0 ? totalCosto / productosCatalogo.length : 0;
+                    const totalGanancia = totalVenta - totalCosto;
+                    const avgMargen = totalVenta > 0 ? Math.round((totalGanancia / totalVenta) * 100) : 0;
+
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 bg-[#FFFDF6]/50 p-2.5 rounded-lg border border-slate-200/60 text-xs">
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Referencias</span>
+                          <span className="text-xs font-black text-slate-800">{productosCatalogo.length} productos</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">P. Venta Promedio</span>
+                          <span className="text-xs font-black text-[#4B9CD3]">{formatMoney(avgVenta)}</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Costo Promedio</span>
+                          <span className="text-xs font-black text-slate-700">{formatMoney(avgCosto)}</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Margen Promedio</span>
+                          <span className="text-xs font-black text-emerald-600">~{avgMargen}% rentabilidad</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* TABLA PRINCIPAL */}
+                  {(() => {
+                    const filtered = productosCatalogo.filter(p => {
+                      if (!catCatalogSearch.trim()) return true;
+                      const q = catCatalogSearch.toLowerCase().trim();
+                      return (
+                        p.codigo.toLowerCase().includes(q) ||
+                        p.nombre.toLowerCase().includes(q) ||
+                        (p.categoria && p.categoria.toLowerCase().includes(q))
+                      );
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="text-center py-8 text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
+                          <Database className="w-6 h-6 mx-auto mb-1 text-slate-300" />
+                          {catCatalogSearch ? 'Ningún producto coincide con el filtro de búsqueda.' : 'No hay productos registrados en el catálogo.'}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="w-full border border-slate-200 rounded-xl overflow-hidden shadow-2xs bg-white">
+                        <div className="overflow-x-auto w-full">
+                          <table className="w-full text-xs text-left text-slate-600">
+                            <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
+                              <tr>
+                                <th className="px-3 py-2.5">Código Producto</th>
+                                <th className="px-3 py-2.5">Nombre Producto</th>
+                                <th className="px-3 py-2.5 text-right">Valor Bruto</th>
+                                <th className="px-3 py-2.5 text-right">Descuento</th>
+                                <th className="px-3 py-2.5 text-right">Subtotal</th>
+                                <th className="px-3 py-2.5 text-right">Impuesto Cargo</th>
+                                <th className="px-3 py-2.5 text-right font-black text-[#4B9CD3]">Total (P. Venta)</th>
+                                <th className="px-3 py-2.5 text-right">Precio Costo</th>
+                                <th className="px-3 py-2.5 text-right">Utilidad / Margen</th>
+                                <th className="px-3 py-2.5 text-center">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {filtered.map(p => {
+                                const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
+                                const desc = p.descuento != null ? p.descuento : 0;
+                                const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
+                                const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
+                                const tot = p.total != null ? p.total : p.precio;
+                                const costo = p.precio_costo != null ? p.precio_costo : 0;
+                                const ganancia = tot - costo;
+                                const pct = tot > 0 && costo > 0 ? Math.round((ganancia / tot) * 100) : 0;
+
+                                return (
+                                  <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
+                                    {/* Código producto */}
+                                    <td className="px-3 py-2.5 whitespace-nowrap">
+                                      <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold border border-slate-200">
+                                        {p.codigo}
+                                      </span>
+                                    </td>
+
+                                    {/* Nombre producto */}
+                                    <td className="px-3 py-2.5">
+                                      <div className="font-bold text-slate-800">{p.nombre}</div>
+                                      <div className="text-[10px] text-slate-400 font-medium">Cat: {p.categoria || 'General'}</div>
+                                    </td>
+
+                                    {/* Valor bruto */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
+                                      {formatMoney(vb)}
+                                    </td>
+
+                                    {/* Descuento */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      {desc > 0 ? (
+                                        <span className="text-amber-600 font-semibold">-{formatMoney(desc)}</span>
+                                      ) : (
+                                        <span className="text-slate-400">$0.00</span>
+                                      )}
+                                    </td>
+
+                                    {/* Subtotal */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-semibold text-slate-700">
+                                      {formatMoney(subt)}
+                                    </td>
+
+                                    {/* Impuesto cargo */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      {imp > 0 ? (
+                                        <span className="text-slate-700 font-medium">+{formatMoney(imp)}</span>
+                                      ) : (
+                                        <span className="text-slate-400">$0.00</span>
+                                      )}
+                                    </td>
+
+                                    {/* Total (P. Venta) */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      <span className="text-sm font-black text-[#4B9CD3]">{formatMoney(tot)}</span>
+                                    </td>
+
+                                    {/* Precio Costo */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
+                                      {costo > 0 ? formatMoney(costo) : <span className="text-slate-400">--</span>}
+                                    </td>
+
+                                    {/* Utilidad / Margen */}
+                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                      {costo > 0 ? (
+                                        <div>
+                                          <span className={`font-bold ${ganancia >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {formatMoney(ganancia)}
+                                          </span>
+                                          <span className="block text-[9px] text-slate-400 font-semibold">
+                                            {pct}% margen
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-400 text-[10px]">--</span>
+                                      )}
+                                    </td>
+
+                                    {/* Acciones */}
+                                    <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                                      <div className="flex gap-1 justify-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleEditCatProd(p)}
+                                          className="p-1.5 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors border border-transparent hover:border-slate-100 cursor-pointer"
+                                          title="Editar producto"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (window.confirm(`¿Seguro que deseas eliminar el producto "${p.nombre}"?`)) {
+                                              onDeleteProductoCatalogo(p.id);
+                                            }
+                                          }}
+                                          className="p-1.5 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors border border-transparent hover:border-red-100 cursor-pointer"
+                                          title="Eliminar producto"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* MODAL DE CARGA MASIVA CSV DE PRODUCTOS */}
+              {showCsvModal && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                    {/* Modal Header */}
+                    <div className="bg-gradient-to-r from-[#2C3E50] to-[#4B9CD3] p-4 text-white flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-white/10 rounded-lg backdrop-blur-xs">
+                          <Upload className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-black uppercase tracking-wide">Carga Masiva de Productos (CSV)</h3>
+                          <p className="text-[11px] text-sky-100">Sube múltiples productos al catálogo mediante un archivo CSV o Excel</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCsvModal(false);
+                          setCsvParsedProducts([]);
+                          setCsvParseErrors([]);
+                          setCsvFileName('');
+                        }}
+                        className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Modal Body */}
+                    <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                      {/* Indicaciones y Descarga de Plantilla */}
+                      <div className="bg-[#EBF5FB] border border-[#AED6F1] rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <h4 className="text-xs font-bold text-[#1B4F72] flex items-center gap-1.5">
+                            <FileText className="w-4 h-4 text-[#4B9CD3]" />
+                            Plantilla Formateada de Ejemplo
+                          </h4>
+                          <p className="text-[11px] text-slate-600">
+                            Descarga nuestro formato CSV con las columnas correspondientes (<span className="font-mono font-bold text-slate-700">codigo, nombre, categoria, valor_bruto, descuento, total, precio_costo</span>).
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleDownloadSampleCsv}
+                          className="bg-white hover:bg-slate-50 text-[#4B9CD3] border border-[#4B9CD3] text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Descargar Plantilla CSV</span>
+                        </button>
+                      </div>
+
+                      {/* File Dropzone */}
+                      <div className="border-2 border-dashed border-slate-300 hover:border-[#4B9CD3] rounded-xl p-6 text-center bg-slate-50/50 transition-colors relative">
+                        <input
+                          type="file"
+                          accept=".csv,.txt"
+                          onChange={handleFileUpload}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        />
+                        <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                          <div className="p-3 bg-sky-100/80 rounded-full text-[#4B9CD3]">
+                            <Upload className="w-6 h-6" />
+                          </div>
+                          <p className="text-xs font-bold text-slate-700">
+                            {csvFileName ? `Archivo seleccionado: ${csvFileName}` : 'Arrastra o haz clic para subir tu archivo CSV'}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Archivos compatibles: .csv (delimitado por comas o punto y coma)
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Errores de parsing */}
+                      {csvParseErrors.length > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
+                          <div className="font-bold flex items-center gap-1 text-amber-900">
+                            <AlertCircle className="w-4 h-4 text-amber-600" />
+                            Advertencias detectadas en el archivo:
+                          </div>
+                          <ul className="list-disc list-inside text-[11px] space-y-0.5 text-amber-700 pl-1">
+                            {csvParseErrors.map((err, idx) => (
+                              <li key={idx}>{err}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Vista Previa de Productos Detectados */}
+                      {csvParsedProducts.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                              <CheckCircle className="w-4 h-4 text-emerald-500" />
+                              Vista Previa ({csvParsedProducts.length} productos válidos detectados)
+                            </h4>
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              Listos para guardar
+                            </span>
+                          </div>
+
+                          <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl">
+                            <table className="w-full text-left border-collapse text-[11px]">
+                              <thead>
+                                <tr className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                                  <th className="p-2">Código</th>
+                                  <th className="p-2">Nombre</th>
+                                  <th className="p-2">Categoría</th>
+                                  <th className="p-2 text-right">Valor Bruto</th>
+                                  <th className="p-2 text-right">Desc.</th>
+                                  <th className="p-2 text-right">Total ($)</th>
+                                  <th className="p-2 text-right">Costo ($)</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                                {csvParsedProducts.map((p, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-50">
+                                    <td className="p-2 font-mono font-bold text-slate-900">{p.codigo}</td>
+                                    <td className="p-2 font-bold">{p.nombre}</td>
+                                    <td className="p-2 text-slate-500">{p.categoria}</td>
+                                    <td className="p-2 text-right font-mono">{formatMoney(p.valor_bruto)}</td>
+                                    <td className="p-2 text-right font-mono text-emerald-600">{formatMoney(p.descuento)}</td>
+                                    <td className="p-2 text-right font-mono font-bold text-slate-900">{formatMoney(p.total)}</td>
+                                    <td className="p-2 text-right font-mono text-slate-500">{formatMoney(p.precio_costo)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Modal Footer */}
+                    <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCsvModal(false);
+                          setCsvParsedProducts([]);
+                          setCsvParseErrors([]);
+                          setCsvFileName('');
+                        }}
+                        className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={csvParsedProducts.length === 0 || isCsvUploading}
+                        onClick={handleConfirmCsvImport}
+                        className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        {isCsvUploading ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Sincronizando con Supabase...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-4 h-4" />
+                            <span>Confirmar e Importar {csvParsedProducts.length} Productos</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              </div>
+              </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
+      </div>
+      )}
+
+      {isTabOpen('gastos') && (
+        <div className={activeTab === 'gastos' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
+          <GastosModule
+            gastos={gastos}
+            ventasRegistradas={ventasRegistradas}
+            currentUser={usuarios.find(u => u.rol === 'admin') || usuarios[0] || ({ id: 'admin', nombre: 'Administrador', rol: 'admin' } as any)}
+            onSaveGasto={onSaveGasto}
+            onDeleteGasto={onDeleteGasto}
+          />
+        </div>
+      )}
+
+      {/* 9. REPORTE Y REGISTRO DE VENTAS & FIDELIZACIÓN (ADMINISTRADOR) */}
+
+      {isTabOpen('inventario') && (
+        <div className={activeTab === 'inventario' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
+          {/* Formulario de Inventario */}
+          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+            <div className="flex border-b border-[#FFFDF6] pb-3 justify-between items-center flex-wrap gap-2 mb-4">
+              <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
+                <Boxes className="w-4.5 h-4.5 text-[#4B9CD3]" />
+                {editingInvId ? 'Editar Insumo de Bodega' : 'Gestión de Insumos y Bodega'}
+              </h3>
+              {!editingInvId && (
+                <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg text-[9px]">
+                  <button
+                    type="button"
+                    onClick={() => setInvFormMode('individual')}
+                    className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
+                      invFormMode === 'individual' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Carga Individual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvFormMode('bulk');
+                      setImportStatus({ type: 'idle', message: '' });
+                    }}
+                    className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      invFormMode === 'bulk' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-3 h-3" />
+                    Carga Masiva Excel / Sheets
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {invFormMode === 'individual' || editingInvId ? (
+              <form onSubmit={handleInvSubmit}>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nombre del Recurso / Insumo</label>
+                    <input
+                      type="text"
+                      placeholder="Ej. Fresas Orgánicas..."
+                      value={invNombre}
+                      onChange={(e) => setInvNombre(e.target.value)}
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Categoría de Bodega</label>
+                    <select
+                      value={invCategoria}
+                      onChange={(e) => {
+                        if (e.target.value === '___MANAGE___') {
+                          setActiveCategoryType('inventario');
+                          setShowCategoryModal(true);
+                        } else {
+                          setInvCategoria(e.target.value);
+                        }
+                      }}
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                    >
+                      {categorias.inventario.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                      <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Stock Actual</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={invStockActual}
+                      onChange={(e) => setInvStockActual(Number(e.target.value))}
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Stock Mínimo</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={invStockMinimo}
+                      onChange={(e) => setInvStockMinimo(Number(e.target.value))}
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Unidad</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Kg, Unidades"
+                        value={invUnidad}
+                        onChange={(e) => setInvUnidad(e.target.value)}
+                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                        required
+                      />
+                    </div>
+
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        type="submit"
+                        className="bg-[#4B9CD3] text-white text-xs font-bold py-2 px-3 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer whitespace-nowrap"
+                      >
+                        {editingInvId ? 'Guardar' : 'Registrar'}
+                      </button>
+                      {editingInvId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingInvId(null);
+                            setInvNombre('');
+                            setInvCategoria('insumos');
+                            setInvStockActual(10);
+                            setInvStockMinimo(5);
+                            setInvUnidad('Kg');
+                          }}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2 px-2.5 rounded-lg transition-colors h-9 cursor-pointer"
+                        >
+                          X
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </form>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start text-xs animate-in fade-in duration-150">
+                {/* BANNER PRINCIPAL DE CARGA MASIVA CON EXCEL */}
+                <div className="col-span-1 md:col-span-12 bg-[#FFFDF6] border-2 border-dashed border-[#4B9CD3]/50 rounded-xl p-4 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-[#EBF5FB] flex items-center justify-center text-[#4B9CD3] shrink-0 border border-[#AED6F1]">
+                      <FileSpreadsheet className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-sm text-[#2C3E50] flex items-center gap-2">
+                        Carga Masiva con Archivo Excel (.xlsx / .xls / .csv)
+                        <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border border-emerald-200">
+                          Recomendado
+                        </span>
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Sube tu archivo de Excel o CSV con tus productos e insumos para registrarlos automáticamente en bodega.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleExcel}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-200"
+                      title="Descargar plantilla de archivo Excel con formato listo para llenar"
+                    >
+                      <Download className="w-3.5 h-3.5 text-slate-600" />
+                      Plantilla Ejemplo
+                    </button>
+
+                    <label className="px-4 py-2 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 cursor-pointer shadow-xs border border-[#3A82B4]">
+                      <FileSpreadsheet className="w-4 h-4" />
+                      <span>Cargar Archivo Excel</span>
+                      <input
+                        type="file"
+                        accept=".xlsx, .xls, .csv"
+                        onChange={handleExcelFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="md:col-span-4 bg-[#EBF5FB] text-[#4B9CD3] p-4 rounded-lg border border-[#AED6F1]/40">
+                  <p className="font-extrabold text-[10px] uppercase tracking-wide flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                    ¿Cómo importar de Google Sheets?
+                  </p>
+                  <ol className="list-decimal pl-4 mt-1.5 text-[10.5px] space-y-1 text-[#2C3E50] font-semibold leading-relaxed">
+                    <li>Abre tu documento en <strong>Google Sheets</strong>.</li>
+                    <li>
+                      Copia tus columnas. Formato de izquierda a derecha:
+                      <br />
+                      <code className="bg-white/70 px-1 py-0.5 rounded-md font-mono text-[9px] border border-[#AED6F1]/60 block mt-0.5 font-bold">
+                        Nombre | Categoría | Stock | Mínimo | Unidad
+                      </code>
+                    </li>
+                    <li>Pega en la caja de la derecha o ingresa el enlace de tu hoja.</li>
+                  </ol>
+                </div>
+
+                <div className="md:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Estrategia de Carga</label>
+                      <div className="flex gap-2">
+                        <label className="flex-1 flex items-center gap-2 border border-[#E2E8F0] p-2 rounded-lg bg-[#FFFDF6]/20 cursor-pointer hover:bg-slate-50 transition-colors">
+                          <input
+                            type="radio"
+                            name="importOption"
+                            value="append"
+                            checked={importOption === 'append'}
+                            onChange={() => setImportOption('append')}
+                            className="accent-[#4B9CD3]"
+                          />
+                          <div className="text-[10px]">
+                            <p className="font-bold text-[#2C3E50]">Adicionar</p>
+                            <p className="text-[8px] text-slate-400">Suma a la lista actual</p>
+                          </div>
+                        </label>
+                        <label className="flex-1 flex items-center gap-2 border border-[#E2E8F0] p-2 rounded-lg bg-[#FFFDF6]/20 cursor-pointer hover:bg-slate-50 transition-colors">
+                          <input
+                            type="radio"
+                            name="importOption"
+                            value="replace"
+                            checked={importOption === 'replace'}
+                            onChange={() => setImportOption('replace')}
+                            className="accent-[#4B9CD3]"
+                          />
+                          <div className="text-[10px]">
+                            <p className="font-bold text-[#2C3E50]">Reemplazar</p>
+                            <p className="text-[8px] text-slate-400">Borra lista y carga nuevo</p>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                        <Link className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        Opción A: Enlace de Google Sheets (Público)
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="url"
+                          placeholder="https://docs.google.com/spreadsheets/d/..."
+                          value={sheetLink}
+                          onChange={(e) => setSheetLink(e.target.value)}
+                          className="flex-1 text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleFetchSheetLink}
+                          className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer h-9"
+                        >
+                          <Database className="w-3 h-3" />
+                          Importar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                      <Upload className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                      Opción B: Pegar Celdas Directamente
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="Fresas de Huerto	insumos	20	5	Kg&#10;Vasos Eco 12oz	empaques	150	30	Unidades"
+                      value={bulkPasteText}
+                      onChange={(e) => setBulkPasteText(e.target.value)}
+                      className="w-full text-[10px] font-mono p-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 resize-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => parseAndImportRows(bulkPasteText)}
+                      className="w-full bg-slate-950 hover:bg-slate-900 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Cargar Filas Pegadas
+                    </button>
+                  </div>
+                </div>
+
+                {importStatus.message && (
+                  <div className={`col-span-1 md:col-span-12 p-2.5 rounded-lg text-[10.5px] font-bold ${
+                    importStatus.type === 'success' ? 'bg-sky-50 text-sky-800 border border-sky-200' :
+                    importStatus.type === 'error' ? 'bg-red-50 text-red-800 border border-red-200' :
+                    'bg-sky-50 text-sky-800 border border-sky-200 animate-pulse'
+                  }`}>
+                    {importStatus.message}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Listado del Inventario en Tiempo Real */}
+          <div className="w-full space-y-4">
+            {/* Alertas Rápidas de Stock Bajo */}
+            {inventario.filter(item => item.stock_actual <= item.stock_minimo_alerta).length > 0 && (
+              <div className="bg-red-50 border-l-4 border-red-500 text-red-900 rounded-xl p-4 shadow-2xs">
+                <p className="font-extrabold text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 animate-bounce" />
+                  ALERTA DE SEGURIDAD ALIMENTARIA: {inventario.filter(item => item.stock_actual <= item.stock_minimo_alerta).length} recursos están en niveles críticos de stock.
+                </p>
+                <p className="text-[11px] text-red-700 mt-1">
+                  El personal de cocina y atención requiere reabastecimiento para mantener las metas diarias de ventas fit.
+                </p>
+              </div>
+            )}
+
+            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4 pb-2 border-b border-[#FFFDF6]">
+                <div className="space-y-0.5">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-[#4B9CD3]">Control en Tiempo Real de Almacén</h4>
+                  <p className="text-xs text-slate-500">Refleja automáticamente los conteos diarios ingresados por tu personal en las terminales.</p>
+                </div>
+                <div className="flex gap-1 bg-slate-50 p-1 border border-slate-200 rounded-lg text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">Total: {inventario.length} items</span>
+                  <span className="px-2 py-0.5 rounded-md bg-red-100 text-red-800">Alertas: {inventario.filter(item => item.stock_actual <= item.stock_minimo_alerta).length}</span>
+                </div>
+              </div>
+
+              {inventario.length === 0 ? (
+                <p className="text-center py-12 text-slate-400 text-xs">No hay recursos agregados en el inventario.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#E2E8F0]/60 text-[10px] text-slate-400 uppercase font-black tracking-wider">
+                        <th className="py-2.5 px-3">Recurso</th>
+                        <th className="py-2.5 px-3">Categoría</th>
+                        <th className="py-2.5 px-3 text-center">Stock Actual</th>
+                        <th className="py-2.5 px-3 text-center">Límite Mínimo</th>
+                        <th className="py-2.5 px-3">Última Actualización</th>
+                        <th className="py-2.5 px-3 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#FFFDF6] text-xs">
+                      {inventario.map(item => {
+                        const esCritico = item.stock_actual <= item.stock_minimo_alerta;
+                        return (
+                          <tr key={item.id} className={`hover:bg-slate-50/50 transition-colors ${esCritico ? 'bg-red-50/20' : ''}`}>
+                            <td className="py-3 px-3 font-extrabold text-[#2C3E50]">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${esCritico ? 'bg-red-500 animate-pulse' : 'bg-sky-500'}`} />
+                                {item.nombre}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase ${
+                                item.categoria === 'insumos' ? 'bg-orange-50 text-orange-800 border border-orange-100' :
+                                item.categoria === 'empaques' ? 'bg-sky-50 text-sky-800 border border-sky-100' :
+                                'bg-sky-50 text-sky-800 border border-sky-100'
+                              }`}>
+                                {item.categoria}
+                              </span>
+                            </td>
+                            <td className={`py-3 px-3 text-center font-black ${esCritico ? 'text-red-700 text-sm' : 'text-slate-800'}`}>
+                              {item.stock_actual} <span className="text-[9px] font-medium text-slate-400">{item.unidad}</span>
+                            </td>
+                            <td className="py-3 px-3 text-center text-slate-400 font-bold">
+                              {item.stock_minimo_alerta} {item.unidad}
+                            </td>
+                            <td className="py-3 px-3">
+                              {item.ultima_actualizacion_fecha ? (
+                                <div className="space-y-0.5">
+                                  <p className="text-[10px] text-slate-700 font-bold">{item.ultima_actualizacion_por || 'Sistema'}</p>
+                                  <p className="text-[9px] text-slate-400 font-semibold">{item.ultima_actualizacion_fecha}</p>
+                                </div>
+                              ) : (
+                                <span className="text-slate-300 text-[10px]">Sin cambios registrados</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-right">
+                              <div className="flex gap-1 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditInvClick(item)}
+                                  className="p-1.5 text-slate-600 hover:text-[#4B9CD3] hover:bg-[#EBF5FB]/60 rounded-lg transition-all"
+                                  title="Editar recurso"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteInventarioItem(item.id)}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                  title="Eliminar del inventario"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+
+
+      {/* 8. CONTROL DE GASTOS */}
+
       {isTabOpen('tendencia') && (
         <div className={activeTab === 'tendencia' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
           <TendenciaModule
@@ -2651,6 +4608,7 @@ export default function AdminDashboard({
       )}
 
       {/* FINANCIEROS Y RENTABILIDAD */}
+
       {isTabOpen('financieros') && (
         <div className={activeTab === 'financieros' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
           <FinancierosModule
@@ -2662,434 +4620,7 @@ export default function AdminDashboard({
       )}
 
       {/* 1. GESTOR DE TAREAS */}
-      {isTabOpen('tareas') && (
-        <div className={activeTab === 'tareas' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
-          {/* Panel de Monitoreo de Productividad y Cumplimiento de Tareas */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b border-slate-100 gap-3">
-              <div>
-                <h3 className="text-sm font-bold text-[#2C3E50] flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-[#4B9CD3]" />
-                  Monitoreo de Productividad del Personal
-                </h3>
-                <p className="text-[10px] text-slate-500 mt-0.5">Control de avance diario de tareas de colaboradores registrado en Supabase.</p>
-              </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <input
-                  type="date"
-                  value={adminFechaProd}
-                  onChange={(e) => {
-                    setAdminFechaProd(e.target.value);
-                    cargarProductividadAdmin(e.target.value);
-                  }}
-                  className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]"
-                />
-                <button
-                  type="button"
-                  onClick={() => cargarProductividadAdmin(adminFechaProd)}
-                  className="bg-[#4B9CD3] hover:bg-[#3A88BE] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
-                >
-                  Consultar
-                </button>
-              </div>
-            </div>
 
-            {loadingAdminProd ? (
-              <p className="text-xs text-slate-400 text-center py-4">Consultando datos de productividad...</p>
-            ) : adminProductividadData.length === 0 ? (
-              <div className="text-center py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
-                <p className="text-xs font-bold text-slate-600">Sin registros de productividad para la fecha seleccionada ({adminFechaProd})</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {adminProductividadData.map(item => (
-                  <div key={item.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-800">{item.employee_name}</span>
-                      <span className="text-xs font-extrabold text-[#4B9CD3]">{item.porcentaje}%</span>
-                    </div>
-                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner">
-                      <div
-                        className={`h-2.5 rounded-full transition-all duration-500 ${
-                          item.porcentaje >= 100
-                            ? 'bg-emerald-500'
-                            : item.porcentaje >= 50
-                            ? 'bg-[#4B9CD3]'
-                            : 'bg-amber-500'
-                        }`}
-                        style={{ width: `${item.porcentaje}%` }}
-                      ></div>
-                    </div>
-                    <div className="flex justify-between text-[11px] text-slate-500 pt-1">
-                      <span>{item.completadas} de {item.totales} completadas</span>
-                      <span>{new Date(item.updated_at).toLocaleTimeString()}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Formulario de Tarea */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
-              <Plus className="w-4 h-4 text-[#4B9CD3]" />
-              {editingTareaId ? 'Modificar Tarea' : 'Crear Tarea Diaria'}
-            </h3>
-            
-            <form onSubmit={handleTareaSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Título de Tarea</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Sanitizar extractores de jugos"
-                    value={tareaTitulo}
-                    onChange={(e) => setTareaTitulo(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Instrucciones / Descripción</label>
-                  <input
-                    type="text"
-                    placeholder="Detalles específicos para asegurar el estándar..."
-                    value={tareaDesc}
-                    onChange={(e) => setTareaDesc(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Área de Trabajo</label>
-                  <select
-                    value={tareaArea}
-                    onChange={(e) => {
-                      if (e.target.value === '___MANAGE___') {
-                        setActiveCategoryType('areasTrabajo');
-                        setShowCategoryModal(true);
-                      } else {
-                        setTareaArea(e.target.value);
-                      }
-                    }}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white"
-                  >
-                    {categorias.areasTrabajo.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                    <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Tipo / Checklist</label>
-                  <select
-                    value={tareaTipo}
-                    onChange={(e) => {
-                      if (e.target.value === '___MANAGE___') {
-                        setActiveCategoryType('tareas');
-                        setShowCategoryModal(true);
-                      } else {
-                        setTareaTipo(e.target.value);
-                      }
-                    }}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white"
-                  >
-                    {categorias.tareas.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                    <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase">Asignado A</label>
-                    <label className="flex items-center gap-1 text-[10px] font-extrabold text-[#4B9CD3] cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={asignarATodos}
-                        onChange={(e) => setAsignarATodos(e.target.checked)}
-                        className="w-3.5 h-3.5 text-[#4B9CD3] border-[#E2E8F0] focus:ring-[#4B9CD3] rounded-sm cursor-pointer mr-1"
-                      />
-                      Asignar a todos
-                    </label>
-                  </div>
-                  <select
-                    value={tareaAsignado}
-                    onChange={(e) => setTareaAsignado(e.target.value)}
-                    disabled={asignarATodos}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 disabled:opacity-50 disabled:bg-slate-50"
-                  >
-                    {asignarATodos ? (
-                      <option value="ALL">👥 Todos los empleados ({empleados.length})</option>
-                    ) : (
-                      empleados.map(emp => (
-                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Duración Estimada (Minutos)</label>
-                  <input
-                    type="number"
-                    min="5"
-                    max="480"
-                    value={tareaTiempo}
-                    onChange={(e) => setTareaTiempo(Number(e.target.value))}
-                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30"
-                  />
-                </div>
-
-                <div className="flex gap-3 items-center">
-                  <div className="flex items-center gap-2 flex-1">
-                    <input
-                      type="checkbox"
-                      id="requiere_foto"
-                      checked={tareaRequiereFoto}
-                      onChange={(e) => setTareaRequiereFoto(e.target.checked)}
-                      className="w-4 h-4 rounded-sm border-[#E2E8F0] text-[#4B9CD3] focus:ring-[#4B9CD3]"
-                    />
-                    <label htmlFor="requiere_foto" className="text-xs font-semibold text-slate-600 select-none cursor-pointer">
-                      ¿Evidencia de foto?
-                    </label>
-                  </div>
-
-                  <div className="flex gap-2 shrink-0">
-                    <button
-                      type="submit"
-                      className="bg-[#4B9CD3] text-white text-xs font-bold py-2 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer"
-                    >
-                      {editingTareaId ? 'Actualizar' : 'Asignar'}
-                    </button>
-                    {editingTareaId && (
-                      <button
-                        type="button"
-                        onClick={handleCancelEdit}
-                        className="bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-bold py-2 px-3 rounded-lg transition-colors h-9"
-                      >
-                        X
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </form>
-          </div>
-
-          {/* Tabla de tareas del día */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 border-b border-slate-100 pb-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5 mr-2">
-                  <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
-                  Bitácora de Tareas Diarias
-                </h3>
-                
-                {/* Selector de Fecha para Bitácora */}
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
-                  <Calendar className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                  <input
-                    type="date"
-                    value={fechaFiltroBitacora}
-                    onChange={(e) => setFechaFiltroBitacora(e.target.value)}
-                    className="bg-white border border-slate-300 text-slate-800 text-[11px] font-bold rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] cursor-pointer"
-                  />
-                  {fechaFiltroBitacora !== getLocalDateString() && (
-                    <button
-                      type="button"
-                      onClick={() => setFechaFiltroBitacora(getLocalDateString())}
-                      className="text-[10px] bg-[#EBF5FB] hover:bg-[#D4E6F1] text-[#4B9CD3] font-bold px-2 py-1 rounded-md transition-all cursor-pointer"
-                    >
-                      Hoy
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => cargarTareasAdminPorFecha(fechaFiltroBitacora)}
-                    title="Recargar tareas desde Supabase"
-                    className="p-1 hover:bg-slate-200 text-slate-500 rounded-md transition-colors cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${cargandoTareasBitacora ? 'animate-spin text-[#4B9CD3]' : ''}`} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {cargandoTareasBitacora && (
-                  <span className="text-[10px] text-blue-600 font-bold animate-pulse">Sincronizando...</span>
-                )}
-                {eliminandoTareas && (
-                  <span className="text-[10px] text-rose-600 font-bold animate-pulse">Borrando...</span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleBorrarTodasLasTareas}
-                  disabled={eliminandoTareas || cargandoTareasBitacora}
-                  title={`Eliminar todas las tareas del día ${fechaFiltroBitacora}`}
-                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                  Borrar Todas ({fechaFiltroBitacora})
-                </button>
-                <button
-                  type="button"
-                  onClick={handleGenerarAsignacionPredeterminada}
-                  disabled={eliminandoTareas || cargandoTareasBitacora}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Generar 24 Tareas ({fechaFiltroBitacora})
-                </button>
-              </div>
-            </div>
-
-            {(() => {
-              const tareasMostrar = (tareasAdminFecha !== null ? tareasAdminFecha : tareas).filter(t => 
-                !t.fecha || getLocalDateString(t.fecha) === fechaFiltroBitacora
-              );
-
-              if (tareasMostrar.length === 0) {
-                return (
-                  <div className="text-center py-12 text-slate-400 text-xs">
-                    {cargandoTareasBitacora 
-                      ? 'Cargando bitácora de Supabase...' 
-                      : `No hay tareas creadas para la fecha ${fechaFiltroBitacora}.`}
-                  </div>
-                );
-              }
-
-              return (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-[#E2E8F0] text-[10px] uppercase text-slate-400 font-bold tracking-wider">
-                        <th className="w-8"></th>
-                        <th className="py-2 px-3">Tarea</th>
-                        <th className="py-2 px-3 text-center">Área</th>
-                        <th className="py-2 px-3">Asignado</th>
-                        <th className="py-2 px-3 text-center">Tiempo Est.</th>
-                        <th className="py-2 px-3 text-center">Duración</th>
-                        <th className="py-2 px-3 text-center">Foto</th>
-                        <th className="py-2 px-3 text-center">Estado</th>
-                        <th className="py-2 px-3 text-right">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#E5EAE4] text-xs">
-                      {[...tareasMostrar].sort((a, b) => {
-                        const empA = getEmpleadoNombre(a.asignado_a);
-                        const empB = getEmpleadoNombre(b.asignado_a);
-                        if (empA !== empB) return empA.localeCompare(empB);
-                        return (a.orden || 0) - (b.orden || 0);
-                      }).map(t => (
-                      <tr 
-                        key={t.id} 
-                        className={`hover:bg-[#FFFDF6]/50 ${draggedTaskId === t.id ? 'opacity-50' : ''}`}
-                        draggable
-                        onDragStart={(e) => handleDragStartTask(e, t.id)}
-                        onDragOver={handleDragOverTask}
-                        onDrop={(e) => handleDropTask(e, t.id)}
-                      >
-                        <td className="py-3 px-1 text-center cursor-grab text-slate-300 hover:text-slate-600">
-                          <GripVertical className="w-4 h-4 mx-auto" />
-                        </td>
-                        <td className="py-3 px-3 max-w-[180px]">
-                          <p className="font-bold text-[#2C3E50] truncate" title={t.titulo}>
-                            {t.titulo}
-                          </p>
-                          <p className="text-[10px] text-slate-400 line-clamp-1" title={t.descripcion}>
-                            {t.descripcion || 'Sin instrucciones adicionales'}
-                          </p>
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          {getAreaBadge(t.area)}
-                        </td>
-                        <td className="py-3 px-3 font-semibold text-slate-600">
-                          {getEmpleadoNombre(t.asignado_a)}
-                        </td>
-                        <td className="py-3 px-3 text-center font-bold text-slate-700">
-                          {t.tiempo_estimado_min} min
-                        </td>
-                        <td className="py-3 px-3 text-center font-semibold">
-                          {t.started_at ? (
-                            <span className={`px-2 py-0.5 rounded text-[10px] ${
-                              t.estado === 'Completada' 
-                                ? 'bg-[#EBF5FB] text-[#4B9CD3] border border-blue-100' 
-                                : t.estado === 'En proceso'
-                                ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}>
-                              {calcularTiempoTarea(t.started_at, t.completed_at)}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 italic text-[10px]">Sin iniciar</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <div className="flex flex-col items-center justify-center gap-1">
-                            <span className={t.requiere_foto ? 'text-[#4B9CD3] font-bold text-[10px]' : 'text-slate-400 text-[10px]'}>
-                              {t.requiere_foto ? 'Requerida' : 'Opcional'}
-                            </span>
-                            {t.foto_url ? (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedPreviewPhoto(t.foto_url || null)}
-                                className="mt-1 group relative focus:outline-hidden transition-transform hover:scale-105"
-                              >
-                                <img 
-                                  src={t.foto_url} 
-                                  alt="Evidencia" 
-                                  className="w-10 h-10 object-cover rounded-md border border-slate-200 cursor-pointer shadow-2xs" 
-                                  title="Click para ampliar foto de evidencia"
-                                />
-                                {t.nota_evidencia && (
-                                  <span className="absolute -bottom-1 -right-1 bg-emerald-500 w-2.5 h-2.5 rounded-full border-2 border-white" title={t.nota_evidencia} />
-                                )}
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 italic">Sin evidencia</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          {getEstadoBadge(t.estado)}
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <button
-                              onClick={() => handleEditClick(t)}
-                              className="p-1 text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-all"
-                              title="Editar tarea"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => onDeleteTarea(t.id)}
-                              className="p-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-all"
-                              title="Eliminar tarea"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
-        </div>
-        </div>
-      )}
-
-      {/* 2. GESTOR DE PRODUCTOS A PROMOCIONAR Y COMUNICADOS */}
       {isTabOpen('productos') && (
         <div className={(activeTab === 'productos' || activeTab === 'anuncios') ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
           {/* Header y Selector de Sub-pestañas: Ventas Sugeridas y Comunicados */}
@@ -3411,6 +4942,7 @@ export default function AdminDashboard({
       )}
 
       {/* 5. SECCIÓN DE TRABAJADORES (INTEGRADO: PERSONAL, HORARIOS Y FICHAJES) */}
+
       {isTabOpen('empleados') && (
         <div className={(activeTab === 'empleados' || activeTab === 'horarios' || activeTab === 'calidad') ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
           {/* Selector de Sub-pestañas: Trabajadores, Horarios y Control de Fichajes */}
@@ -4185,1937 +5717,438 @@ export default function AdminDashboard({
       )}
 
       {/* 6. MÓDULO DE INVENTARIO INTEGRADO (VISTA ADMIN) */}
-      {isTabOpen('inventario') && (
-        <div className={activeTab === 'inventario' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
-          {/* Formulario de Inventario */}
-          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-            <div className="flex border-b border-[#FFFDF6] pb-3 justify-between items-center flex-wrap gap-2 mb-4">
-              <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5">
-                <Boxes className="w-4.5 h-4.5 text-[#4B9CD3]" />
-                {editingInvId ? 'Editar Insumo de Bodega' : 'Gestión de Insumos y Bodega'}
-              </h3>
-              {!editingInvId && (
-                <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg text-[9px]">
-                  <button
-                    type="button"
-                    onClick={() => setInvFormMode('individual')}
-                    className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
-                      invFormMode === 'individual' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Carga Individual
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInvFormMode('bulk');
-                      setImportStatus({ type: 'idle', message: '' });
-                    }}
-                    className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      invFormMode === 'bulk' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-3 h-3" />
-                    Carga Masiva Excel / Sheets
-                  </button>
-                </div>
-              )}
+
+      {isTabOpen('tareas') && (
+        <div className={activeTab === 'tareas' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
+          {/* Panel de Monitoreo de Productividad y Cumplimiento de Tareas */}
+          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b border-slate-100 gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-[#2C3E50] flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[#4B9CD3]" />
+                  Monitoreo de Productividad del Personal
+                </h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">Control de avance diario de tareas de colaboradores registrado en Supabase.</p>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <input
+                  type="date"
+                  value={adminFechaProd}
+                  onChange={(e) => {
+                    setAdminFechaProd(e.target.value);
+                    cargarProductividadAdmin(e.target.value);
+                  }}
+                  className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]"
+                />
+                <button
+                  type="button"
+                  onClick={() => cargarProductividadAdmin(adminFechaProd)}
+                  className="bg-[#4B9CD3] hover:bg-[#3A88BE] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
+                >
+                  Consultar
+                </button>
+              </div>
             </div>
 
-            {invFormMode === 'individual' || editingInvId ? (
-              <form onSubmit={handleInvSubmit}>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nombre del Recurso / Insumo</label>
-                    <input
-                      type="text"
-                      placeholder="Ej. Fresas Orgánicas..."
-                      value={invNombre}
-                      onChange={(e) => setInvNombre(e.target.value)}
-                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Categoría de Bodega</label>
-                    <select
-                      value={invCategoria}
-                      onChange={(e) => {
-                        if (e.target.value === '___MANAGE___') {
-                          setActiveCategoryType('inventario');
-                          setShowCategoryModal(true);
-                        } else {
-                          setInvCategoria(e.target.value);
-                        }
-                      }}
-                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                    >
-                      {categorias.inventario.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                      <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Stock Actual</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={invStockActual}
-                      onChange={(e) => setInvStockActual(Number(e.target.value))}
-                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Stock Mínimo</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={invStockMinimo}
-                      onChange={(e) => setInvStockMinimo(Number(e.target.value))}
-                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                      required
-                    />
-                  </div>
-
-                  <div className="flex gap-2 items-end">
-                    <div className="flex-1">
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Unidad</label>
-                      <input
-                        type="text"
-                        placeholder="Ej. Kg, Unidades"
-                        value={invUnidad}
-                        onChange={(e) => setInvUnidad(e.target.value)}
-                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                        required
-                      />
-                    </div>
-
-                    <div className="flex gap-1 shrink-0">
-                      <button
-                        type="submit"
-                        className="bg-[#4B9CD3] text-white text-xs font-bold py-2 px-3 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer whitespace-nowrap"
-                      >
-                        {editingInvId ? 'Guardar' : 'Registrar'}
-                      </button>
-                      {editingInvId && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingInvId(null);
-                            setInvNombre('');
-                            setInvCategoria('insumos');
-                            setInvStockActual(10);
-                            setInvStockMinimo(5);
-                            setInvUnidad('Kg');
-                          }}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2 px-2.5 rounded-lg transition-colors h-9 cursor-pointer"
-                        >
-                          X
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </form>
+            {loadingAdminProd ? (
+              <p className="text-xs text-slate-400 text-center py-4">Consultando datos de productividad...</p>
+            ) : adminProductividadData.length === 0 ? (
+              <div className="text-center py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
+                <p className="text-xs font-bold text-slate-600">Sin registros de productividad para la fecha seleccionada ({adminFechaProd})</p>
+              </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start text-xs animate-in fade-in duration-150">
-                {/* BANNER PRINCIPAL DE CARGA MASIVA CON EXCEL */}
-                <div className="col-span-1 md:col-span-12 bg-[#FFFDF6] border-2 border-dashed border-[#4B9CD3]/50 rounded-xl p-4 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-[#EBF5FB] flex items-center justify-center text-[#4B9CD3] shrink-0 border border-[#AED6F1]">
-                      <FileSpreadsheet className="w-6 h-6" />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {adminProductividadData.map(item => (
+                  <div key={item.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-800">{item.employee_name}</span>
+                      <span className="text-xs font-extrabold text-[#4B9CD3]">{item.porcentaje}%</span>
                     </div>
-                    <div>
-                      <h4 className="font-black text-sm text-[#2C3E50] flex items-center gap-2">
-                        Carga Masiva con Archivo Excel (.xlsx / .xls / .csv)
-                        <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border border-emerald-200">
-                          Recomendado
-                        </span>
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Sube tu archivo de Excel o CSV con tus productos e insumos para registrarlos automáticamente en bodega.
-                      </p>
+                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner">
+                      <div
+                        className={`h-2.5 rounded-full transition-all duration-500 ${
+                          item.porcentaje >= 100
+                            ? 'bg-emerald-500'
+                            : item.porcentaje >= 50
+                            ? 'bg-[#4B9CD3]'
+                            : 'bg-amber-500'
+                        }`}
+                        style={{ width: `${item.porcentaje}%` }}
+                      ></div>
                     </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleDownloadSampleExcel}
-                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-200"
-                      title="Descargar plantilla de archivo Excel con formato listo para llenar"
-                    >
-                      <Download className="w-3.5 h-3.5 text-slate-600" />
-                      Plantilla Ejemplo
-                    </button>
-
-                    <label className="px-4 py-2 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 cursor-pointer shadow-xs border border-[#3A82B4]">
-                      <FileSpreadsheet className="w-4 h-4" />
-                      <span>Cargar Archivo Excel</span>
-                      <input
-                        type="file"
-                        accept=".xlsx, .xls, .csv"
-                        onChange={handleExcelFileUpload}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="md:col-span-4 bg-[#EBF5FB] text-[#4B9CD3] p-4 rounded-lg border border-[#AED6F1]/40">
-                  <p className="font-extrabold text-[10px] uppercase tracking-wide flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                    ¿Cómo importar de Google Sheets?
-                  </p>
-                  <ol className="list-decimal pl-4 mt-1.5 text-[10.5px] space-y-1 text-[#2C3E50] font-semibold leading-relaxed">
-                    <li>Abre tu documento en <strong>Google Sheets</strong>.</li>
-                    <li>
-                      Copia tus columnas. Formato de izquierda a derecha:
-                      <br />
-                      <code className="bg-white/70 px-1 py-0.5 rounded-md font-mono text-[9px] border border-[#AED6F1]/60 block mt-0.5 font-bold">
-                        Nombre | Categoría | Stock | Mínimo | Unidad
-                      </code>
-                    </li>
-                    <li>Pega en la caja de la derecha o ingresa el enlace de tu hoja.</li>
-                  </ol>
-                </div>
-
-                <div className="md:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Estrategia de Carga</label>
-                      <div className="flex gap-2">
-                        <label className="flex-1 flex items-center gap-2 border border-[#E2E8F0] p-2 rounded-lg bg-[#FFFDF6]/20 cursor-pointer hover:bg-slate-50 transition-colors">
-                          <input
-                            type="radio"
-                            name="importOption"
-                            value="append"
-                            checked={importOption === 'append'}
-                            onChange={() => setImportOption('append')}
-                            className="accent-[#4B9CD3]"
-                          />
-                          <div className="text-[10px]">
-                            <p className="font-bold text-[#2C3E50]">Adicionar</p>
-                            <p className="text-[8px] text-slate-400">Suma a la lista actual</p>
-                          </div>
-                        </label>
-                        <label className="flex-1 flex items-center gap-2 border border-[#E2E8F0] p-2 rounded-lg bg-[#FFFDF6]/20 cursor-pointer hover:bg-slate-50 transition-colors">
-                          <input
-                            type="radio"
-                            name="importOption"
-                            value="replace"
-                            checked={importOption === 'replace'}
-                            onChange={() => setImportOption('replace')}
-                            className="accent-[#4B9CD3]"
-                          />
-                          <div className="text-[10px]">
-                            <p className="font-bold text-[#2C3E50]">Reemplazar</p>
-                            <p className="text-[8px] text-slate-400">Borra lista y carga nuevo</p>
-                          </div>
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
-                        <Link className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                        Opción A: Enlace de Google Sheets (Público)
-                      </label>
-                      <div className="flex gap-1.5">
-                        <input
-                          type="url"
-                          placeholder="https://docs.google.com/spreadsheets/d/..."
-                          value={sheetLink}
-                          onChange={(e) => setSheetLink(e.target.value)}
-                          className="flex-1 text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleFetchSheetLink}
-                          className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer h-9"
-                        >
-                          <Database className="w-3 h-3" />
-                          Importar
-                        </button>
-                      </div>
+                    <div className="flex justify-between text-[11px] text-slate-500 pt-1">
+                      <span>{item.completadas} de {item.totales} completadas</span>
+                      <span>{new Date(item.updated_at).toLocaleTimeString()}</span>
                     </div>
                   </div>
-
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
-                      <Upload className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                      Opción B: Pegar Celdas Directamente
-                    </label>
-                    <textarea
-                      rows={3}
-                      placeholder="Fresas de Huerto	insumos	20	5	Kg&#10;Vasos Eco 12oz	empaques	150	30	Unidades"
-                      value={bulkPasteText}
-                      onChange={(e) => setBulkPasteText(e.target.value)}
-                      className="w-full text-[10px] font-mono p-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 resize-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => parseAndImportRows(bulkPasteText)}
-                      className="w-full bg-slate-950 hover:bg-slate-900 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Cargar Filas Pegadas
-                    </button>
-                  </div>
-                </div>
-
-                {importStatus.message && (
-                  <div className={`col-span-1 md:col-span-12 p-2.5 rounded-lg text-[10.5px] font-bold ${
-                    importStatus.type === 'success' ? 'bg-sky-50 text-sky-800 border border-sky-200' :
-                    importStatus.type === 'error' ? 'bg-red-50 text-red-800 border border-red-200' :
-                    'bg-sky-50 text-sky-800 border border-sky-200 animate-pulse'
-                  }`}>
-                    {importStatus.message}
-                  </div>
-                )}
+                ))}
               </div>
             )}
           </div>
 
-          {/* Listado del Inventario en Tiempo Real */}
-          <div className="w-full space-y-4">
-            {/* Alertas Rápidas de Stock Bajo */}
-            {inventario.filter(item => item.stock_actual <= item.stock_minimo_alerta).length > 0 && (
-              <div className="bg-red-50 border-l-4 border-red-500 text-red-900 rounded-xl p-4 shadow-2xs">
-                <p className="font-extrabold text-xs flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 animate-bounce" />
-                  ALERTA DE SEGURIDAD ALIMENTARIA: {inventario.filter(item => item.stock_actual <= item.stock_minimo_alerta).length} recursos están en niveles críticos de stock.
-                </p>
-                <p className="text-[11px] text-red-700 mt-1">
-                  El personal de cocina y atención requiere reabastecimiento para mantener las metas diarias de ventas fit.
-                </p>
-              </div>
-            )}
-
-            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4 pb-2 border-b border-[#FFFDF6]">
-                <div className="space-y-0.5">
-                  <h4 className="font-bold text-xs uppercase tracking-wider text-[#4B9CD3]">Control en Tiempo Real de Almacén</h4>
-                  <p className="text-xs text-slate-500">Refleja automáticamente los conteos diarios ingresados por tu personal en las terminales.</p>
+          {/* Formulario de Tarea */}
+          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+            <h3 className="text-base font-bold text-[#2C3E50] mb-4 flex items-center gap-1.5 border-b border-slate-50 pb-2">
+              <Plus className="w-4 h-4 text-[#4B9CD3]" />
+              {editingTareaId ? 'Modificar Tarea' : 'Crear Tarea Diaria'}
+            </h3>
+            
+            <form onSubmit={handleTareaSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Título de Tarea</label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Sanitizar extractores de jugos"
+                    value={tareaTitulo}
+                    onChange={(e) => setTareaTitulo(e.target.value)}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30"
+                    required
+                  />
                 </div>
-                <div className="flex gap-1 bg-slate-50 p-1 border border-slate-200 rounded-lg text-[10px] font-bold">
-                  <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">Total: {inventario.length} items</span>
-                  <span className="px-2 py-0.5 rounded-md bg-red-100 text-red-800">Alertas: {inventario.filter(item => item.stock_actual <= item.stock_minimo_alerta).length}</span>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Instrucciones / Descripción</label>
+                  <input
+                    type="text"
+                    placeholder="Detalles específicos para asegurar el estándar..."
+                    value={tareaDesc}
+                    onChange={(e) => setTareaDesc(e.target.value)}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Área de Trabajo</label>
+                  <select
+                    value={tareaArea}
+                    onChange={(e) => {
+                      if (e.target.value === '___MANAGE___') {
+                        setActiveCategoryType('areasTrabajo');
+                        setShowCategoryModal(true);
+                      } else {
+                        setTareaArea(e.target.value);
+                      }
+                    }}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white"
+                  >
+                    {categorias.areasTrabajo.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                    <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Tipo / Checklist</label>
+                  <select
+                    value={tareaTipo}
+                    onChange={(e) => {
+                      if (e.target.value === '___MANAGE___') {
+                        setActiveCategoryType('tareas');
+                        setShowCategoryModal(true);
+                      } else {
+                        setTareaTipo(e.target.value);
+                      }
+                    }}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white"
+                  >
+                    {categorias.tareas.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                    <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
+                  </select>
                 </div>
               </div>
 
-              {inventario.length === 0 ? (
-                <p className="text-center py-12 text-slate-400 text-xs">No hay recursos agregados en el inventario.</p>
-              ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase">Asignado A</label>
+                    <label className="flex items-center gap-1 text-[10px] font-extrabold text-[#4B9CD3] cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={asignarATodos}
+                        onChange={(e) => setAsignarATodos(e.target.checked)}
+                        className="w-3.5 h-3.5 text-[#4B9CD3] border-[#E2E8F0] focus:ring-[#4B9CD3] rounded-sm cursor-pointer mr-1"
+                      />
+                      Asignar a todos
+                    </label>
+                  </div>
+                  <select
+                    value={tareaAsignado}
+                    onChange={(e) => setTareaAsignado(e.target.value)}
+                    disabled={asignarATodos}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 disabled:opacity-50 disabled:bg-slate-50"
+                  >
+                    {asignarATodos ? (
+                      <option value="ALL">👥 Todos los empleados ({empleados.length})</option>
+                    ) : (
+                      empleados.map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Duración Estimada (Minutos)</label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="480"
+                    value={tareaTiempo}
+                    onChange={(e) => setTareaTiempo(Number(e.target.value))}
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30"
+                  />
+                </div>
+
+                <div className="flex gap-3 items-center">
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      type="checkbox"
+                      id="requiere_foto"
+                      checked={tareaRequiereFoto}
+                      onChange={(e) => setTareaRequiereFoto(e.target.checked)}
+                      className="w-4 h-4 rounded-sm border-[#E2E8F0] text-[#4B9CD3] focus:ring-[#4B9CD3]"
+                    />
+                    <label htmlFor="requiere_foto" className="text-xs font-semibold text-slate-600 select-none cursor-pointer">
+                      ¿Evidencia de foto?
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="submit"
+                      className="bg-[#4B9CD3] text-white text-xs font-bold py-2 px-4 rounded-lg hover:bg-[#3A82B4] transition-colors shadow-xs h-9 cursor-pointer"
+                    >
+                      {editingTareaId ? 'Actualizar' : 'Asignar'}
+                    </button>
+                    {editingTareaId && (
+                      <button
+                        type="button"
+                        onClick={handleCancelEdit}
+                        className="bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-bold py-2 px-3 rounded-lg transition-colors h-9"
+                      >
+                        X
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          {/* Tabla de tareas del día */}
+          <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 border-b border-slate-100 pb-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-1.5 mr-2">
+                  <ClipboardList className="w-4.5 h-4.5 text-[#4B9CD3]" />
+                  Bitácora de Tareas Diarias
+                </h3>
+                
+                {/* Selector de Fecha para Bitácora */}
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
+                  <Calendar className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                  <input
+                    type="date"
+                    value={fechaFiltroBitacora}
+                    onChange={(e) => setFechaFiltroBitacora(e.target.value)}
+                    className="bg-white border border-slate-300 text-slate-800 text-[11px] font-bold rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] cursor-pointer"
+                  />
+                  {fechaFiltroBitacora !== getLocalDateString() && (
+                    <button
+                      type="button"
+                      onClick={() => setFechaFiltroBitacora(getLocalDateString())}
+                      className="text-[10px] bg-[#EBF5FB] hover:bg-[#D4E6F1] text-[#4B9CD3] font-bold px-2 py-1 rounded-md transition-all cursor-pointer"
+                    >
+                      Hoy
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => cargarTareasAdminPorFecha(fechaFiltroBitacora)}
+                    title="Recargar tareas desde Supabase"
+                    className="p-1 hover:bg-slate-200 text-slate-500 rounded-md transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${cargandoTareasBitacora ? 'animate-spin text-[#4B9CD3]' : ''}`} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {cargandoTareasBitacora && (
+                  <span className="text-[10px] text-blue-600 font-bold animate-pulse">Sincronizando...</span>
+                )}
+                {eliminandoTareas && (
+                  <span className="text-[10px] text-rose-600 font-bold animate-pulse">Borrando...</span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleBorrarTodasLasTareas}
+                  disabled={eliminandoTareas || cargandoTareasBitacora}
+                  title={`Eliminar todas las tareas del día ${fechaFiltroBitacora}`}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  Borrar Todas ({fechaFiltroBitacora})
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGenerarAsignacionPredeterminada}
+                  disabled={eliminandoTareas || cargandoTareasBitacora}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Generar 24 Tareas ({fechaFiltroBitacora})
+                </button>
+              </div>
+            </div>
+
+            {(() => {
+              const tareasMostrar = (tareasAdminFecha !== null ? tareasAdminFecha : tareas).filter(t => 
+                !t.fecha || getLocalDateString(t.fecha) === fechaFiltroBitacora
+              );
+
+              if (tareasMostrar.length === 0) {
+                return (
+                  <div className="text-center py-12 text-slate-400 text-xs">
+                    {cargandoTareasBitacora 
+                      ? 'Cargando bitácora de Supabase...' 
+                      : `No hay tareas creadas para la fecha ${fechaFiltroBitacora}.`}
+                  </div>
+                );
+              }
+
+              return (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-[#E2E8F0]/60 text-[10px] text-slate-400 uppercase font-black tracking-wider">
-                        <th className="py-2.5 px-3">Recurso</th>
-                        <th className="py-2.5 px-3">Categoría</th>
-                        <th className="py-2.5 px-3 text-center">Stock Actual</th>
-                        <th className="py-2.5 px-3 text-center">Límite Mínimo</th>
-                        <th className="py-2.5 px-3">Última Actualización</th>
-                        <th className="py-2.5 px-3 text-right">Acciones</th>
+                      <tr className="border-b border-[#E2E8F0] text-[10px] uppercase text-slate-400 font-bold tracking-wider">
+                        <th className="w-8"></th>
+                        <th className="py-2 px-3">Tarea</th>
+                        <th className="py-2 px-3 text-center">Área</th>
+                        <th className="py-2 px-3">Asignado</th>
+                        <th className="py-2 px-3 text-center">Tiempo Est.</th>
+                        <th className="py-2 px-3 text-center">Duración</th>
+                        <th className="py-2 px-3 text-center">Foto</th>
+                        <th className="py-2 px-3 text-center">Estado</th>
+                        <th className="py-2 px-3 text-right">Acciones</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#FFFDF6] text-xs">
-                      {inventario.map(item => {
-                        const esCritico = item.stock_actual <= item.stock_minimo_alerta;
-                        return (
-                          <tr key={item.id} className={`hover:bg-slate-50/50 transition-colors ${esCritico ? 'bg-red-50/20' : ''}`}>
-                            <td className="py-3 px-3 font-extrabold text-[#2C3E50]">
-                              <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${esCritico ? 'bg-red-500 animate-pulse' : 'bg-sky-500'}`} />
-                                {item.nombre}
-                              </div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase ${
-                                item.categoria === 'insumos' ? 'bg-orange-50 text-orange-800 border border-orange-100' :
-                                item.categoria === 'empaques' ? 'bg-sky-50 text-sky-800 border border-sky-100' :
-                                'bg-sky-50 text-sky-800 border border-sky-100'
-                              }`}>
-                                {item.categoria}
-                              </span>
-                            </td>
-                            <td className={`py-3 px-3 text-center font-black ${esCritico ? 'text-red-700 text-sm' : 'text-slate-800'}`}>
-                              {item.stock_actual} <span className="text-[9px] font-medium text-slate-400">{item.unidad}</span>
-                            </td>
-                            <td className="py-3 px-3 text-center text-slate-400 font-bold">
-                              {item.stock_minimo_alerta} {item.unidad}
-                            </td>
-                            <td className="py-3 px-3">
-                              {item.ultima_actualizacion_fecha ? (
-                                <div className="space-y-0.5">
-                                  <p className="text-[10px] text-slate-700 font-bold">{item.ultima_actualizacion_por || 'Sistema'}</p>
-                                  <p className="text-[9px] text-slate-400 font-semibold">{item.ultima_actualizacion_fecha}</p>
-                                </div>
-                              ) : (
-                                <span className="text-slate-300 text-[10px]">Sin cambios registrados</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-3 text-right">
-                              <div className="flex gap-1 justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => handleEditInvClick(item)}
-                                  className="p-1.5 text-slate-600 hover:text-[#4B9CD3] hover:bg-[#EBF5FB]/60 rounded-lg transition-all"
-                                  title="Editar recurso"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onDeleteInventarioItem(item.id)}
-                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                                  title="Eliminar del inventario"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-
-
-
-      {/* 8. CONTROL DE GASTOS */}
-      {isTabOpen('gastos') && (
-        <div className={activeTab === 'gastos' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
-          <GastosModule
-            gastos={gastos}
-            ventasRegistradas={ventasRegistradas}
-            currentUser={usuarios.find(u => u.rol === 'admin') || usuarios[0] || ({ id: 'admin', nombre: 'Administrador', rol: 'admin' } as any)}
-            onSaveGasto={onSaveGasto}
-            onDeleteGasto={onDeleteGasto}
-          />
-        </div>
-      )}
-
-      {/* 9. REPORTE Y REGISTRO DE VENTAS & FIDELIZACIÓN (ADMINISTRADOR) */}
-      {isTabOpen('ventas') && (
-        <div className={activeTab === 'ventas' ? 'w-full space-y-6' : 'hidden'}>
-          {(() => {
-        // --- CÁLCULOS PARA LA PESTAÑA DE FIDELIZACIÓN ---
-        const allClientes = clientes || [];
-        const todayStr = getLocalDateString();
-        const monthStartStr = todayStr.substring(0, 7);
-
-        const filteredClientes = allClientes.filter(c => {
-          if (clienteSearch.trim()) {
-            const q = clienteSearch.toLowerCase();
-            const matchName = c.nombre.toLowerCase().includes(q);
-            const matchPhone = c.telefono.includes(q);
-            if (!matchName && !matchPhone) return false;
-          }
-
-          if (clienteSegmentoFilter === 'frecuentes') {
-            return c.total_compras_count > 3;
-          }
-          if (clienteSegmentoFilter === 'inactivos') {
-            if (!c.ultima_fecha_compra) return true;
-            const lastDate = new Date(c.ultima_fecha_compra).getTime();
-            const now = new Date(todayStr).getTime();
-            const diffDays = (now - lastDate) / (1000 * 3600 * 24);
-            return diffDays > 30;
-          }
-          if (clienteSegmentoFilter === 'nuevos') {
-            return c.fecha_registro.startsWith(monthStartStr);
-          }
-          return true;
-        });
-
-        const totalClientesCount = allClientes.length;
-        const recurrentesCount = allClientes.filter(c => c.total_compras_count > 3).length;
-        const totalMontoComprado = allClientes.reduce((sum, c) => sum + c.total_compras_monto, 0);
-        const ticketPromedioCliente = totalClientesCount > 0 ? totalMontoComprado / totalClientesCount : 0;
-
-        const handleExportClientesCSV = () => {
-          const headers = ['Nombre del Cliente', 'Teléfono Móvil', 'Fecha de Registro', 'Total Compras ($)', 'Frecuencia de Visita', 'Última Fecha de Compra'];
-          const rows = filteredClientes.map(c => [
-            c.nombre,
-            c.telefono,
-            c.fecha_registro,
-            c.total_compras_monto.toFixed(2),
-            c.total_compras_count,
-            c.ultima_fecha_compra
-          ]);
-          downloadCSV('fidelizacion_clientes_coccolefit.csv', headers, rows);
-        };
-
-        // --- CALCULOS DE FILTROS PARA EL REPORTE DE VENTAS ---
-        const filteredSales = (ventasRegistradas || []).filter(v => {
-          const saleDate = v.fecha; // 'YYYY-MM-DD'
-          const matchesStartDate = !salesStartDate || saleDate >= salesStartDate;
-          const matchesEndDate = !salesEndDate || saleDate <= salesEndDate;
-          const matchesSeller = !salesSeller || v.usuario_id === salesSeller;
-          
-          // Buscar en productos de la venta, cliente o nombre del vendedor
-          const q = salesSearch.toLowerCase();
-          const matchesSearch = !salesSearch.trim() || 
-            v.vendedor_nombre.toLowerCase().includes(q) ||
-            (v.cliente_nombre && v.cliente_nombre.toLowerCase().includes(q)) ||
-            (v.cliente_telefono && v.cliente_telefono.includes(q)) ||
-            v.productos_vendidos.some(p => p.nombre.toLowerCase().includes(q) || p.codigo.toLowerCase().includes(q));
-          
-          const matchesPaymentMethod = !salesPaymentMethod || 
-            (salesPaymentMethod === 'efectivo' ? isEfectivo(v.metodo_pago) :
-             salesPaymentMethod === 'tarjeta' ? isTarjeta(v.metodo_pago) :
-             salesPaymentMethod === 'transferencia' ? isTransferencia(v.metodo_pago) :
-             salesPaymentMethod === 'rappi' ? isRappi(v.metodo_pago) :
-             v.metodo_pago === salesPaymentMethod);
-            
-          return matchesStartDate && matchesEndDate && matchesSeller && matchesSearch && matchesPaymentMethod;
-        });
-
-        // Ventas activas (excluye las anuladas para los totales financieros de caja)
-        const activeFilteredSales = filteredSales.filter(v => v.estado !== 'Anulada');
-        
-        const totalEfectivoFiltered = activeFilteredSales.filter(v => isEfectivo(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-        const totalTarjetaFiltered = activeFilteredSales.filter(v => isTarjeta(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-        const totalTransferenciaFiltered = activeFilteredSales.filter(v => isTransferencia(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-        const totalRappiFiltered = activeFilteredSales.filter(v => isRappi(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-
-        const totalFilteredAmount = activeFilteredSales.reduce((acc, curr) => acc + curr.total, 0);
-        const ticketPromedio = activeFilteredSales.length > 0 ? totalFilteredAmount / activeFilteredSales.length : 0;
-
-        // Encontrar el vendedor estrella en los registros filtrados activos
-        const sellerTotals: Record<string, number> = {};
-        activeFilteredSales.forEach(s => {
-          sellerTotals[s.vendedor_nombre] = (sellerTotals[s.vendedor_nombre] || 0) + s.total;
-        });
-        let starSellerName = 'Ninguno';
-        let starSellerTotal = 0;
-        Object.entries(sellerTotals).forEach(([name, tot]) => {
-          if (tot > starSellerTotal) {
-            starSellerTotal = tot;
-            starSellerName = name;
-          }
-        });
-
-        // --- CÁLCULO DE DATOS PARA LAS GRÁFICAS DE TENDENCIA ---
-        let chartData: Array<{ label: string; value: number }> = [];
-        
-        if (chartView === '7days') {
-          const days = [];
-          for (let i = 6; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            days.push(d.toISOString().split('T')[0]);
-          }
-          chartData = days.map(d => {
-            const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
-            const total = daySales.reduce((sum, s) => sum + s.total, 0);
-            const parts = d.split('-');
-            const label = `${parts[2]}/${parts[1]}`;
-            return { label, value: total };
-          });
-        } else if (chartView === '15days') {
-          const days = [];
-          for (let i = 14; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            days.push(d.toISOString().split('T')[0]);
-          }
-          chartData = days.map(d => {
-            const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
-            const total = daySales.reduce((sum, s) => sum + s.total, 0);
-            const parts = d.split('-');
-            const label = `${parts[2]}/${parts[1]}`;
-            return { label, value: total };
-          });
-        } else {
-          const months = [
-            { key: '2026-06', name: 'Junio' },
-            { key: '2026-07', name: 'Julio' },
-            { key: '2026-08', name: 'Agosto' }
-          ];
-          chartData = months.map(m => {
-            const monthSales = (ventasRegistradas || []).filter(v => v.fecha.startsWith(m.key) && v.estado !== 'Anulada');
-            const total = monthSales.reduce((sum, s) => sum + s.total, 0);
-            return { label: m.name, value: total };
-          });
-        }
-
-        const maxVal = Math.max(...chartData.map(d => d.value), 100);
-
-        return (
-          <div className="space-y-6 w-full" id="ventas-dashboard-tab-panel">
-            
-            {/* BARRA DE NAVEGACIÓN SUB-PESTAÑAS (VENTAS VS FIDELIZACIÓN VS AUDITORÍA DB) */}
-            <div className="flex bg-[#EBF5FB] p-1.5 rounded-xl gap-2 border border-[#AED6F1] w-full">
-              <button
-                type="button"
-                onClick={() => setVentasSubTab('reportes')}
-                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
-                  ventasSubTab === 'reportes'
-                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-extrabold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                }`}
-              >
-                Resumen de Ventas & Catálogo POS
-              </button>
-              <button
-                type="button"
-                onClick={() => setVentasSubTab('fidelizacion')}
-                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
-                  ventasSubTab === 'fidelizacion'
-                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-extrabold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                }`}
-              >
-                Programa de Fidelización
-              </button>
-            </div>
-
-            {ventasSubTab === 'fidelizacion' ? (
-              /* VISTA DE PROGRAMA DE FIDELIZACIÓN DE CLIENTES */
-              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-6">
-                
-                {/* Encabezado y Acción de Exportación */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
-                  <div>
-                    <h3 className="text-base font-extrabold text-[#2C3E50]">
-                      Programa de Fidelización de Clientes
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Monitoreo de consumos, frecuencia y métricas de recurrencia de la comunidad COCCOLE FIT.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleExportClientesCSV}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
-                  >
-                    Exportar Base de Datos (CSV)
-                  </button>
-                </div>
-
-                {/* Métricas Clave */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
-                  <div className="bg-[#FFFDF6] border border-[#E2E8F0] p-4 rounded-xl space-y-1">
-                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
-                      Total de Clientes
-                    </span>
-                    <p className="text-2xl font-black text-[#2C3E50]">{totalClientesCount}</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Clientes registrados en base de datos</p>
-                  </div>
-
-                  <div className="bg-[#FFFDF6] border border-[#E2E8F0] p-4 rounded-xl space-y-1">
-                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
-                      Clientes Recurrentes
-                    </span>
-                    <p className="text-2xl font-black text-[#2C3E50]">{recurrentesCount}</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Clientes con más de 3 compras acumuladas</p>
-                  </div>
-
-                  <div className="bg-[#FFFDF6] border border-[#E2E8F0] p-4 rounded-xl space-y-1">
-                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
-                      Ticket Promedio por Cliente
-                    </span>
-                    <p className="text-2xl font-black text-[#4B9CD3]">{formatMoney(ticketPromedioCliente)}</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Consumo acumulado promedio por usuario</p>
-                  </div>
-                </div>
-
-                {/* Filtros de Segmentación y Búsqueda */}
-                <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 pt-2 w-full">
-                  <div className="flex flex-wrap bg-[#EBF5FB] p-1 rounded-lg gap-1 border border-[#AED6F1]">
-                    <button
-                      type="button"
-                      onClick={() => setClienteSegmentoFilter('todos')}
-                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                        clienteSegmentoFilter === 'todos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Todos ({allClientes.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setClienteSegmentoFilter('frecuentes')}
-                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                        clienteSegmentoFilter === 'frecuentes' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Top / Frecuentes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setClienteSegmentoFilter('inactivos')}
-                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                        clienteSegmentoFilter === 'inactivos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Inactivos (&gt;30 días)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setClienteSegmentoFilter('nuevos')}
-                      className={`text-xs font-bold px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                        clienteSegmentoFilter === 'nuevos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Nuevos del Mes
-                    </button>
-                  </div>
-
-                  <div className="w-full md:w-72">
-                    <input
-                      type="text"
-                      value={clienteSearch}
-                      onChange={(e) => setClienteSearch(e.target.value)}
-                      placeholder="Buscar por nombre o teléfono..."
-                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] font-medium text-[#2C3E50] bg-white"
-                    />
-                  </div>
-                </div>
-
-                {/* Tabla de Clientes Registrados */}
-                <div className="overflow-x-auto border border-[#E2E8F0] rounded-xl w-full">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-[#FFFDF6] border-b border-[#E2E8F0] text-[#2C3E50] uppercase font-black tracking-wider text-[10px]">
-                        <th className="p-3">Nombre del Cliente</th>
-                        <th className="p-3">Teléfono Móvil</th>
-                        <th className="p-3">Total Compras ($)</th>
-                        <th className="p-3">Frecuencia de Visita</th>
-                        <th className="p-3">Última Fecha de Compra</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                      {filteredClientes.length > 0 ? (
-                        filteredClientes.map((cli) => (
-                          <tr key={cli.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 font-bold text-[#2C3E50]">{cli.nombre}</td>
-                            <td className="p-3 text-slate-600">{cli.telefono}</td>
-                            <td className="p-3 font-bold text-[#4B9CD3]">{formatMoney(cli.total_compras_monto)}</td>
-                            <td className="p-3">
-                              <span className="inline-block px-2 py-0.5 bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] font-bold rounded-md text-[11px]">
-                                {cli.total_compras_count} compras
-                              </span>
-                            </td>
-                            <td className="p-3 text-slate-500">{cli.ultima_fecha_compra || 'N/A'}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="p-8 text-center text-slate-400 font-semibold">
-                            No se encontraron clientes registrados para esta búsqueda o filtro.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-              </div>
-            ) : (
-              /* VISTA DE REPORTES DE VENTAS & CATÁLOGO POS ORIGINAL */
-              <>
-            {/* GRÁFICAS DE TENDENCIAS */}
-            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-4 mb-4">
-                <div>
-                  <h3 className="text-base font-bold text-[#2C3E50] flex items-center gap-2">
-                    <BarChart3 className="w-5 h-5 text-[#4B9CD3]" />
-                    Panel de Tendencias de Ventas
-                  </h3>
-                  <p className="text-xs text-slate-500">Visualiza el comportamiento de ventas por rango temporal o comparativas mensuales.</p>
-                </div>
-
-                <div className="flex bg-[#EBF5FB] p-1 rounded-lg gap-1 border border-[#AED6F1] self-stretch md:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => setChartView('7days')}
-                    className={`flex-1 md:flex-initial text-xs font-bold px-3 py-1.5 rounded-md transition-all ${
-                      chartView === '7days' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Últimos 7 Días
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setChartView('15days')}
-                    className={`flex-1 md:flex-initial text-xs font-bold px-3 py-1.5 rounded-md transition-all ${
-                      chartView === '15days' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Últimos 15 Días
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setChartView('monthly')}
-                    className={`flex-1 md:flex-initial text-xs font-bold px-3 py-1.5 rounded-md transition-all ${
-                      chartView === 'monthly' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Mes tras Mes
-                  </button>
-                </div>
-              </div>
-
-              {/* Renderizado de Gráfico de Barras y Líneas Dinámico en SVG */}
-              <div className="h-64 w-full bg-slate-50/50 rounded-xl border border-dashed border-slate-200/80 p-4 relative flex flex-col justify-between">
-                <div className="flex-1 flex items-end justify-between gap-2.5 pt-4 px-2">
-                  {chartData.map((d, index) => {
-                    const pct = (d.value / maxVal) * 100;
-                    return (
-                      <div key={index} className="flex-1 flex flex-col items-center group relative h-full justify-end">
-                        {/* Tooltip flotante */}
-                        <div className="absolute -top-6 bg-slate-900 text-white text-[10px] px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 font-bold shadow-sm whitespace-nowrap">
-                          ${d.value.toFixed(2)}
-                        </div>
-
-                        {/* Columna de la barra */}
-                        <div 
-                          style={{ height: `${Math.max(pct, 4)}%` }}
-                          className="w-full max-w-[48px] bg-gradient-to-t from-[#4B9CD3] to-[#4c8f44] rounded-t-md hover:brightness-110 transition-all duration-300 relative flex items-start justify-center shadow-xs"
-                        >
-                          <span className="text-[9px] text-white font-extrabold mt-1 select-none opacity-0 group-hover:opacity-100 transition-opacity">
-                            ${Math.round(d.value)}
-                          </span>
-                        </div>
-
-                        {/* Label de fecha */}
-                        <span className="text-[10px] text-slate-500 font-bold mt-2 truncate max-w-full">
-                          {d.label}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Eje horizontal */}
-                <div className="w-full h-px bg-slate-200 mt-1"></div>
-
-                {/* Gridlines indicativos de fondo */}
-                <div className="absolute left-4 right-4 top-1/4 h-px border-t border-slate-100 pointer-events-none"></div>
-                <div className="absolute left-4 right-4 top-2/4 h-px border-t border-slate-100 pointer-events-none"></div>
-                <div className="absolute left-4 right-4 top-3/4 h-px border-t border-slate-100 pointer-events-none"></div>
-              </div>
-            </div>
-
-            {/* SECCIÓN DOBLE REORGANIZADA A FILAS 100% HORIZONTALES */}
-            <div className="flex flex-col gap-6 w-full">
-              
-              {/* FILA A: REGISTRO Y EDICIÓN DE PRODUCTOS DEL CATÁLOGO (ESTRUCTURA FINANCIERA COMPLETA) */}
-              <div id="form-registro-producto" className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-[#2C3E50] flex items-center gap-1.5 uppercase tracking-wide text-[#4B9CD3]">
-                      <Plus className="w-4.5 h-4.5" />
-                      {editingCatProdId ? 'Editar Producto del Catálogo' : 'Registrar Nuevo Producto'}
-                    </h3>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Estructura financiera y fiscal: Código producto, Nombre, Valor bruto, Descuento, Subtotal, Impuesto cargo, Total y Precio Costo.
-                    </p>
-                  </div>
-                  {editingCatProdId && (
-                    <span className="self-start sm:self-auto text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-full flex items-center gap-1">
-                      <Edit2 className="w-3 h-3" /> Editando: {catProdCodigo}
-                    </span>
-                  )}
-                </div>
-
-                <form onSubmit={handleCatProdSubmit} className="space-y-4">
-                  {/* SECCIÓN 1: IDENTIFICACIÓN Y CATEGORÍA */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                        Código Producto <span className="text-red-500">*</span>
-                      </label>
-                      <div className="flex gap-1.5 font-mono">
-                        <input
-                          type="text"
-                          placeholder="Ej. JUIC-05"
-                          value={catProdCodigo}
-                          onChange={(e) => setCatProdCodigo(e.target.value)}
-                          className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 uppercase font-bold h-9"
-                          required
-                        />
-                        {!editingCatProdId && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const rand = Math.floor(10 + Math.random() * 90);
-                              setCatProdCodigo(`PROD-${rand}`);
-                            }}
-                            className="bg-[#EBF5FB] hover:bg-[#cbe2ca] border border-[#AED6F1] text-[#4B9CD3] text-[10px] font-extrabold px-2.5 rounded-lg transition-colors whitespace-nowrap h-9 cursor-pointer"
-                            title="Generar código aleatorio"
-                          >
-                            Auto
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                        Nombre Producto <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej. Parfait Berry Chía Slim"
-                        value={catProdNombre}
-                        onChange={(e) => setCatProdNombre(e.target.value)}
-                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9 font-medium"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Categoría</label>
-                      <select
-                        value={catProdCategoria}
-                        onChange={(e) => {
-                          if (e.target.value === '___MANAGE___') {
-                            setActiveCategoryType('productosFit');
-                            setShowCategoryModal(true);
-                          } else {
-                            setCatProdCategoria(e.target.value);
-                          }
-                        }}
-                        className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 h-9 font-medium"
+                    <tbody className="divide-y divide-[#E5EAE4] text-xs">
+                      {[...tareasMostrar].sort((a, b) => {
+                        const empA = getEmpleadoNombre(a.asignado_a);
+                        const empB = getEmpleadoNombre(b.asignado_a);
+                        if (empA !== empB) return empA.localeCompare(empB);
+                        return (a.orden || 0) - (b.orden || 0);
+                      }).map(t => (
+                      <tr 
+                        key={t.id} 
+                        className={`hover:bg-[#FFFDF6]/50 ${draggedTaskId === t.id ? 'opacity-50' : ''}`}
+                        draggable
+                        onDragStart={(e) => handleDragStartTask(e, t.id)}
+                        onDragOver={handleDragOverTask}
+                        onDrop={(e) => handleDropTask(e, t.id)}
                       >
-                        {categorias.productosFit.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                        <option value="___MANAGE___" className="font-bold text-[#4B9CD3] bg-[#EBF5FB]">+ Gestionar / Agregar Categoría</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* SECCIÓN 2: DESGLOSE FINANCIERO Y TRIBUTARIO */}
-                  <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] rounded-xl p-3.5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                        <DollarSign className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                        Estructura de Precios e Impuestos
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
-                        Subtotal = Valor bruto - Descuento | Total = Subtotal + Impuesto cargo
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
-                      {/* 1. Valor bruto */}
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                          Valor Bruto ($)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={catProdValorBruto}
-                          onChange={(e) => handleCatProdValorBrutoChange(e.target.value)}
-                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-semibold"
-                        />
-                      </div>
-
-                      {/* 2. Descuento */}
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                          Descuento ($)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={catProdDescuento}
-                          onChange={(e) => handleCatProdDescuentoChange(e.target.value)}
-                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                        />
-                      </div>
-
-                      {/* 3. Subtotal */}
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                          Subtotal ($)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={catProdSubtotal}
-                          onChange={(e) => handleCatProdSubtotalChange(e.target.value)}
-                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-slate-50 font-bold h-9 text-slate-700"
-                        />
-                      </div>
-
-                      {/* 4. Impuesto cargo */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="block text-[10px] font-bold text-slate-600 uppercase">
-                            Impuesto Cargo ($)
-                          </label>
-                          <div className="flex gap-0.5 text-[9px]">
-                            <button
-                              type="button"
-                              onClick={() => handleCatProdImpuestoTipoSelect('0')}
-                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '0' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                              title="0% Exento"
-                            >
-                              0%
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCatProdImpuestoTipoSelect('8')}
-                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '8' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                              title="8% Impoconsumo"
-                            >
-                              8%
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCatProdImpuestoTipoSelect('19')}
-                              className={`px-1 py-0.2 rounded font-bold ${catProdImpuestoTipo === '19' ? 'bg-[#4B9CD3] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                              title="19% IVA"
-                            >
-                              19%
-                            </button>
-                          </div>
-                        </div>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={catProdImpuestoCargo}
-                          onChange={(e) => handleCatProdImpuestoCargoChange(e.target.value)}
-                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                        />
-                      </div>
-
-                      {/* 5. Total (Precio Venta Final) */}
-                      <div>
-                        <label className="block text-[10px] font-bold text-[#4B9CD3] uppercase mb-1 flex items-center justify-between">
-                          <span>Total Venta ($)</span>
-                          <span className="text-[9px] font-black text-white bg-[#4B9CD3] px-1 rounded">P. Venta</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={catProdTotal || catProdPrecio}
-                          onChange={(e) => handleCatProdTotalChange(e.target.value)}
-                          className="w-full text-xs px-2.5 py-1.5 border-2 border-[#AED6F1] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-black text-[#2C3E50]"
-                          required
-                        />
-                      </div>
-
-                      {/* 6. Precio Costo */}
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                          Precio Costo ($)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={catProdPrecioCosto}
-                          onChange={(e) => setCatProdPrecioCosto(e.target.value)}
-                          className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9 font-semibold text-slate-700"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* SECCIÓN 3: RESUMEN FINANCIERO EN TIEMPO REAL & BOTONES */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-                    {/* Live Financial Badges */}
-                    {(() => {
-                      const vb = parseFloat(catProdValorBruto) || 0;
-                      const desc = parseFloat(catProdDescuento) || 0;
-                      const subt = parseFloat(catProdSubtotal) || Math.max(0, vb - desc);
-                      const imp = parseFloat(catProdImpuestoCargo) || 0;
-                      const tot = parseFloat(catProdTotal) || parseFloat(catProdPrecio) || (subt + imp);
-                      const costo = parseFloat(catProdPrecioCosto) || 0;
-                      const ganancia = tot - costo;
-                      const margenPct = tot > 0 && costo > 0 ? Math.round((ganancia / tot) * 100) : 0;
-
-                      return (
-                        <div className="flex flex-wrap items-center gap-2 text-xs w-full sm:w-auto">
-                          <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
-                            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Subtotal:</span>
-                            <span className="font-extrabold text-slate-800">{formatMoney(subt)}</span>
-                          </div>
-                          <div className="bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
-                            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Impuesto:</span>
-                            <span className="font-extrabold text-slate-800">{formatMoney(imp)}</span>
-                          </div>
-                          <div className="bg-[#EBF5FB] border border-[#AED6F1] px-2.5 py-1 rounded-lg">
-                            <span className="text-[10px] text-[#4B9CD3] font-bold uppercase mr-1">Total:</span>
-                            <span className="font-black text-[#2C3E50]">{formatMoney(tot)}</span>
-                          </div>
-                          {costo > 0 && (
-                            <div className={`border px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${ganancia >= 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                              <span className="text-[10px] font-bold uppercase">Utilidad:</span>
-                              <span className="font-black">{formatMoney(ganancia)}</span>
-                              <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-white/70">
-                                {margenPct}% margen
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* Botones de Acción */}
-                    <div className="flex gap-2 w-full sm:w-auto justify-end">
-                      {editingCatProdId && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCatProdCodigo('');
-                            setCatProdNombre('');
-                            setCatProdPrecio('');
-                            setCatProdValorBruto('');
-                            setCatProdDescuento('0');
-                            setCatProdSubtotal('');
-                            setCatProdImpuestoTipo('0');
-                            setCatProdImpuestoCargo('0');
-                            setCatProdTotal('');
-                            setCatProdPrecioCosto('');
-                            setCatProdCategoria('Parfaits');
-                            setEditingCatProdId(null);
-                          }}
-                          className="border border-[#E2E8F0] text-slate-600 hover:bg-slate-100 text-xs font-bold px-3 py-2 rounded-lg transition-colors h-9 cursor-pointer whitespace-nowrap"
-                        >
-                          Cancelar Edición
-                        </button>
-                      )}
-                      <button
-                        type="submit"
-                        className="bg-[#4B9CD3] hover:bg-[#3A82B4] text-white text-xs font-bold px-5 py-2 rounded-lg transition-colors shadow-xs h-9 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
-                      >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        {editingCatProdId ? 'Guardar Cambios' : 'Registrar Producto'}
-                      </button>
-                    </div>
-                  </div>
-                </form>
-
-                {/* TABLA DE PRODUCTOS REGISTRADOS EN EL CATÁLOGO (ESTRUCTURA DE COLUMNAS SOLICITADA) */}
-                <div className="border-t border-slate-100 pt-5 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                        <Database className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                        Catálogo de Productos ({productosCatalogo.length})
-                      </h4>
-                      <span className="text-[10px] font-bold bg-[#EBF5FB] text-[#4B9CD3] px-2 py-0.5 rounded-full border border-[#AED6F1]">
-                        Activos en Tienda
-                      </span>
-                    </div>
-
-                    {/* Buscador y Exportador */}
-                    <div className="flex gap-2 items-center">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="Buscar código, nombre o categoría..."
-                          value={catCatalogSearch}
-                          onChange={(e) => setCatCatalogSearch(e.target.value)}
-                          className="text-xs pl-7 pr-3 py-1.5 border border-[#E2E8F0] rounded-lg bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] w-56 sm:w-64"
-                        />
-                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" />
-                        {catCatalogSearch && (
-                          <button
-                            type="button"
-                            onClick={() => setCatCatalogSearch('')}
-                            className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setShowCsvModal(true)}
-                        className="bg-[#4B9CD3] hover:bg-[#3B8CB3] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
-                        title="Importar productos de manera masiva desde un archivo CSV"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-white" />
-                        <span>Carga Masiva CSV</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (productosCatalogo.length === 0) return;
-                          const headers = ['Código producto', 'Nombre producto', 'Categoría', 'Valor bruto', 'Descuento', 'Subtotal', 'Impuesto cargo', 'Total', 'Precio Costo', 'Margen Ganancia ($)', 'Margen (%)'];
-                          const rows = productosCatalogo.map(p => {
-                            const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
-                            const desc = p.descuento != null ? p.descuento : 0;
-                            const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
-                            const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
-                            const tot = p.total != null ? p.total : p.precio;
-                            const costo = p.precio_costo != null ? p.precio_costo : 0;
-                            const ganancia = tot - costo;
-                            const pct = tot > 0 && costo > 0 ? ((tot - costo) / tot * 100).toFixed(1) + '%' : '0%';
-                            return [
-                              `"${p.codigo}"`,
-                              `"${p.nombre.replace(/"/g, '""')}"`,
-                              `"${p.categoria || ''}"`,
-                              vb.toFixed(2),
-                              desc.toFixed(2),
-                              subt.toFixed(2),
-                              imp.toFixed(2),
-                              tot.toFixed(2),
-                              costo.toFixed(2),
-                              ganancia.toFixed(2),
-                              `"${pct}"`
-                            ].join(',');
-                          });
-                          const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows].join('\n');
-                          const encodedUri = encodeURI(csvContent);
-                          const link = document.createElement('a');
-                          link.setAttribute('href', encodedUri);
-                          link.setAttribute('download', `catalogo_productos_${new Date().toISOString().split('T')[0]}.csv`);
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        }}
-                        className="border border-[#E2E8F0] hover:bg-slate-50 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-                        title="Exportar a archivo CSV"
-                      >
-                        <Download className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                        <span className="hidden sm:inline">Exportar CSV</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Resumen Financiero Rápido del Catálogo */}
-                  {(() => {
-                    const totalVenta = productosCatalogo.reduce((acc, p) => acc + (p.total != null ? p.total : p.precio), 0);
-                    const totalCosto = productosCatalogo.reduce((acc, p) => acc + (p.precio_costo || 0), 0);
-                    const avgVenta = productosCatalogo.length > 0 ? totalVenta / productosCatalogo.length : 0;
-                    const avgCosto = productosCatalogo.length > 0 ? totalCosto / productosCatalogo.length : 0;
-                    const totalGanancia = totalVenta - totalCosto;
-                    const avgMargen = totalVenta > 0 ? Math.round((totalGanancia / totalVenta) * 100) : 0;
-
-                    return (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 bg-[#FFFDF6]/50 p-2.5 rounded-lg border border-slate-200/60 text-xs">
-                        <div className="text-center">
-                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Referencias</span>
-                          <span className="text-xs font-black text-slate-800">{productosCatalogo.length} productos</span>
-                        </div>
-                        <div className="text-center">
-                          <span className="block text-[9px] font-bold text-slate-500 uppercase">P. Venta Promedio</span>
-                          <span className="text-xs font-black text-[#4B9CD3]">{formatMoney(avgVenta)}</span>
-                        </div>
-                        <div className="text-center">
-                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Costo Promedio</span>
-                          <span className="text-xs font-black text-slate-700">{formatMoney(avgCosto)}</span>
-                        </div>
-                        <div className="text-center">
-                          <span className="block text-[9px] font-bold text-slate-500 uppercase">Margen Promedio</span>
-                          <span className="text-xs font-black text-emerald-600">~{avgMargen}% rentabilidad</span>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* TABLA PRINCIPAL */}
-                  {(() => {
-                    const filtered = productosCatalogo.filter(p => {
-                      if (!catCatalogSearch.trim()) return true;
-                      const q = catCatalogSearch.toLowerCase().trim();
-                      return (
-                        p.codigo.toLowerCase().includes(q) ||
-                        p.nombre.toLowerCase().includes(q) ||
-                        (p.categoria && p.categoria.toLowerCase().includes(q))
-                      );
-                    });
-
-                    if (filtered.length === 0) {
-                      return (
-                        <div className="text-center py-8 text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
-                          <Database className="w-6 h-6 mx-auto mb-1 text-slate-300" />
-                          {catCatalogSearch ? 'Ningún producto coincide con el filtro de búsqueda.' : 'No hay productos registrados en el catálogo.'}
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div className="w-full border border-slate-200 rounded-xl overflow-hidden shadow-2xs bg-white">
-                        <div className="overflow-x-auto w-full">
-                          <table className="w-full text-xs text-left text-slate-600">
-                            <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
-                              <tr>
-                                <th className="px-3 py-2.5">Código Producto</th>
-                                <th className="px-3 py-2.5">Nombre Producto</th>
-                                <th className="px-3 py-2.5 text-right">Valor Bruto</th>
-                                <th className="px-3 py-2.5 text-right">Descuento</th>
-                                <th className="px-3 py-2.5 text-right">Subtotal</th>
-                                <th className="px-3 py-2.5 text-right">Impuesto Cargo</th>
-                                <th className="px-3 py-2.5 text-right font-black text-[#4B9CD3]">Total (P. Venta)</th>
-                                <th className="px-3 py-2.5 text-right">Precio Costo</th>
-                                <th className="px-3 py-2.5 text-right">Utilidad / Margen</th>
-                                <th className="px-3 py-2.5 text-center">Acciones</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {filtered.map(p => {
-                                const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
-                                const desc = p.descuento != null ? p.descuento : 0;
-                                const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
-                                const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
-                                const tot = p.total != null ? p.total : p.precio;
-                                const costo = p.precio_costo != null ? p.precio_costo : 0;
-                                const ganancia = tot - costo;
-                                const pct = tot > 0 && costo > 0 ? Math.round((ganancia / tot) * 100) : 0;
-
-                                return (
-                                  <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
-                                    {/* Código producto */}
-                                    <td className="px-3 py-2.5 whitespace-nowrap">
-                                      <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold border border-slate-200">
-                                        {p.codigo}
-                                      </span>
-                                    </td>
-
-                                    {/* Nombre producto */}
-                                    <td className="px-3 py-2.5">
-                                      <div className="font-bold text-slate-800">{p.nombre}</div>
-                                      <div className="text-[10px] text-slate-400 font-medium">Cat: {p.categoria || 'General'}</div>
-                                    </td>
-
-                                    {/* Valor bruto */}
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
-                                      {formatMoney(vb)}
-                                    </td>
-
-                                    {/* Descuento */}
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                      {desc > 0 ? (
-                                        <span className="text-amber-600 font-semibold">-{formatMoney(desc)}</span>
-                                      ) : (
-                                        <span className="text-slate-400">$0.00</span>
-                                      )}
-                                    </td>
-
-                                    {/* Subtotal */}
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-semibold text-slate-700">
-                                      {formatMoney(subt)}
-                                    </td>
-
-                                    {/* Impuesto cargo */}
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                      {imp > 0 ? (
-                                        <span className="text-slate-700 font-medium">+{formatMoney(imp)}</span>
-                                      ) : (
-                                        <span className="text-slate-400">$0.00</span>
-                                      )}
-                                    </td>
-
-                                    {/* Total (P. Venta) */}
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                      <span className="text-sm font-black text-[#4B9CD3]">{formatMoney(tot)}</span>
-                                    </td>
-
-                                    {/* Precio Costo */}
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap font-medium text-slate-600">
-                                      {costo > 0 ? formatMoney(costo) : <span className="text-slate-400">--</span>}
-                                    </td>
-
-                                    {/* Utilidad / Margen */}
-                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                      {costo > 0 ? (
-                                        <div>
-                                          <span className={`font-bold ${ganancia >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                            {formatMoney(ganancia)}
-                                          </span>
-                                          <span className="block text-[9px] text-slate-400 font-semibold">
-                                            {pct}% margen
-                                          </span>
-                                        </div>
-                                      ) : (
-                                        <span className="text-slate-400 text-[10px]">--</span>
-                                      )}
-                                    </td>
-
-                                    {/* Acciones */}
-                                    <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                                      <div className="flex gap-1 justify-center">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleEditCatProd(p)}
-                                          className="p-1.5 hover:text-[#4B9CD3] hover:bg-[#EBF5FB] rounded-md transition-colors border border-transparent hover:border-slate-100 cursor-pointer"
-                                          title="Editar producto"
-                                        >
-                                          <Edit2 className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            if (window.confirm(`¿Seguro que deseas eliminar el producto "${p.nombre}"?`)) {
-                                              onDeleteProductoCatalogo(p.id);
-                                            }
-                                          }}
-                                          className="p-1.5 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors border border-transparent hover:border-red-100 cursor-pointer"
-                                          title="Eliminar producto"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              {/* MODAL DE CARGA MASIVA CSV DE PRODUCTOS */}
-              {showCsvModal && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                    {/* Modal Header */}
-                    <div className="bg-gradient-to-r from-[#2C3E50] to-[#4B9CD3] p-4 text-white flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-white/10 rounded-lg backdrop-blur-xs">
-                          <Upload className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                          <h3 className="text-sm font-black uppercase tracking-wide">Carga Masiva de Productos (CSV)</h3>
-                          <p className="text-[11px] text-sky-100">Sube múltiples productos al catálogo mediante un archivo CSV o Excel</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCsvModal(false);
-                          setCsvParsedProducts([]);
-                          setCsvParseErrors([]);
-                          setCsvFileName('');
-                        }}
-                        className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-
-                    {/* Modal Body */}
-                    <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-                      {/* Indicaciones y Descarga de Plantilla */}
-                      <div className="bg-[#EBF5FB] border border-[#AED6F1] rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <h4 className="text-xs font-bold text-[#1B4F72] flex items-center gap-1.5">
-                            <FileText className="w-4 h-4 text-[#4B9CD3]" />
-                            Plantilla Formateada de Ejemplo
-                          </h4>
-                          <p className="text-[11px] text-slate-600">
-                            Descarga nuestro formato CSV con las columnas correspondientes (<span className="font-mono font-bold text-slate-700">codigo, nombre, categoria, valor_bruto, descuento, total, precio_costo</span>).
+                        <td className="py-3 px-1 text-center cursor-grab text-slate-300 hover:text-slate-600">
+                          <GripVertical className="w-4 h-4 mx-auto" />
+                        </td>
+                        <td className="py-3 px-3 max-w-[180px]">
+                          <p className="font-bold text-[#2C3E50] truncate" title={t.titulo}>
+                            {t.titulo}
                           </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleDownloadSampleCsv}
-                          className="bg-white hover:bg-slate-50 text-[#4B9CD3] border border-[#4B9CD3] text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Descargar Plantilla CSV</span>
-                        </button>
-                      </div>
-
-                      {/* File Dropzone */}
-                      <div className="border-2 border-dashed border-slate-300 hover:border-[#4B9CD3] rounded-xl p-6 text-center bg-slate-50/50 transition-colors relative">
-                        <input
-                          type="file"
-                          accept=".csv,.txt"
-                          onChange={handleFileUpload}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        />
-                        <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
-                          <div className="p-3 bg-sky-100/80 rounded-full text-[#4B9CD3]">
-                            <Upload className="w-6 h-6" />
-                          </div>
-                          <p className="text-xs font-bold text-slate-700">
-                            {csvFileName ? `Archivo seleccionado: ${csvFileName}` : 'Arrastra o haz clic para subir tu archivo CSV'}
+                          <p className="text-[10px] text-slate-400 line-clamp-1" title={t.descripcion}>
+                            {t.descripcion || 'Sin instrucciones adicionales'}
                           </p>
-                          <p className="text-[10px] text-slate-400">
-                            Archivos compatibles: .csv (delimitado por comas o punto y coma)
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Errores de parsing */}
-                      {csvParseErrors.length > 0 && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
-                          <div className="font-bold flex items-center gap-1 text-amber-900">
-                            <AlertCircle className="w-4 h-4 text-amber-600" />
-                            Advertencias detectadas en el archivo:
-                          </div>
-                          <ul className="list-disc list-inside text-[11px] space-y-0.5 text-amber-700 pl-1">
-                            {csvParseErrors.map((err, idx) => (
-                              <li key={idx}>{err}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {/* Vista Previa de Productos Detectados */}
-                      {csvParsedProducts.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-                              <CheckCircle className="w-4 h-4 text-emerald-500" />
-                              Vista Previa ({csvParsedProducts.length} productos válidos detectados)
-                            </h4>
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                              Listos para guardar
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {getAreaBadge(t.area)}
+                        </td>
+                        <td className="py-3 px-3 font-semibold text-slate-600">
+                          {getEmpleadoNombre(t.asignado_a)}
+                        </td>
+                        <td className="py-3 px-3 text-center font-bold text-slate-700">
+                          {t.tiempo_estimado_min} min
+                        </td>
+                        <td className="py-3 px-3 text-center font-semibold">
+                          {t.started_at ? (
+                            <span className={`px-2 py-0.5 rounded text-[10px] ${
+                              t.estado === 'Completada' 
+                                ? 'bg-[#EBF5FB] text-[#4B9CD3] border border-blue-100' 
+                                : t.estado === 'En proceso'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {calcularTiempoTarea(t.started_at, t.completed_at)}
                             </span>
+                          ) : (
+                            <span className="text-slate-400 italic text-[10px]">Sin iniciar</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <div className="flex flex-col items-center justify-center gap-1">
+                            <span className={t.requiere_foto ? 'text-[#4B9CD3] font-bold text-[10px]' : 'text-slate-400 text-[10px]'}>
+                              {t.requiere_foto ? 'Requerida' : 'Opcional'}
+                            </span>
+                            {t.foto_url ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPreviewPhoto(t.foto_url || null)}
+                                className="mt-1 group relative focus:outline-hidden transition-transform hover:scale-105"
+                              >
+                                <img 
+                                  src={t.foto_url} 
+                                  alt="Evidencia" 
+                                  className="w-10 h-10 object-cover rounded-md border border-slate-200 cursor-pointer shadow-2xs" 
+                                  title="Click para ampliar foto de evidencia"
+                                />
+                                {t.nota_evidencia && (
+                                  <span className="absolute -bottom-1 -right-1 bg-emerald-500 w-2.5 h-2.5 rounded-full border-2 border-white" title={t.nota_evidencia} />
+                                )}
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Sin evidencia</span>
+                            )}
                           </div>
-
-                          <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl">
-                            <table className="w-full text-left border-collapse text-[11px]">
-                              <thead>
-                                <tr className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
-                                  <th className="p-2">Código</th>
-                                  <th className="p-2">Nombre</th>
-                                  <th className="p-2">Categoría</th>
-                                  <th className="p-2 text-right">Valor Bruto</th>
-                                  <th className="p-2 text-right">Desc.</th>
-                                  <th className="p-2 text-right">Total ($)</th>
-                                  <th className="p-2 text-right">Costo ($)</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                                {csvParsedProducts.map((p, idx) => (
-                                  <tr key={idx} className="hover:bg-slate-50">
-                                    <td className="p-2 font-mono font-bold text-slate-900">{p.codigo}</td>
-                                    <td className="p-2 font-bold">{p.nombre}</td>
-                                    <td className="p-2 text-slate-500">{p.categoria}</td>
-                                    <td className="p-2 text-right font-mono">{formatMoney(p.valor_bruto)}</td>
-                                    <td className="p-2 text-right font-mono text-emerald-600">{formatMoney(p.descuento)}</td>
-                                    <td className="p-2 text-right font-mono font-bold text-slate-900">{formatMoney(p.total)}</td>
-                                    <td className="p-2 text-right font-mono text-slate-500">{formatMoney(p.precio_costo)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {getEstadoBadge(t.estado)}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <button
+                              onClick={() => handleEditClick(t)}
+                              className="p-1 text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-all"
+                              title="Editar tarea"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => onDeleteTarea(t.id)}
+                              className="p-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-all"
+                              title="Eliminar tarea"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Modal Footer */}
-                    <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCsvModal(false);
-                          setCsvParsedProducts([]);
-                          setCsvParseErrors([]);
-                          setCsvFileName('');
-                        }}
-                        className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 transition-colors"
-                      >
-                        Cancelar
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={csvParsedProducts.length === 0 || isCsvUploading}
-                        onClick={handleConfirmCsvImport}
-                        className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
-                      >
-                        {isCsvUploading ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            <span>Sincronizando con Supabase...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle className="w-4 h-4" />
-                            <span>Confirmar e Importar {csvParsedProducts.length} Productos</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* FILA B: FILTROS + REPORTE GENERAL DE VENTAS REALIZADAS (ANCHO COMPLETO) */}
-              <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-5 flex flex-col">
-                
-                {/* FILTROS DE CONSULTA */}
-                <div className="space-y-3 bg-[#FFFDF6]/45 p-4 rounded-xl border border-[#E2E8F0]/60">
-                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <Filter className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                    Filtros de Reporte por Fecha, Vendedor o Ítems
-                  </h4>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Fecha de Inicio</label>
-                      <input
-                        type="date"
-                        value={salesStartDate}
-                        onChange={(e) => setSalesStartDate(e.target.value)}
-                        className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Fecha de Término</label>
-                      <input
-                        type="date"
-                        value={salesEndDate}
-                        onChange={(e) => setSalesEndDate(e.target.value)}
-                        className="w-full text-xs px-2.5 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Filtrar Vendedor</label>
-                      <select
-                        value={salesSeller}
-                        onChange={(e) => setSalesSeller(e.target.value)}
-                        className="w-full text-xs px-2 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
-                      >
-                        <option value="">-- Todos los Staffs --</option>
-                        {usuarios.map(u => (
-                          <option key={u.id} value={u.id}>{u.nombre} ({u.rol === 'admin' ? 'Admin' : 'Staff'})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Medio Pago</label>
-                      <select
-                        value={salesPaymentMethod}
-                        onChange={(e) => setSalesPaymentMethod(e.target.value)}
-                        className="w-full text-xs px-2 py-1.5 border border-[#E2E8F0] rounded-lg bg-white capitalize"
-                      >
-                        <option value="">-- Todos --</option>
-                        <option value="efectivo">Efectivo</option>
-                        <option value="tarjeta">Tarjeta (Datáfono)</option>
-                        <option value="transferencia">Transferencia</option>
-                        <option value="rappi">Rappi</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <input
-                        type="text"
-                        placeholder="Buscar por vendedor, nombre de producto, o código..."
-                        value={salesSearch}
-                        onChange={(e) => setSalesSearch(e.target.value)}
-                        className="w-full text-xs px-3 py-1.5 border border-[#E2E8F0] rounded-lg bg-white"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const d = new Date();
-                        const endStr = getLocalDateString(d);
-                        d.setDate(d.getDate() - 7);
-                        const startStr = getLocalDateString(d);
-                        setSalesStartDate(startStr);
-                        setSalesEndDate(endStr);
-                        setSalesSeller('');
-                        setSalesSearch('');
-                        setSalesPaymentMethod('');
-                      }}
-                      className="border border-[#E2E8F0] text-slate-600 px-3 text-xs font-bold rounded-lg hover:bg-slate-50 bg-white transition-colors"
-                    >
-                      Limpiar
-                    </button>
-                  </div>
-                </div>
-
-                {/* KPI DESGLOSE MEDIOS DE PAGO */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-4">
-                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Efectivo</span>
-                    <span className="text-sm font-black text-[#4B9CD3] mt-0.5 block">{formatMoney(totalEfectivoFiltered)}</span>
-                  </div>
-                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Tarjeta</span>
-                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalTarjetaFiltered)}</span>
-                  </div>
-                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Transferencia</span>
-                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalTransferenciaFiltered)}</span>
-                  </div>
-                  <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Rappi</span>
-                    <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalRappiFiltered)}</span>
-                  </div>
-                </div>
-
-                {/* KPIs DEL RANGO FILTRADO */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-                  <div className="bg-[#EBF5FB]/60 border border-[#AED6F1] p-3 rounded-lg text-center">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Total Vendido</span>
-                    <span className="text-base font-black text-[#4B9CD3] mt-0.5 block">{formatMoney(totalFilteredAmount)}</span>
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-center">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Tickets Emitidos</span>
-                    <span className="text-base font-black text-slate-800 mt-0.5 block">{filteredSales.length} trans.</span>
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-center">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Ticket Promedio</span>
-                    <span className="text-base font-black text-slate-800 mt-0.5 block">{formatMoney(ticketPromedio)}</span>
-                  </div>
-
-                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-center">
-                    <span className="block text-[9px] font-extrabold text-amber-800 uppercase tracking-widest">Vendedor Estrella</span>
-                    <span className="text-xs font-black text-amber-950 mt-1 block truncate" title={starSellerName}>
-                      {starSellerName}
-                    </span>
-                  </div>
-                </div>
-
-                {/* TABLA / LOG DE TRANSACCIONES AUDITABLES */}
-                <div className="w-full border border-slate-200 rounded-xl overflow-hidden shadow-xs bg-white">
-                  <div className="p-3 bg-[#FFFDF6] border-b border-slate-200 flex justify-between items-center">
-                    <h4 className="font-extrabold text-xs text-[#2C3E50] uppercase tracking-wider">
-                      Historial de Transacciones del Día (Vista de Auditoría Administrador)
-                    </h4>
-                    <span className="text-[10px] font-bold bg-[#EBF5FB] text-[#4B9CD3] px-2.5 py-1 rounded-full border border-[#AED6F1]">
-                      {filteredSales.length} Registro(s)
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full text-xs text-left text-slate-600">
-                      <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
-                        <tr>
-                          <th className="px-4 py-3">Hora y Fecha</th>
-                          <th className="px-4 py-3">Colaborador</th>
-                          <th className="px-4 py-3">Cliente (Teléfono/Nombre)</th>
-                          <th className="px-4 py-3">Productos Vendidos</th>
-                          <th className="px-4 py-3 text-center">Medio de Pago</th>
-                          <th className="px-4 py-3 text-right">Monto Total</th>
-                          <th className="px-4 py-3 text-center">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filteredSales.length === 0 ? (
-                          <tr>
-                            <td colSpan={7} className="text-center py-12 text-slate-400 font-medium">
-                              Ninguna venta coincide con los criterios de filtrado.
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredSales.map(v => {
-                            const isAnulada = v.estado === 'Anulada';
-                            return (
-                              <tr key={v.id} className={`transition-colors ${isAnulada ? 'bg-red-50/30' : 'hover:bg-slate-50/60 bg-white'}`}>
-                                <td className="px-4 py-3 whitespace-nowrap">
-                                  <span className="font-bold text-slate-800 block">{v.hora}</span>
-                                  <span className="block text-[10px] text-slate-400">{v.fecha}</span>
-                                </td>
-                                <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-700">
-                                  {v.vendedor_nombre}
-                                </td>
-                                <td className="px-4 py-3 whitespace-nowrap">
-                                  <span className="font-extrabold text-[#2C3E50] block">{v.cliente_nombre || 'Cliente General'}</span>
-                                  <span className="block text-[10px] font-semibold text-[#4B9CD3]">{v.cliente_telefono || 'Sin teléfono'}</span>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="space-y-1 max-w-[280px]">
-                                    {v.productos_vendidos.map((prod, pIdx) => (
-                                      <div key={pIdx} className="text-[11px] text-slate-700 font-semibold flex justify-between gap-2">
-                                        <span className="truncate">{prod.nombre} x{prod.cantidad}</span>
-                                        <span className="text-slate-400 font-mono text-[10px] shrink-0">{formatMoney(prod.precio * prod.cantidad)}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-center whitespace-nowrap">
-                                  <span className="inline-block px-2.5 py-1 text-[10px] font-extrabold rounded-md uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 capitalize">
-                                    {v.metodo_pago || 'Efectivo'}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-right whitespace-nowrap font-extrabold">
-                                  {isAnulada ? (
-                                    <div className="text-right">
-                                      <span className="text-slate-400 line-through block font-medium">{formatMoney(v.total)}</span>
-                                      <span className="text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-100 border border-red-200 px-2 py-0.5 rounded-md inline-block">
-                                        Anulada
-                                      </span>
-                                      {v.motivo_anulacion && (
-                                        <span className="block text-[9px] text-slate-500 font-normal max-w-[130px] text-right truncate" title={v.motivo_anulacion}>
-                                          Motivo: {v.motivo_anulacion}
-                                        </span>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-[#4B9CD3] text-sm">{formatMoney(v.total)}</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-center whitespace-nowrap">
-                                  {!isAnulada ? (
-                                    <div className="flex gap-1.5 justify-center">
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingVentaModal({
-                                          open: true,
-                                          venta: v,
-                                          metodo_pago: v.metodo_pago || 'efectivo',
-                                          cliente_nombre: v.cliente_nombre || '',
-                                          cliente_telefono: v.cliente_telefono || '',
-                                          items: (v.productos_vendidos || []).map(p => ({ ...p })),
-                                          selectedProdIdToAdd: ''
-                                        })}
-                                        className="px-2.5 py-1.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer shrink-0"
-                                      >
-                                        Editar Venta
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setAnnullingVentaModal({
-                                          open: true,
-                                          venta: v,
-                                          motivo: ''
-                                        })}
-                                        className="px-2.5 py-1.5 bg-red-500 hover:bg-red-600 text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer shrink-0"
-                                      >
-                                        Anular / Eliminar Venta
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <span className="text-[10px] font-bold text-slate-400 italic">
-                                      Transacción Anulada
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* EXPORTADOR DE REPORTES CONSOLIDADOS (CSV) */}
-                <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="border-b border-[#FFFDF6] pb-2">
-                    <h4 className="font-extrabold text-xs uppercase tracking-wider text-[#4B9CD3]">Exportador de Reportes Operativos Consolidados</h4>
-                    <p className="text-xs text-slate-500">Descarga de reportes en formato CSV con valores numéricos puros para el análisis de rendimiento, inventario o ventas.</p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <button
-                      type="button"
-                      id="export-sales-btn"
-                      onClick={handleExportVentas}
-                      className="bg-white border border-[#E2E8F0] hover:border-[#4B9CD3] text-[#2C3E50] text-xs font-bold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-center"
-                    >
-                      Descargar Métricas de Ventas (CSV)
-                    </button>
-                    <button
-                      type="button"
-                      id="export-inventory-btn"
-                      onClick={handleExportInventario}
-                      className="bg-white border border-[#E2E8F0] hover:border-[#4B9CD3] text-[#2C3E50] text-xs font-bold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-center"
-                    >
-                      Descargar Historial de Inventario (CSV)
-                    </button>
-                    <button
-                      type="button"
-                      id="export-performance-btn"
-                      onClick={handleExportRendimiento}
-                      className="bg-white border border-[#E2E8F0] hover:border-[#4B9CD3] text-[#2C3E50] text-xs font-bold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-center"
-                    >
-                      Descargar Rendimiento de Personal (CSV)
-                    </button>
-                  </div>
-                </div>
-
-                {/* HISTORIAL DE CUADRES DE CAJA / CORTES DIARIOS */}
-                <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="border-b border-[#FFFDF6] pb-2">
-                    <h4 className="font-extrabold text-xs uppercase tracking-wider text-[#4B9CD3]">Cortes de Caja de la Jornada (Cuadre Diario)</h4>
-                    <p className="text-xs text-slate-500">Historial de rendición de caja y observaciones de entrega de turno reportados por el staff.</p>
-                  </div>
-
-                  {cuadresCaja.length === 0 ? (
-                    <p className="text-xs text-slate-400 italic text-center py-6">No se han registrado cortes de caja en esta jornada.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs text-left text-slate-600">
-                        <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
-                          <tr>
-                            <th className="px-4 py-3">Fecha y Hora</th>
-                            <th className="px-4 py-3">Colaborador</th>
-                            <th className="px-4 py-3 text-right">Efectivo Contado</th>
-                            <th className="px-4 py-3 text-right">Datáfono / Transf.</th>
-                            <th className="px-4 py-3">Observaciones de Entrega</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {cuadresCaja.map(c => (
-                            <tr key={c.id} className="hover:bg-slate-50 bg-white transition-colors">
-                              <td className="px-4 py-3 whitespace-nowrap">
-                                <span className="font-bold text-slate-800">{c.fecha}</span>
-                                <span className="block text-[10px] text-slate-400">{c.hora}</span>
-                              </td>
-                              <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-700">{c.usuario_nombre}</td>
-                              <td className="px-4 py-3 text-right font-mono font-bold text-sky-700">{formatMoney(c.efectivo_contado)}</td>
-                              <td className="px-4 py-3 text-right font-mono font-bold text-slate-700">{formatMoney(c.tarjeta_esperado)}</td>
-                              <td className="px-4 py-3 text-slate-600 font-medium max-w-[250px] truncate" title={c.observaciones}>{c.observaciones}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-
-            </div>
-            </>
-            )}
-
-          </div>
-        );
-      })()}
-      </div>
+            );
+          })()}
+        </div>
+        </div>
       )}
 
+      {/* 2. GESTOR DE PRODUCTOS A PROMOCIONAR Y COMUNICADOS */}
 
+      </div>
 
-      {/* Modal para Agregar Feedback */}
       {showFeedbackModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white border border-[#E2E8F0] rounded-2xl w-full max-w-md p-6 shadow-xl relative animate-in fade-in zoom-in-95 duration-150">
@@ -6252,10 +6285,10 @@ export default function AdminDashboard({
                   <button
                     onClick={() => {
                       const today = new Date();
-                      const todayStr = today.toISOString().split('T')[0];
+                      const todayStr = getLocalDateString(today);
                       const sevenDaysAgo = new Date(today);
                       sevenDaysAgo.setDate(today.getDate() - 7);
-                      const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
+                      const sevenDaysAgoStr = getLocalDateString(sevenDaysAgo);
                       
                       setPerformanceDateFilter(sevenDaysAgoStr);
                       setPerformanceDateEndFilter(todayStr);
@@ -6270,10 +6303,10 @@ export default function AdminDashboard({
                   <button
                     onClick={() => {
                       const today = new Date();
-                      const todayStr = today.toISOString().split('T')[0];
+                      const todayStr = getLocalDateString(today);
                       const fifteenDaysAgo = new Date(today);
                       fifteenDaysAgo.setDate(today.getDate() - 15);
-                      const fifteenDaysAgoStr = fifteenDaysAgo.toISOString().split('T')[0];
+                      const fifteenDaysAgoStr = getLocalDateString(fifteenDaysAgo);
                       
                       setPerformanceDateFilter(fifteenDaysAgoStr);
                       setPerformanceDateEndFilter(todayStr);
@@ -6288,10 +6321,10 @@ export default function AdminDashboard({
                   <button
                     onClick={() => {
                       const today = new Date();
-                      const todayStr = today.toISOString().split('T')[0];
+                      const todayStr = getLocalDateString(today);
                       const oneMonthAgo = new Date(today);
                       oneMonthAgo.setMonth(today.getMonth() - 1);
-                      const oneMonthAgoStr = oneMonthAgo.toISOString().split('T')[0];
+                      const oneMonthAgoStr = getLocalDateString(oneMonthAgo);
                       
                       setPerformanceDateFilter(oneMonthAgoStr);
                       setPerformanceDateEndFilter(todayStr);
@@ -7809,7 +7842,6 @@ export default function AdminDashboard({
           </div>
         </div>
       )}
-      </div>
     </div>
   );
 }

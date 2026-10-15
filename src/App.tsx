@@ -201,8 +201,8 @@ export default function App() {
   const [filtroGeneral, setFiltroGeneral] = useState<'diario' | 'semanal' | 'mensual'>('diario');
 
   // Pestaña activa y pestañas abiertas del administrador (Multi-Tab Admin)
-  const [openTabs, setOpenTabs] = useState<AdminTab[]>(['tareas']);
-  const [activeTab, setActiveTab] = useState<AdminTab>('tareas');
+  const [openTabs, setOpenTabs] = useState<AdminTab[]>(['ventas']);
+  const [activeTab, setActiveTab] = useState<AdminTab>('ventas');
 
   const handleSelectTab = (tab: AdminTab) => {
     let targetTab = tab;
@@ -2356,53 +2356,20 @@ export default function App() {
             <div className="max-w-7xl mx-auto px-2 sm:px-4 py-1.5 overflow-x-auto">
               <nav className="flex flex-wrap items-center gap-1.5 w-full">
                 <button
-                  id="admin-tab-tareas"
+                  id="admin-tab-ventas"
                   onClick={() => {
-                    handleSelectTab('tareas');
-                    pushNotification('Ingresando al gestor de tareas diarias.', 'info');
+                    handleSelectTab('ventas');
+                    pushNotification('Abriendo módulo de ventas y reportes históricos.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'tareas'
+                    activeTab === 'ventas'
                       ? 'bg-[#4B9CD3] text-white shadow-xs'
                       : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
                   }`}
                 >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                  <span>Tareas Diarias</span>
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>Reportes</span>
                 </button>
-                
-                <button
-                  id="admin-tab-productos"
-                  onClick={() => {
-                    handleSelectTab('productos');
-                    pushNotification('Revisando el módulo de ventas sugeridas y comunicados.', 'info');
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'productos' || activeTab === 'anuncios'
-                      ? 'bg-[#4B9CD3] text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Ventas Sugeridas</span>
-                </button>
-
-                <button
-                  id="admin-tab-inventario"
-                  onClick={() => {
-                    handleSelectTab('inventario');
-                    pushNotification('Accediendo al control de stock e inventario.', 'info');
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'inventario'
-                      ? 'bg-[#4B9CD3] text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
-                  }`}
-                >
-                  <Boxes className="w-3.5 h-3.5" />
-                  <span>Inventario</span>
-                </button>
-
                 <button
                   id="admin-tab-gastos"
                   onClick={() => {
@@ -2418,39 +2385,21 @@ export default function App() {
                   <DollarSign className="w-3.5 h-3.5" />
                   <span>Gastos</span>
                 </button>
-
                 <button
-                  id="admin-tab-empleados"
+                  id="admin-tab-inventario"
                   onClick={() => {
-                    handleSelectTab('empleados');
-                    pushNotification('Visualizando nómina de trabajadores, horarios y fichajes.', 'info');
+                    handleSelectTab('inventario');
+                    pushNotification('Accediendo al control de stock e inventario.', 'info');
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'empleados' || activeTab === 'horarios' || activeTab === 'calidad'
+                    activeTab === 'inventario'
                       ? 'bg-[#4B9CD3] text-white shadow-xs'
                       : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
                   }`}
                 >
-                  <User className="w-3.5 h-3.5" />
-                  <span>Trabajadores</span>
+                  <Boxes className="w-3.5 h-3.5" />
+                  <span>Inventario</span>
                 </button>
-
-                <button
-                  id="admin-tab-ventas"
-                  onClick={() => {
-                    handleSelectTab('ventas');
-                    pushNotification('Abriendo módulo de ventas y reportes históricos.', 'info');
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeTab === 'ventas'
-                      ? 'bg-[#4B9CD3] text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
-                  }`}
-                >
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  <span>Reportes</span>
-                </button>
-
                 <button
                   id="admin-tab-tendencia"
                   onClick={() => {
@@ -2466,7 +2415,6 @@ export default function App() {
                   <BarChart3 className="w-3.5 h-3.5" />
                   <span>Tendencia</span>
                 </button>
-
                 <button
                   id="admin-tab-financieros"
                   onClick={() => {
@@ -2481,6 +2429,51 @@ export default function App() {
                 >
                   <Wallet className="w-3.5 h-3.5" />
                   <span>Financieros</span>
+                </button>
+                <button
+                  id="admin-tab-productos"
+                  onClick={() => {
+                    handleSelectTab('productos');
+                    pushNotification('Revisando el módulo de ventas sugeridas y comunicados.', 'info');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    activeTab === 'productos' || activeTab === 'anuncios'
+                      ? 'bg-[#4B9CD3] text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Ventas Sugeridas</span>
+                </button>
+                <button
+                  id="admin-tab-empleados"
+                  onClick={() => {
+                    handleSelectTab('empleados');
+                    pushNotification('Visualizando nómina de trabajadores, horarios y fichajes.', 'info');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    activeTab === 'empleados' || activeTab === 'horarios' || activeTab === 'calidad'
+                      ? 'bg-[#4B9CD3] text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
+                  }`}
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span>Trabajadores</span>
+                </button>
+                <button
+                  id="admin-tab-tareas"
+                  onClick={() => {
+                    handleSelectTab('tareas');
+                    pushNotification('Ingresando al gestor de tareas diarias.', 'info');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    activeTab === 'tareas'
+                      ? 'bg-[#4B9CD3] text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-[#EBF5FB]/60 hover:text-[#2C3E50]'
+                  }`}
+                >
+                  <ClipboardList className="w-3.5 h-3.5" />
+                  <span>Tareas Diarias</span>
                 </button>
               </nav>
             </div>

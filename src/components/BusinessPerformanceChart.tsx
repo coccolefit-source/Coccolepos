@@ -129,7 +129,7 @@ export const BusinessPerformanceChart = (props: BusinessPerformanceChartProps) =
               labelFormatter={(label) => "Día " + label + " del Mes"}
             />
             <Legend wrapperStyle={{ paddingTop: "10px" }} />
-            <Bar dataKey="ventasDiarias" name="Ventas Diarias" fill="#cbd5e1" radius={[4, 4, 0, 0]} maxBarSize={20} />
+            <Bar dataKey="ventasDiarias" name="Ventas Diarias" fill="#cbd5e1" radius={[4, 4, 0, 0]} maxBarSize={20} label={{ position: "top", fill: "#1e293b", fontSize: 10, fontWeight: "bold", formatter: (val) => (Number(val) > 0 ? "$" + Math.round(Number(val)).toLocaleString("es-CO") : "") }} />
             <Line type="monotone" dataKey="ventasAcumuladas" name="Ventas Acumuladas" stroke="#4f46e5" strokeWidth={3} dot={false} />
             <Line type="monotone" dataKey="objetivoProyectado" name="Objetivo Lineal" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" dot={false} />
           </ComposedChart>

@@ -1,3 +1,4 @@
+import { getLocalDateString } from '../lib/supabaseClient';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -34,8 +35,8 @@ export default function Leaderboard({
   const [localFiltro, setLocalFiltro] = useState<'diario' | 'semanal' | 'mensual'>(filtro);
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [expandedEmployeeId, setExpandedEmployeeId] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState<string>(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState<string>(getLocalDateString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
+  const [endDate, setEndDate] = useState<string>(getLocalDateString());
   const [useCustomRange, setUseCustomRange] = useState<boolean>(false);
 
   const activeFiltro = onFiltroChange ? filtro : localFiltro;
@@ -56,7 +57,7 @@ export default function Leaderboard({
     fichajes,
     productos,
     activeFiltro,
-    new Date().toISOString().split('T')[0],
+    getLocalDateString(),
     posVentas,
     rankingWeights,
     useCustomRange ? startDate : undefined,

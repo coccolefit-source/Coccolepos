@@ -2082,36 +2082,41 @@ export const DEFAULT_TASKS_24_TEMPLATES = [
  * Retorna la fecha local en formato YYYY-MM-DD sin desfases por zona horaria UTC.
  */
 export function getLocalDateString(dateInput?: Date | string | null): string {
-  if (!dateInput) {
-    const now = new Date();
+  try {
+    let d: Date;
+    if (!dateInput) {
+      d = new Date();
+    } else if (typeof dateInput === 'string') {
+      const trimmed = dateInput.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        return trimmed;
+      }
+      d = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
+    } else {
+      d = dateInput;
+    }
+
+    if (isNaN(d.getTime())) {
+      d = new Date();
+    }
+
+    // Forzar zona horaria oficial de Bogotá (America/Bogota - UTC-5)
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return formatter.format(d);
+  } catch (err) {
+    const now = dateInput instanceof Date ? dateInput : new Date();
     const yyyy = now.getFullYear();
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const dd = String(now.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
   }
-  if (typeof dateInput === 'string') {
-    const trimmed = dateInput.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-      return trimmed;
-    }
-    const d = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
-    if (!isNaN(d.getTime())) {
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    }
-    return trimmed;
-  }
-  const yyyy = dateInput.getFullYear();
-  const mm = String(dateInput.getMonth() + 1).padStart(2, '0');
-  const dd = String(dateInput.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
 }
 
-/**
- * Calcula las horas y minutos trabajados entre hora de entrada y hora de salida (o hora actual si está en curso).
- */
 export function calcularHorasTurno(horaEntrada?: string | null, horaSalida?: string | null): { 
   horas: number; 
   minutos: number; 

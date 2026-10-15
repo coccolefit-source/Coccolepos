@@ -1,3 +1,4 @@
+import { getLocalDateString } from '../lib/supabaseClient';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -47,7 +48,7 @@ export default function AnalyticsPanel({
   const salesByProduct = productos.map(prod => {
     const totalSold = ventas
       .filter(v => v.producto_id === prod.id && (
-        filtro === 'diario' ? v.fecha === new Date().toISOString().split('T')[0] : true
+        filtro === 'diario' ? v.fecha === getLocalDateString() : true
       ))
       .reduce((sum, v) => sum + v.unidades_contadas, 0);
     return {
