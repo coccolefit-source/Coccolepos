@@ -213,16 +213,8 @@ import { getSupabaseClient, getLocalDateString } from './supabaseClient';
 
       var cliente = obtenerCliente();
       if (cliente && !canalRealtimeVentas) {
-        try {
-          var chs = cliente.getChannels();
-          for (var i = 0; i < chs.length; i++) {
-            if (chs[i].topic && chs[i].topic.includes('canal-optimizado-sales')) {
-              cliente.removeChannel(chs[i]);
-            }
-          }
-        } catch (errChannels) {}
         canalRealtimeVentas = cliente
-          .channel('canal-optimizado-sales-' + Date.now())
+          .channel('canal-optimizado-sales')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, sincronizarConDebounce)
           .subscribe();
       }

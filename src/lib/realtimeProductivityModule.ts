@@ -189,16 +189,8 @@ import { getSupabaseClient, DEFAULT_TASKS_24_TEMPLATES, generarLoteTareasPredete
     }
 
     try {
-      try {
-        var chs = supabase.getChannels();
-        for (var i = 0; i < chs.length; i++) {
-          if (chs[i].topic && chs[i].topic.includes('canal-progreso-seguro')) {
-            supabase.removeChannel(chs[i]);
-          }
-        }
-      } catch (errChs) {}
       _canalProgresoSingleton = supabase
-        .channel('canal-progreso-seguro-' + Date.now())
+        .channel('canal-progreso-seguro')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'task_progress' }, () => {
           const inputEmpleado = document.getElementById('input-fecha-progreso') as HTMLInputElement;
           const inputAdmin = document.getElementById('admin-input-fecha') as HTMLInputElement;
