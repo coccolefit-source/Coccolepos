@@ -415,3 +415,22 @@ export const DEFAULT_UPSELL_RULES: UpsellRule[] = [
 
 
 
+
+export interface TarjetaRegalo {
+  id: string;
+  codigo: string;
+  monto_inicial: number;
+  saldo_actual: number;
+  estado: 'activa' | 'canjeada' | 'inactiva';
+  fecha_creacion: string;
+  fecha_canje?: string;
+  creado_por_nombre?: string;
+  cliente_nombre?: string;
+  notas?: string;
+}
+
+export function isTarjetaRegalo(method?: string): boolean {
+  if (!method) return false;
+  const m = method.toLowerCase().trim();
+  return m === 'tarjeta_regalo' || m.includes('regalo') || m.includes('gift') || m.includes('bono') || m.includes('redimible');
+}

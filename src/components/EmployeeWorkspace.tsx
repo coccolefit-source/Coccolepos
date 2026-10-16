@@ -26,7 +26,9 @@ import {
   RankingWeights,
   UpsellRule,
   DEFAULT_UPSELL_RULES,
-  Gasto
+  Gasto,
+  TarjetaRegalo,
+  isTarjetaRegalo
 } from '../types';
 
 import { calculateLeaderboard, getGlobalMetrics, formatMoney } from '../utils/metrics';
@@ -305,7 +307,7 @@ export default function EmployeeWorkspace({
     cargarHorarioEmpleado();
 
     const subscriptionSchedules = client
-      .channel('sync_schedules_empleado')
+      .channel(`sync_schedules_empleado_${empleado.id || 'emp'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'schedules' },
@@ -346,7 +348,7 @@ export default function EmployeeWorkspace({
 
     // 2. Escuchar cambios en tiempo real con canales seguros
     const subscriptionCampaigns = client
-      .channel('public:campaign_updates_worker')
+      .channel(`campaign_updates_worker_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'upsell_rules' },
@@ -593,6 +595,9 @@ export default function EmployeeWorkspace({
   };
 
   // Modal obligatorio de cobro previo a registro
+  const [giftCardCodeInput, setGiftCardCodeInput] = useState('');
+  const [giftCardValidationMsg, setGiftCardValidationMsg] = useState<{ type: 'error' | 'success'; text: string; saldo?: number } | null>(null);
+  const [showGiftCardStep, setShowGiftCardStep] = useState(false);
   const [mandatoryPaymentModal, setMandatoryPaymentModal] = useState<{
     kind: 'sugerida' | 'pos';
     sugeridaProdId?: string;
@@ -633,6 +638,9 @@ export default function EmployeeWorkspace({
       setPhoneError(false);
     }
 
+    setShowGiftCardStep(false);
+    setGiftCardCodeInput('');
+    setGiftCardValidationMsg(null);
     setMandatoryPaymentModal(null);
   };
 
@@ -2054,7 +2062,9 @@ export default function EmployeeWorkspace({
                         v.vendedor_id === empleado.id || 
                         (v as any).cajero_id === empleado.id || 
                         v.vendedor_nombre === empleado.nombre;
-                      const isToday = !v.fecha || v.fecha === todayStr;
+                      const rawDate = v.fecha || (v as any).created_at;
+                      const saleFecha = rawDate ? getLocalDateString(rawDate) : todayStr;
+                      const isToday = saleFecha === todayStr;
                       return matchesEmp && isToday;
                     });
                     const totalVentasTurno = shiftSales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
@@ -2203,8 +2213,12 @@ export default function EmployeeWorkspace({
                   Cuadre de Caja Diario / Cierre de Turno
                 </h5>
                 {(() => {
+                  const todayStr = getLocalDateString();
                   const userSales = (ventasRegistradas || []).filter(v => {
                     if (!v || v.estado === 'Anulada') return false;
+                    const rawDate = v.fecha || (v as any).created_at;
+                    const saleFecha = rawDate ? getLocalDateString(rawDate) : todayStr;
+                    if (saleFecha !== todayStr) return false;
                     const matchesEmp = 
                       !v.usuario_id || 
                       v.usuario_id === empleado.id || 
@@ -2217,6 +2231,7 @@ export default function EmployeeWorkspace({
                   const totalTarjeta = userSales.filter(v => isTarjeta(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
                   const totalTransferencia = userSales.filter(v => isTransferencia(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
                   const totalRappi = userSales.filter(v => isRappi(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                   const totalTarjetaRegalo = userSales.filter(v => isTarjetaRegalo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
 
                   return (
                     <form 
@@ -2260,6 +2275,10 @@ export default function EmployeeWorkspace({
                         <div>
                           <p className="text-[9px] font-bold text-slate-500 uppercase">Rappi</p>
                           <p className="font-black text-slate-700 text-sm">{formatMoney(totalRappi)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] font-bold text-slate-500 uppercase">Tarjeta Regalo / Bonos</p>
+                          <p className="font-black text-purple-700 text-sm">{formatMoney(totalTarjetaRegalo)}</p>
                         </div>
                       </div>
 
@@ -2671,6 +2690,17 @@ export default function EmployeeWorkspace({
                   className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
                 >
                   Rappi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowGiftCardStep(true);
+                    setGiftCardCodeInput('');
+                    setGiftCardValidationMsg(null);
+                  }}
+                  className="w-full py-3.5 px-4 bg-purple-50 hover:bg-purple-600 hover:text-white border-2 border-purple-300 hover:border-purple-600 text-purple-900 font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center col-span-1 sm:col-span-2 flex items-center justify-center gap-1.5"
+                >
+                  <span>🎁 Tarjeta Regalo / Bono Redimible</span>
                 </button>
               </div>
             </div>
