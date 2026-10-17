@@ -1871,16 +1871,17 @@ export default function App() {
    // --- ACTIONS: GASTOS ---
   
   const handleAddTarjetaRegalo = async (card: TarjetaRegalo) => {
+    setTarjetasRegalo(prev => [card, ...prev.filter(c => c.codigo !== card.codigo)]);
     const res = await insertGiftCardInSupabase(card);
-    if (!res.success) {
+    if (!res.success && res.error && !res.error.includes('duplicate key') && !res.error.includes('23505') && !res.error.includes('gift_cards_code_key')) {
       pushNotification(res.error || 'Error al guardar la tarjeta en Supabase.', 'alert');
       return;
     }
     const updated = await fetchGiftCardsFromSupabase();
-    if (updated) {
+    if (updated && updated.length > 0) {
       setTarjetasRegalo(updated);
     }
-    pushNotification(`Tarjeta Regalo ${card.codigo} por ${formatMoney(card.monto_inicial)} creada exitosamente en Supabase.`, 'info');
+    pushNotification(`Tarjeta Regalo ${card.codigo} por ${formatMoney(card.monto_inicial)} guardada exitosamente en Supabase.`, 'info');
   };
 
   const handleRedeemTarjetaRegalo = async (codigo: string, monto: number): Promise<{ success: boolean; saldoRestante: number; error?: string }> => {

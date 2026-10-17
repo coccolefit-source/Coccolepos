@@ -814,6 +814,7 @@ export default function AdminDashboard({
   const [ventasSubTab, setVentasSubTab] = useState<'reportes' | 'fidelizacion' | 'tarjetas_regalo'>('reportes');
   const [giftCardFormCode, setGiftCardFormCode] = useState('');
   const [giftCardSearchTerm, setGiftCardSearchTerm] = useState('');
+  const [isSubmittingGiftCard, setIsSubmittingGiftCard] = useState(false);
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
@@ -2872,36 +2873,83 @@ export default function AdminDashboard({
                   </div>
                 </div>
 
-                <form onSubmit={(e) => {
+                <form onSubmit={async (e) => {
                   e.preventDefault();
-                  const formData = new FormData(e.currentTarget);
-                  const codigo = (formData.get('codigo') as string || '').trim();
-                  const monto = parseFloat(formData.get('monto') as string) || 0;
-                  const cliente = (formData.get('cliente') as string || '').trim();
-                  const notas = (formData.get('notas') as string || '').trim();
+                  const formElement = e.currentTarget;
+                  const formData = new FormData(formElement);
+                  const codigo = (formData.get('codigo') as string || giftCardFormCode || '').trim();
+                  const monto = (formData.get('monto') as string || '0').trim();
+                  const clienteAsignado = (formData.get('cliente') as string || '').trim();
+                  const conceptoNotas = (formData.get('notas') as string || '').trim();
 
-                  if (!codigo || monto <= 0) {
+                  if (!codigo || parseFloat(monto) <= 0) {
                     alert('Por favor ingresa un código válido y un monto mayor a 0.');
                     return;
                   }
 
-                  const newCard: TarjetaRegalo = {
-                    id: 'gift-' + Date.now(),
-                    codigo,
-                    monto_inicial: monto,
-                    saldo_actual: monto,
-                    estado: 'activa',
-                    fecha_creacion: getLocalDateString(),
-                    cliente_nombre: cliente,
-                    notas,
-                    creado_por_nombre: 'Administrador'
-                  };
-
-                  if (onAddTarjetaRegalo) {
-                    onAddTarjetaRegalo(newCard);
+                  const supabase = (window as any).supabase || getSupabaseClient();
+                  if (!supabase) {
+                    alert('No se detectó cliente de Supabase configurado.');
+                    return;
                   }
-                  e.currentTarget.reset();
-                  setGiftCardFormCode('');
+
+                  setIsSubmittingGiftCard(true);
+
+                  try {
+                    const { data, error } = await supabase
+                      .from('gift_cards')
+                      .insert([
+                        {
+                          code: codigo.trim().toUpperCase(),
+                          initial_balance: parseFloat(monto),
+                          current_balance: parseFloat(monto),
+                          customer_name: clienteAsignado?.trim() || null,
+                          notes: conceptoNotas?.trim() || null,
+                          is_active: true
+                        }
+                      ])
+                      .select();
+
+                    if (error) {
+                      console.error('[Supabase] Error al insertar en gift_cards:', error);
+                      if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('gift_cards_code_key')) {
+                        alert(`El código de tarjeta "${codigo.trim().toUpperCase()}" ya existe en Supabase. Por favor ingresa o genera un código diferente.`);
+                      } else if (error.code === '42501' || error.message?.includes('row-level security')) {
+                        alert('Error RLS en Supabase (42501): Permiso denegado por Row-Level Security en gift_cards.\n\nPara solucionarlo, ejecuta en el SQL Editor de Supabase:\nALTER TABLE public.gift_cards DISABLE ROW LEVEL SECURITY;');
+                      } else {
+                        alert('Error al guardar tarjeta en Supabase: ' + (error.message || 'Error desconocido'));
+                      }
+                      setIsSubmittingGiftCard(false);
+                      return;
+                    }
+
+                    const insertedRow = data && data[0] ? data[0] : null;
+                    const cleanCode = codigo.trim().toUpperCase();
+                    const newCard: TarjetaRegalo = {
+                      id: insertedRow?.id ? String(insertedRow.id) : ('gift-' + cleanCode),
+                      codigo: cleanCode,
+                      monto_inicial: parseFloat(monto),
+                      saldo_actual: parseFloat(monto),
+                      estado: 'activa',
+                      fecha_creacion: getLocalDateString(),
+                      cliente_nombre: clienteAsignado || '',
+                      notas: conceptoNotas || '',
+                      creado_por_nombre: 'Administrador'
+                    };
+
+                    if (onAddTarjetaRegalo) {
+                      onAddTarjetaRegalo(newCard);
+                    }
+
+                    formElement.reset();
+                    setGiftCardFormCode('');
+                    alert(`¡Tarjeta Regalo ${cleanCode} creada y activada exitosamente en Supabase!`);
+                  } catch (err: any) {
+                    console.error('Excepción al crear tarjeta en Supabase:', err);
+                    alert('Error inesperado al crear tarjeta: ' + (err.message || 'Error de conexión'));
+                  } finally {
+                    setIsSubmittingGiftCard(false);
+                  }
                 }} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                     <div>
@@ -2966,9 +3014,10 @@ export default function AdminDashboard({
 
                   <button
                     type="submit"
-                    className="w-full sm:w-auto bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs py-2.5 px-6 rounded-lg transition-colors cursor-pointer flex items-center justify-center shadow-xs"
+                    disabled={isSubmittingGiftCard}
+                    className="w-full sm:w-auto bg-[#4B9CD3] hover:bg-[#3A82B4] disabled:opacity-50 text-white font-bold text-xs py-2.5 px-6 rounded-lg transition-colors cursor-pointer flex items-center justify-center shadow-xs"
                   >
-                    Crear y Activar Tarjeta Regalo
+                    {isSubmittingGiftCard ? 'Guardando en Supabase...' : 'Crear y Activar Tarjeta Regalo'}
                   </button>
                 </form>
               </div>

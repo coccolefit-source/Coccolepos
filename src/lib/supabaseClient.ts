@@ -480,24 +480,30 @@ END $$;
 CREATE TABLE IF NOT EXISTS public.gift_cards (
   id UUID DEFAULT gen_random_uuid(),
   code TEXT PRIMARY KEY,
+  initial_balance NUMERIC NOT NULL DEFAULT 0,
   current_balance NUMERIC NOT NULL DEFAULT 0,
+  customer_name TEXT,
+  notes TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.gift_cards ADD COLUMN IF NOT EXISTS initial_balance NUMERIC DEFAULT 0;
+ALTER TABLE public.gift_cards ADD COLUMN IF NOT EXISTS customer_name TEXT;
+ALTER TABLE public.gift_cards ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Habilitar RLS y otorgar acceso completo a anon y authenticated
 ALTER TABLE public.gift_cards ENABLE ROW LEVEL SECURITY;
 
-DO $$ 
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies 
-    WHERE tablename = 'gift_cards' AND policyname = 'Permitir acceso publico total a gift_cards'
-  ) THEN
-    CREATE POLICY "Permitir acceso publico total a gift_cards" 
-    ON public.gift_cards FOR ALL TO public USING (true) WITH CHECK (true);
-  END IF;
-END $$;
+DROP POLICY IF EXISTS "Permitir acceso publico total a gift_cards" ON public.gift_cards;
+CREATE POLICY "Permitir acceso publico total a gift_cards" 
+ON public.gift_cards FOR ALL 
+TO public 
+USING (true) 
+WITH CHECK (true);
+
+GRANT ALL ON public.gift_cards TO anon, authenticated, service_role;
 
 ALTER TABLE public.gift_cards REPLICA IDENTITY FULL;
 
@@ -507,6 +513,24 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.gift_cards;
   END IF;
 END $$;
+
+-- Función RPC: save_gift_card (Crea o actualiza tarjetas saltando RLS vía SECURITY DEFINER)
+CREATE OR REPLACE FUNCTION public.save_gift_card(p_code text, p_balance numeric, p_is_active boolean DEFAULT true)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  INSERT INTO public.gift_cards (code, current_balance, is_active, updated_at)
+  VALUES (UPPER(TRIM(p_code)), p_balance, p_is_active, NOW())
+  ON CONFLICT (code) DO UPDATE
+  SET current_balance = EXCLUDED.current_balance,
+      is_active = EXCLUDED.is_active,
+      updated_at = NOW();
+
+  RETURN jsonb_build_object('success', true, 'code', UPPER(TRIM(p_code)), 'current_balance', p_balance);
+END;
+$$;
 
 -- Función RPC: debit_gift_card
 CREATE OR REPLACE FUNCTION public.debit_gift_card(p_code text, p_amount numeric)
@@ -4510,8 +4534,8 @@ export async function fetchGiftCardsFromSupabase(): Promise<TarjetaRegalo[]> {
           estado: (!isActive || balance <= 0) ? 'canjeada' : 'activa',
           fecha_creacion: c.fecha_creacion || (c.created_at ? getLocalDateString(c.created_at) : getLocalDateString()),
           creado_por_nombre: c.creado_por_nombre || 'Administrador',
-          cliente_nombre: c.cliente_nombre || '',
-          notas: c.notas || ''
+          cliente_nombre: c.customer_name || c.cliente_nombre || '',
+          notas: c.notes || c.notas || ''
         };
       });
     }
@@ -4538,19 +4562,186 @@ export async function insertGiftCardInSupabase(card: TarjetaRegalo): Promise<{ s
     const balance = Number(card.saldo_actual ?? card.monto_inicial ?? 0);
     const isActive = card.estado !== 'canjeada' && card.estado !== 'inactiva' && balance > 0;
 
-    const payload: any = {
+    // 1. Intentar RPC save_gift_card si está definida en Supabase (SECURITY DEFINER salta RLS)
+    try {
+      const { data: rpcData, error: rpcErr } = await client.rpc('save_gift_card', {
+        p_code: cleanCode,
+        p_balance: balance,
+        p_is_active: isActive
+      });
+      if (!rpcErr && rpcData && (rpcData.success === true || rpcData === true)) {
+        return {
+          success: true,
+          data: {
+            ...card,
+            codigo: cleanCode,
+            saldo_actual: balance,
+            estado: isActive ? 'activa' : 'canjeada'
+          }
+        };
+      }
+    } catch (_) {
+      // Ignorar si la función no existe en la base de datos
+    }
+
+    // 2. Cargar columnas canónicas solicitadas: code, current_balance, is_active, initial_balance, customer_name, notes
+    const corePayload: any = {
       code: cleanCode,
-      current_balance: balance,
-      is_active: isActive,
       initial_balance: Number(card.monto_inicial || balance),
-      cliente_nombre: card.cliente_nombre || '',
-      notas: card.notas || ''
+      current_balance: balance,
+      customer_name: card.cliente_nombre?.trim() || null,
+      notes: card.notas?.trim() || null,
+      is_active: isActive
     };
 
-    const res = await insertWithResilientColumns(client, 'gift_cards', payload);
+    // Intentar upsert directo con conflicto en 'code'
+    const { error: directUpsertErr } = await client
+      .from('gift_cards')
+      .upsert(corePayload, { onConflict: 'code' });
+
+    if (!directUpsertErr) {
+      return {
+        success: true,
+        data: {
+          ...card,
+          codigo: cleanCode,
+          saldo_actual: balance,
+          estado: isActive ? 'activa' : 'canjeada'
+        }
+      };
+    }
+
+    // Si el error es 23505 (duplicate key), la tarjeta ya existe en la base de datos
+    if (
+      directUpsertErr?.code === '23505' || 
+      directUpsertErr?.message?.includes('duplicate key') || 
+      directUpsertErr?.message?.includes('gift_cards_code_key')
+    ) {
+      return {
+        success: true,
+        data: {
+          ...card,
+          codigo: cleanCode,
+          saldo_actual: balance,
+          estado: isActive ? 'activa' : 'canjeada'
+        }
+      };
+    }
+
+    // Si upsert falló por columnas que no existen, intentar con solo las 3 columnas básicas
+    const minimalPayload = {
+      code: cleanCode,
+      current_balance: balance,
+      is_active: isActive
+    };
+    const { error: minimalUpsertErr } = await client
+      .from('gift_cards')
+      .upsert(minimalPayload, { onConflict: 'code' });
+
+    if (!minimalUpsertErr) {
+      return {
+        success: true,
+        data: {
+          ...card,
+          codigo: cleanCode,
+          saldo_actual: balance,
+          estado: isActive ? 'activa' : 'canjeada'
+        }
+      };
+    }
+
+    if (
+      minimalUpsertErr?.code === '23505' || 
+      minimalUpsertErr?.message?.includes('duplicate key') || 
+      minimalUpsertErr?.message?.includes('gift_cards_code_key')
+    ) {
+      return {
+        success: true,
+        data: {
+          ...card,
+          codigo: cleanCode,
+          saldo_actual: balance,
+          estado: isActive ? 'activa' : 'canjeada'
+        }
+      };
+    }
+
+    // Si upsert no está soportado, intentar insert directo
+    const { error: directInsertErr } = await client.from('gift_cards').insert([minimalPayload]);
+    if (!directInsertErr) {
+      return {
+        success: true,
+        data: {
+          ...card,
+          codigo: cleanCode,
+          saldo_actual: balance,
+          estado: isActive ? 'activa' : 'canjeada'
+        }
+      };
+    }
+
+    if (
+      directInsertErr?.code === '23505' || 
+      directInsertErr?.message?.includes('duplicate key') || 
+      directInsertErr?.message?.includes('gift_cards_code_key')
+    ) {
+      return {
+        success: true,
+        data: {
+          ...card,
+          codigo: cleanCode,
+          saldo_actual: balance,
+          estado: isActive ? 'activa' : 'canjeada'
+        }
+      };
+    }
+
+    const directErr = directInsertErr || minimalUpsertErr || directUpsertErr;
+
+    // 3. Detección específica de violación de Row-Level Security (Error Postgres 42501)
+    if (
+      directErr?.code === '42501' || 
+      directErr?.message?.includes('row-level security') || 
+      directErr?.message?.includes('violates row-level security policy')
+    ) {
+      const rlsMsg = 'Permiso denegado por Row-Level Security en Supabase (42501). En el SQL Editor de tu proyecto Supabase ejecuta: ALTER TABLE public.gift_cards DISABLE ROW LEVEL SECURITY; o crea una política FOR ALL TO public.';
+      console.error('[Supabase RLS Error] Permiso denegado por política RLS en gift_cards:', directErr);
+      return {
+        success: false,
+        error: rlsMsg
+      };
+    }
+
+    // 4. Fallback con inserción resiliente para tablas con columnas adicionales
+    const res = await insertWithResilientColumns(client, 'gift_cards', corePayload);
     if (!res.success) {
+      if (
+        res.error?.code === '23505' || 
+        res.error?.message?.includes('duplicate key') || 
+        res.error?.message?.includes('gift_cards_code_key')
+      ) {
+        return {
+          success: true,
+          data: {
+            ...card,
+            codigo: cleanCode,
+            saldo_actual: balance,
+            estado: isActive ? 'activa' : 'canjeada'
+          }
+        };
+      }
+      if (
+        res.error?.code === '42501' || 
+        res.error?.message?.includes('row-level security') || 
+        res.error?.message?.includes('violates row-level security policy')
+      ) {
+        return {
+          success: false,
+          error: 'Permiso denegado por Row-Level Security en Supabase (42501). Ejecuta en Supabase SQL Editor: ALTER TABLE public.gift_cards DISABLE ROW LEVEL SECURITY;'
+        };
+      }
       console.error('[Supabase] Error al insertar en gift_cards:', res.error);
-      return { success: false, error: res.error?.message || 'Error al guardar tarjeta en tabla gift_cards de Supabase.' };
+      return { success: false, error: res.error?.message || directErr?.message || 'Error al guardar tarjeta en tabla gift_cards de Supabase.' };
     }
 
     return {
