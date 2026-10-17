@@ -73,11 +73,13 @@ import {
   Megaphone,
   ImageIcon,
   Gift,
-  ArrowLeft
+  ArrowLeft,
+  QrCode
 } from 'lucide-react';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
 import GastosModule from './GastosModule';
+import ModalQrFidelizacion from './ModalQrFidelizacion';
 
 interface EmployeeWorkspaceProps {
   empleado: Usuario;
@@ -570,6 +572,7 @@ export default function EmployeeWorkspace({
     phone: '',
     name: ''
   });
+  const [showQrModal, setShowQrModal] = useState(false);
 
   const handleSearchClient = () => {
     const cleanPhone = clienteTelefonoInput.trim();
@@ -2239,9 +2242,20 @@ export default function EmployeeWorkspace({
                   <div className="pt-3 border-t border-[#E2E8F0] space-y-3">
                     {/* Campo Teléfono del Cliente */}
                     <div>
-                      <label className="block text-[11px] font-extrabold text-[#2C3E50] uppercase tracking-wider mb-1">
-                        Teléfono del Cliente <span className="text-red-500">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[11px] font-extrabold text-[#2C3E50] uppercase tracking-wider">
+                          Teléfono del Cliente <span className="text-red-500">*</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowQrModal(true)}
+                          className="flex items-center gap-1.5 text-[10px] font-bold text-[#4B9CD3] bg-[#EBF5FB] hover:bg-[#D4E6F1] px-2 py-0.5 rounded-md border border-[#AED6F1] transition-colors cursor-pointer"
+                          title="Mostrar código QR de registro para que el cliente lo escanee con su celular"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          QR de Registro para Clientes
+                        </button>
+                      </div>
                       <div className="flex gap-2">
                         <input
                           type="tel"
@@ -3462,6 +3476,11 @@ export default function EmployeeWorkspace({
         </div>
       )}
 
+      {/* Modal QR de Registro para Clientes */}
+      <ModalQrFidelizacion
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+      />
     </div>
   );
 }

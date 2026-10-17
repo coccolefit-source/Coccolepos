@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS public.customers (
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS total_visits INT DEFAULT 1;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS habeas_data_accepted BOOLEAN DEFAULT true;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS terms_version TEXT DEFAULT 'v1.0-Ley1581';
 
 -- 3. Tabla: sales (Ventas POS)
 CREATE TABLE IF NOT EXISTS public.sales (

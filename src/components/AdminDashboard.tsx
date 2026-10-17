@@ -76,7 +76,8 @@ import {
   Send,
   Copy,
   Check,
-  Lightbulb
+  Lightbulb,
+  QrCode
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { calcularTiempoTarea } from '../lib/taskUtils';
@@ -101,6 +102,7 @@ import { RankingWeightsConfig } from './RankingWeightsConfig';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
 import { BusinessPerformanceChart } from './BusinessPerformanceChart';
+import ModalQrFidelizacion from './ModalQrFidelizacion';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'tendencia' | 'financieros' | 'supabase';
 
@@ -815,6 +817,7 @@ export default function AdminDashboard({
   const [giftCardFormCode, setGiftCardFormCode] = useState('');
   const [giftCardSearchTerm, setGiftCardSearchTerm] = useState('');
   const [isSubmittingGiftCard, setIsSubmittingGiftCard] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
@@ -3136,13 +3139,25 @@ export default function AdminDashboard({
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleExportClientesCSV}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
-                  >
-                    Exportar Base de Datos (CSV)
-                  </button>
+                  <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => setShowQrModal(true)}
+                      className="w-full sm:w-auto px-4 py-2.5 bg-[#EBF5FB] hover:bg-[#D4E6F1] text-[#4B9CD3] font-bold text-xs rounded-xl border border-[#AED6F1] transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-2xs"
+                      title="Mostrar código QR de registro para que los clientes lo escaneen con su celular"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      QR de Registro para Clientes
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportClientesCSV}
+                      className="w-full sm:w-auto px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
+                    >
+                      Exportar Base de Datos (CSV)
+                    </button>
+                  </div>
                 </div>
 
                 {/* Métricas Clave */}
@@ -8140,6 +8155,12 @@ export default function AdminDashboard({
           </div>
         </div>
       )}
+
+      {/* Modal QR de Registro para Clientes */}
+      <ModalQrFidelizacion
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+      />
     </div>
   );
 }

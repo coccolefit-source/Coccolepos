@@ -38,6 +38,7 @@ import Leaderboard from './components/Leaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
+import RegistroClientePublico from './components/RegistroClientePublico';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
 
@@ -862,6 +863,36 @@ export default function App() {
     pushNotification(`Cuenta de Administrador Master "${newAdmin.nombre}" creada con éxito.`, 'success');
     return newAdminId;
   };
+
+  // Detección de ruta pública para registro de cliente desde QR
+  const [isRegistroClienteRoute, setIsRegistroClienteRoute] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const path = (window.location.pathname || '').toLowerCase();
+    const hash = (window.location.hash || '').toLowerCase();
+    const search = (window.location.search || '').toLowerCase();
+    return path.includes('registro-cliente') || hash.includes('registro-cliente') || search.includes('registro-cliente');
+  });
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (typeof window === 'undefined') return;
+      const path = (window.location.pathname || '').toLowerCase();
+      const hash = (window.location.hash || '').toLowerCase();
+      const search = (window.location.search || '').toLowerCase();
+      setIsRegistroClienteRoute(path.includes('registro-cliente') || hash.includes('registro-cliente') || search.includes('registro-cliente'));
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
+  }, []);
+
+  if (isRegistroClienteRoute) {
+    return <RegistroClientePublico />;
+  }
 
    // Si no hay usuario activo, mostramos el login
   if (!activeUserRole) {
