@@ -2049,13 +2049,17 @@ export default function EmployeeWorkspace({
                 <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-xs">
                   {(() => {
                     const todayStr = getLocalDateString();
+                    const utcTodayStr = new Date().toISOString().split('T')[0];
                     
                     const normalizeDate = (v: any) => {
-                      let saleFecha = v?.fecha;
-                      if (saleFecha && saleFecha.includes('T')) {
-                        saleFecha = saleFecha.split('T')[0];
-                      } else if (saleFecha && saleFecha.includes(' ')) {
-                        saleFecha = saleFecha.split(' ')[0];
+                      let saleFecha = v?.fecha || v?.date || (v as any)?.fecha_venta;
+                      if (saleFecha && typeof saleFecha === 'string') {
+                        if (saleFecha.includes('T')) {
+                          saleFecha = saleFecha.split('T')[0];
+                        } else if (saleFecha.includes(' ')) {
+                          saleFecha = saleFecha.split(' ')[0];
+                        }
+                        saleFecha = saleFecha.trim();
                       }
                       if (!saleFecha && v?.created_at) {
                         try {
@@ -2067,10 +2071,16 @@ export default function EmployeeWorkspace({
                       return saleFecha;
                     };
 
+                    const isMatchingToday = (v: any) => {
+                      const norm = normalizeDate(v);
+                      if (!norm) return false;
+                      return norm === todayStr || norm === utcTodayStr;
+                    };
+
                     // Ventas del día registradas por todos los colaboradores
                     const allTodaySales = (ventasRegistradas || []).filter(v => {
                       if (!v) return false;
-                      return normalizeDate(v) === todayStr;
+                      return isMatchingToday(v);
                     });
 
                     // Ventas del día del empleado actual
@@ -2270,13 +2280,17 @@ export default function EmployeeWorkspace({
               <div className="mt-8 pt-6 border-t border-dashed border-[#E2E8F0]">
                 {(() => {
                   const todayStr = getLocalDateString();
+                  const utcTodayStr = new Date().toISOString().split('T')[0];
                   
                   const normalizeDate = (v: any) => {
-                    let saleFecha = v?.fecha;
-                    if (saleFecha && saleFecha.includes('T')) {
-                      saleFecha = saleFecha.split('T')[0];
-                    } else if (saleFecha && saleFecha.includes(' ')) {
-                      saleFecha = saleFecha.split(' ')[0];
+                    let saleFecha = v?.fecha || v?.date || (v as any)?.fecha_venta;
+                    if (saleFecha && typeof saleFecha === 'string') {
+                      if (saleFecha.includes('T')) {
+                        saleFecha = saleFecha.split('T')[0];
+                      } else if (saleFecha.includes(' ')) {
+                        saleFecha = saleFecha.split(' ')[0];
+                      }
+                      saleFecha = saleFecha.trim();
                     }
                     if (!saleFecha && v?.created_at) {
                       try {
@@ -2288,10 +2302,16 @@ export default function EmployeeWorkspace({
                     return saleFecha;
                   };
 
+                  const isMatchingToday = (v: any) => {
+                    const norm = normalizeDate(v);
+                    if (!norm) return false;
+                    return norm === todayStr || norm === utcTodayStr;
+                  };
+
                   // Filtrar únicamente las ventas del DÍA DE HOY registradas por TODOS LOS EMPLEADOS (excluyendo únicamente ventas anuladas)
                   const ventasDelDia = (ventasRegistradas || []).filter(v => {
                     if (!v || v.estado === 'Anulada') return false;
-                    return normalizeDate(v) === todayStr;
+                    return isMatchingToday(v);
                   });
 
                   // Desglose por medio de pago de todos los colaboradores

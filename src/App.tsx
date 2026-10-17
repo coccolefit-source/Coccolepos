@@ -26,10 +26,7 @@ import {
   UpsellRule,
   DEFAULT_UPSELL_RULES,
   DEFAULT_PRODUCTOS_CATALOGO,
-  Gasto,
-  TarjetaRegalo,
-  isTarjetaRegalo,
-  Cliente
+  Gasto
 } from './types';
 
 // Componentes
@@ -41,7 +38,7 @@ import Login from './components/Login';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
 
- // Iconos Lucide
+// Iconos Lucide
 import {
   User,
   RotateCcw,
@@ -87,36 +84,32 @@ import {
   insertDailyTaskInSupabase,
   updateDailyTaskStatusInSupabase,
   deleteDailyTaskFromSupabase,
-  deleteAllDailyTasksFromSupabase,
-  updateTaskOrdersInSupabase,
-  guardarProgresoEnSupabase,
   fetchCampaignProductsFromSupabase,
   insertCampaignProductInSupabase,
   updateCampaignProductInSupabase,
   deleteCampaignProductFromSupabase,
+  insertScheduleInSupabase,
+  deleteScheduleFromSupabase,
+  saveSchedulesBulkToSupabase,
+  fetchSchedulesFromSupabase,
+  guardarProgresoEnSupabase,
+  updateTaskOrdersInSupabase,
+  getLocalDateString,
+  deleteAllDailyTasksFromSupabase,
   fetchAllAnnouncementsFromSupabase,
   insertAnnouncementInSupabase,
   updateAnnouncementInSupabase,
   deleteAnnouncementFromSupabase,
   fetchCatalogFromSupabase,
   upsertCatalogProductInSupabase,
-  upsertCatalogProductsBatchInSupabase,
   deleteCatalogProductFromSupabase,
-  fetchSchedulesFromSupabase,
-  insertScheduleInSupabase,
-  deleteScheduleFromSupabase,
-  saveSchedulesBulkToSupabase,
-  getLocalDateString,
-  getBogotaDateDaysAgo,
-  getBogotaFirstDayOfMonth,
+  upsertCatalogProductsBatchInSupabase,
+  upsertInventoryBatchInSupabase,
   fetchGastosFromSupabase,
   insertGastoInSupabase,
   deleteGastoFromSupabase,
-  fetchGiftCardsFromSupabase,
-  insertGiftCardInSupabase,
-  redeemGiftCardInSupabase,
-  deleteGiftCardFromSupabase,
-  upsertInventoryBatchInSupabase
+  fetchCashClosuresFromSupabase,
+  saveCashClosureToSupabase
 } from './lib/supabaseClient';
 
 // Módulo de Productividad en Tiempo Real
@@ -141,7 +134,7 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // initialCatalogo = parsed;
+          initialCatalogo = parsed;
         }
       }
     } catch (e) {
@@ -157,32 +150,32 @@ export default function App() {
     } catch (e) {}
 
     return {
-          usuarios: [],
-          tareas: [],
-          productos: [],
-          ventas: [],
-          fichajes: [],
-          incidencias: [],
-          anuncios: [],
-          feedbacks: [],
-          inventario: [],
-          horarios: [],
-          gastos: initialGastos,
-          productosCatalogo: initialCatalogo,
-          ventasRegistradas: [],
-          alertasPanico: [],
-          cuadresCaja: [],
-          // clientes: []
+      usuarios: [],
+      tareas: [],
+      productos: [],
+      ventas: [],
+      fichajes: [],
+      incidencias: [],
+      anuncios: [],
+      feedbacks: [],
+      inventario: [],
+      horarios: [],
+      gastos: initialGastos,
+      productosCatalogo: initialCatalogo,
+      ventasRegistradas: [],
+      alertasPanico: [],
+      cuadresCaja: [],
+      clientes: []
     };
   });
   
-   // Ponderación del Ranking de Colaboradores
+  // Ponderación del Ranking de Colaboradores
   const [rankingWeights, setRankingWeights] = useState<RankingWeights>(DEFAULT_RANKING_WEIGHTS);
 
-   // Reglas de Venta Sugerida (Cross-selling)
+  // Reglas de Venta Sugerida (Cross-selling)
   const [upsellRules, setUpsellRules] = useState<UpsellRule[]>(DEFAULT_UPSELL_RULES);
 
-   // Rol activo (Admin o ID de un Empleado específico) con persistencia robusta
+  // Rol activo (Admin o ID de un Empleado específico) con persistencia robusta
   const [activeUserRole, setActiveUserRole] = useState<string | null>(() => {
     try {
       if (typeof window !== 'undefined') {
@@ -206,13 +199,12 @@ export default function App() {
     return null;
   });
   
-   // Filtro de tiempo compartido ('diario', 'semanal', 'mensual')
+  // Filtro de tiempo compartido ('diario', 'semanal', 'mensual')
   const [filtroGeneral, setFiltroGeneral] = useState<'diario' | 'semanal' | 'mensual'>('diario');
 
-   // Pestaña activa y pestañas abiertas del administrador (Multi-Tab Admin)
+  // Pestaña activa y pestañas abiertas del administrador (Multi-Tab Admin)
   const [openTabs, setOpenTabs] = useState<AdminTab[]>(['ventas']);
   const [activeTab, setActiveTab] = useState<AdminTab>('ventas');
-  const [tarjetasRegalo, setTarjetasRegalo] = useState<TarjetaRegalo[]>([]);
 
   const handleSelectTab = (tab: AdminTab) => {
     let targetTab = tab;
@@ -253,7 +245,7 @@ export default function App() {
     };
     setState(prev => ({
       ...prev,
-          incidencias: [inc, ...prev.incidencias]
+      incidencias: [inc, ...prev.incidencias]
     }));
     pushNotification(`Solicitud de restablecimiento de PIN enviada para ${empNombre}.`, 'info');
   };
@@ -270,7 +262,7 @@ export default function App() {
         return false;
       }
 
-       // Fuerza re-consulta para asegurar que el estado global lea la información recién guardada en Supabase
+      // Fuerza re-consulta para asegurar que el estado global lea la información recién guardada en Supabase
       const supaProfiles = await fetchProfilesFromSupabase();
       if (supaProfiles && supaProfiles.length > 0) {
         setState(prev => ({
@@ -284,7 +276,7 @@ export default function App() {
             if (u.id === userId) {
               return {
                 ...u,
-          pin: pinLimpio,
+                pin: pinLimpio,
                 ...(newPassword ? { password: newPassword } : {})
               };
             }
@@ -294,14 +286,14 @@ export default function App() {
       }
       return true;
     } else {
-       // Sin Supabase configurado, actualizar estado local
+      // Sin Supabase configurado, actualizar estado local
       setState(prev => ({
         ...prev,
         usuarios: prev.usuarios.map(u => {
           if (u.id === userId) {
             return {
               ...u,
-          pin: pinLimpio,
+              pin: pinLimpio,
               ...(newPassword ? { password: newPassword } : {})
             };
           }
@@ -312,7 +304,7 @@ export default function App() {
     }
   };
   
-   // Cargar ponderaciones de ranking y reglas de upsell al montar
+  // Cargar ponderaciones de ranking y reglas de upsell al montar
   useEffect(() => {
     fetchRankingWeightsFromSupabase().then(weights => {
       if (weights) setRankingWeights(weights);
@@ -322,31 +314,31 @@ export default function App() {
     });
   }, []);
 
-   // Handler para guardar ponderación de ranking
+  // Handler para guardar ponderación de ranking
   const handleUpdateRankingWeights = async (newWeights: RankingWeights) => {
     setRankingWeights(newWeights);
     await saveRankingWeightsToSupabase(newWeights);
     pushNotification('Ponderación del ranking guardada y recalculada exitosamente.', 'success');
   };
 
-   // Handler para guardar reglas de venta sugerida
+  // Handler para guardar reglas de venta sugerida
   const handleUpdateUpsellRules = async (newRules: UpsellRule[]) => {
     setUpsellRules(newRules);
     await saveUpsellRulesToSupabase(newRules);
     pushNotification('Reglas de venta sugerida actualizadas exitosamente.', 'success');
   };
 
-   // Estado para Sincronización Manual de Datos
+  // Estado para Sincronización Manual de Datos
   const [isSyncing, setIsSyncing] = useState(false);
 
-   // Función de Sincronización Manual y Recarga de Datos Silenciosa (Fetch In-Memory)
+  // Función de Sincronización Manual y Recarga de Datos Silenciosa (Fetch In-Memory)
   const cargarDatosSilencioso = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
 
     try {
-       // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
-      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries, supaSchedules, supaGastos, supaGiftCards] = await Promise.all([
+      // Función de Recarga Silenciosa (Fetch In-Memory) de lectura de datos completa
+      const [supaTasks, supaSales, supaInventory, supaProfiles, supaWeights, supaUpsell, supaCampaignProds, supaAnnouncements, supaCatalog, supaTimeEntries, supaSchedules, supaGastos, supaCashClosures] = await Promise.all([
         fetchDailyTasksFromSupabase(),
         fetchSalesFromSupabase(),
         fetchInventoryFromSupabase(),
@@ -359,11 +351,11 @@ export default function App() {
         fetchTimeEntriesFromSupabase(),
         fetchSchedulesFromSupabase(),
         fetchGastosFromSupabase(),
-          fetchGiftCardsFromSupabase()
+        fetchCashClosuresFromSupabase()
       ]);
 
       setState(prev => {
-         // Preservación Estricta de la Sesión Activa mediante combinación selectiva de perfiles
+        // Preservación Estricta de la Sesión Activa mediante combinación selectiva de perfiles
         let updatedUsuarios = [...prev.usuarios];
         if (supaProfiles && supaProfiles.length > 0) {
           supaProfiles.forEach(supaU => {
@@ -389,23 +381,23 @@ export default function App() {
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
-          // anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
+          anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
           horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
           gastos: supaGastos !== null ? supaGastos : prev.gastos,
-          tarjetasRegalo: supaGiftCards ? supaGiftCards : [],
+          cuadresCaja: supaCashClosures && supaCashClosures.length > 0 ? supaCashClosures : prev.cuadresCaja,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
             const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
               ? String(f.fecha).trim()
               : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
             return {
-          // id: f.id,
-          // usuario_id: f.usuario_id || f.empleado_id,
-          // fecha: cleanFecha,
-          // hora_entrada: f.hora_entrada,
-          // hora_salida: f.hora_salida,
-          // puntual: f.puntual !== undefined ? f.puntual : true,
-          // activo: !f.hora_salida
+              id: f.id,
+              usuario_id: f.usuario_id || f.empleado_id,
+              fecha: cleanFecha,
+              hora_entrada: f.hora_entrada,
+              hora_salida: f.hora_salida,
+              puntual: f.puntual !== undefined ? f.puntual : true,
+              activo: !f.hora_salida
             };
           }) : prev.fichajes
         };
@@ -418,12 +410,20 @@ export default function App() {
         setUpsellRules(supaUpsell);
       }
 
-       // Notificación Toast discreta de éxito
-
+      // Notificación Toast discreta de éxito
+      triggerPushToast({
+        kind: 'standard',
+        type: 'success',
+        text: 'Datos actualizados'
+      });
       pushNotification('Datos actualizados', 'success');
     } catch (err) {
       console.error('Error al sincronizar datos con Supabase:', err);
-
+      triggerPushToast({
+        kind: 'standard',
+        type: 'alert',
+        text: 'Error de conexión al sincronizar datos.'
+      });
       pushNotification('Error de conexión al sincronizar datos.', 'alert');
     } finally {
       setIsSyncing(false);
@@ -435,24 +435,22 @@ export default function App() {
   };
 
   
-   // Registro de notificaciones/logs flotantes para feedback inmediato
+  // Registro de notificaciones/logs flotantes para feedback inmediato
   const [notifications, setNotifications] = useState<Array<{ id: string; text: string; time: string; type: 'success' | 'alert' | 'info' }>>([
     { id: '1', text: 'Bienvenido a Coccole Fit Ops. Datos de prueba inicializados.', time: 'Hace un momento', type: 'info' },
     { id: '2', text: 'Diego Torres registró asistencia puntual hoy.', time: 'Hace 5 min', type: 'success' }
   ]);
 
-   // Sistema de notificaciones push flotantes
+  // Sistema de notificaciones push flotantes
   const [activeToasts, setActiveToasts] = useState<ToastNotification[]>([]);
 
   // Effect para Sincronización Inicial con Supabase y Realtime Channel
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
-    const localCards = localStorage.getItem('coccole_tarjetas_regalo');
-    if (localCards) setTarjetasRegalo(JSON.parse(localCards));
 
     async function syncFromSupabase() {
       try {
-        const [supaTasks, supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog, supaSchedules, supaGastos, supaGiftCards] = await Promise.all([
+        const [supaTasks, supaProfiles, supaSales, supaCustomers, supaInventory, supaTimeEntries, supaCampaignProds, supaAnnouncements, supaCatalog, supaSchedules, supaGastos, supaCashClosures] = await Promise.all([
           fetchDailyTasksFromSupabase(),
           fetchProfilesFromSupabase(),
           fetchSalesFromSupabase(),
@@ -464,7 +462,7 @@ export default function App() {
           fetchCatalogFromSupabase(),
           fetchSchedulesFromSupabase(),
           fetchGastosFromSupabase(),
-          fetchGiftCardsFromSupabase()
+          fetchCashClosuresFromSupabase()
         ]);
 
         if (supaCatalog && supaCatalog.length > 0) {
@@ -478,26 +476,26 @@ export default function App() {
           tareas: supaTasks && supaTasks.length > 0 ? supaTasks : prev.tareas,
           usuarios: supaProfiles && supaProfiles.length > 0 ? supaProfiles : prev.usuarios,
           ventasRegistradas: supaSales && supaSales.length > 0 ? supaSales : prev.ventasRegistradas,
-          // clientes: supaCustomers && supaCustomers.length > 0 ? supaCustomers : prev.clientes,
+          clientes: supaCustomers && supaCustomers.length > 0 ? supaCustomers : prev.clientes,
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
-          // anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
+          anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
           horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
           gastos: supaGastos !== null ? supaGastos : prev.gastos,
-          tarjetasRegalo: supaGiftCards ? supaGiftCards : [],
+          cuadresCaja: supaCashClosures && supaCashClosures.length > 0 ? supaCashClosures : prev.cuadresCaja,
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
             const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
               ? String(f.fecha).trim()
               : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
             return {
-          // id: f.id,
-          // usuario_id: f.usuario_id || f.empleado_id,
-          // fecha: cleanFecha,
-          // hora_entrada: f.hora_entrada,
-          // hora_salida: f.hora_salida,
-          // puntual: f.puntual !== undefined ? f.puntual : true,
-          // activo: !f.hora_salida
+              id: f.id,
+              usuario_id: f.usuario_id || f.empleado_id,
+              fecha: cleanFecha,
+              hora_entrada: f.hora_entrada,
+              hora_salida: f.hora_salida,
+              puntual: f.puntual !== undefined ? f.puntual : true,
+              activo: !f.hora_salida
             };
           }) : prev.fichajes
         }));
@@ -508,7 +506,7 @@ export default function App() {
 
     syncFromSupabase();
 
-     // Suscripción Realtime en tablas sales, inventory, campaign_products, announcements, products_catalog, time_entries y schedules
+    // Suscripción Realtime en tablas sales, inventory, campaign_products, announcements, products_catalog, time_entries, schedules, gastos y cash_closures
     const unsubscribe = subscribeToRealtimeUpdates(
       async () => {
         const sales = await fetchSalesFromSupabase();
@@ -548,18 +546,18 @@ export default function App() {
         if (timeEntries && timeEntries.length > 0) {
           setState(prev => ({
             ...prev,
-          fichajes: timeEntries.map((f: any) => {
+            fichajes: timeEntries.map((f: any) => {
               const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
                 ? String(f.fecha).trim()
                 : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
               return {
-          // id: f.id,
-          // usuario_id: f.usuario_id || f.empleado_id,
-          // fecha: cleanFecha,
-          // hora_entrada: f.hora_entrada,
-          // hora_salida: f.hora_salida,
-          // puntual: f.puntual !== undefined ? f.puntual : true,
-          // activo: !f.hora_salida
+                id: f.id,
+                usuario_id: f.usuario_id || f.empleado_id,
+                fecha: cleanFecha,
+                hora_entrada: f.hora_entrada,
+                hora_salida: f.hora_salida,
+                puntual: f.puntual !== undefined ? f.puntual : true,
+                activo: !f.hora_salida
               };
             })
           }));
@@ -570,29 +568,32 @@ export default function App() {
         if (freshSchedules !== undefined && freshSchedules !== null) {
           setState(prev => ({
             ...prev,
-          horarios: freshSchedules
+            horarios: freshSchedules
           }));
         }
       },
       async () => {
         const freshGastos = await fetchGastosFromSupabase();
-        const freshCards = await fetchGiftCardsFromSupabase();
-        if (freshCards && freshCards.length > 0) setTarjetasRegalo(freshCards);
         if (freshGastos !== undefined && freshGastos !== null) {
           setState(prev => ({
             ...prev,
-          gastos: freshGastos
+            gastos: freshGastos
+          }));
+        }
+      },
+      async () => {
+        const freshClosures = await fetchCashClosuresFromSupabase();
+        if (freshClosures && freshClosures.length > 0) {
+          setState(prev => ({
+            ...prev,
+            cuadresCaja: freshClosures
           }));
         }
       }
     );
 
     return () => {
-      if (typeof unsubscribe === 'function') {
-        try {
-          unsubscribe();
-        } catch (e) {}
-      }
+      unsubscribe();
     };
   }, []);
 
@@ -609,7 +610,7 @@ export default function App() {
 
     setActiveToasts(prev => [newToast, ...prev]);
 
-     // Permanecer visible durante 4.5 segundos
+    // Permanecer visible durante 4.5 segundos
     setTimeout(() => {
       setActiveToasts(prev => prev.filter(t => t.id !== id));
     }, 4500);
@@ -619,7 +620,7 @@ export default function App() {
     setActiveToasts(prev => prev.filter(t => t.id !== id));
   };
 
-   // --- ALERTA SONORA DE PÁNICO CONFIGURABLE ---
+  // --- ALERTA SONORA DE PÁNICO CONFIGURABLE ---
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const playPanicSound = () => {
@@ -628,15 +629,15 @@ export default function App() {
       const oscillator = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
       
-      // oscillator.connect(gainNode);
-      // gainNode.connect(audioCtx.destination);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
       
-      // oscillator.type = 'sine';
-      // oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);  A5 alert tone
-      // gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 alert tone
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
       
-      // oscillator.start();
-      // oscillator.stop(audioCtx.currentTime + 0.35);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.35);
     } catch (e) {
       console.error('Audio Context not allowed or failed:', e);
     }
@@ -645,17 +646,17 @@ export default function App() {
   useEffect(() => {
     const activeAlerts = state.alertasPanico?.filter(a => !a.atendida) || [];
     if (activeAlerts.length > 0 && soundEnabled && activeUserRole === 'usr-admin') {
-       // play immediately
-      // playPanicSound();
+      // play immediately
+      playPanicSound();
       const interval = setInterval(() => {
-        // playPanicSound();
+        playPanicSound();
       }, 3500);
       return () => clearInterval(interval);
     }
   }, [state.alertasPanico, soundEnabled, activeUserRole]);
 
 
-   // Sincronizar activeUserRole y coccole_sesion con localStorage de manera persistente
+  // Sincronizar activeUserRole y coccole_sesion con localStorage de manera persistente
   useEffect(() => {
     if (activeUserRole) {
       try {
@@ -676,7 +677,7 @@ export default function App() {
     }
   }, [activeUserRole, state.usuarios]);
 
-   // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario
+  // Cargar tareas actualizadas de Supabase al cambiar de rol/usuario
   useEffect(() => {
     if (!activeUserRole || !isSupabaseConfigured()) return;
     
@@ -686,7 +687,7 @@ export default function App() {
         if (supaTasks) {
           setState(prev => ({
             ...prev,
-          tareas: supaTasks
+            tareas: supaTasks
           }));
         }
       } catch (err) {
@@ -694,10 +695,10 @@ export default function App() {
       }
     }
     
-    // loadFreshTasks();
+    loadFreshTasks();
   }, [activeUserRole]);
 
-   // Sincronizar cambios de sesión entre pestañas sin loops ni deslogueos automáticos
+  // Sincronizar cambios de sesión entre pestañas sin loops ni deslogueos automáticos
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'coccole_sesion' || e.key === 'coccole_active_user_role') {
@@ -730,24 +731,24 @@ export default function App() {
       if (rol === 'admin') {
         const existingAdminPanel = document.getElementById('admin-productividad-panel');
         if (existingAdminPanel) {
-          // existingAdminPanel.remove();
+          existingAdminPanel.remove();
         }
       } else {
-        // inicializarSesionProgresoEmpleadoSeguro(nombre);
+        inicializarSesionProgresoEmpleadoSeguro(nombre);
       }
-      // activarSuscripcionTiempoRealSegura();
+      activarSuscripcionTiempoRealSegura();
     }, 300);
 
     return () => clearTimeout(timer);
   }, [activeUserRole]);
 
-   // Agregar una notificación al feed
+  // Agregar una notificación al feed
   const pushNotification = (text: string, type: 'success' | 'alert' | 'info' = 'info') => {
     const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const newNotif = {
-          // id: uniqueId,
-      // text,
-          // time: 'Hace un instante',
+      id: uniqueId,
+      text,
+      time: 'Hace un instante',
       type
     };
     setNotifications(prev => [newNotif, ...prev.slice(0, 4)]);
@@ -767,14 +768,14 @@ export default function App() {
 
     setState(prev => ({
       ...prev,
-          usuarios: [newAdmin, ...prev.usuarios]
+      usuarios: [newAdmin, ...prev.usuarios]
     }));
 
     pushNotification(`Cuenta de Administrador Master "${newAdmin.nombre}" creada con éxito.`, 'success');
     return newAdminId;
   };
 
-   // Si no hay usuario activo, mostramos el login
+  // Si no hay usuario activo, mostramos el login
   if (!activeUserRole) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-3 sm:p-6 antialiased">
@@ -791,7 +792,7 @@ export default function App() {
     );
   }
 
-   // Obtener usuario activo actual
+  // Obtener usuario activo actual
   const defaultAdminUser: Usuario = {
     id: 'usr-admin',
     nombre: (window as any).sesionActual?.nombre || 'Administrador',
@@ -806,14 +807,14 @@ export default function App() {
     pin: '1234'
   };
   const currentUser = state.usuarios.find(u => 
-    u.id === activeUserRole ||
+    u.id === activeUserRole || 
     (Boolean(activeUserRole) && u.nombre?.toLowerCase() === activeUserRole.toLowerCase())
   ) || (activeUserRole === 'usr-admin' ? defaultAdminUser : defaultEmployeeUser);
 
-   // Obtener métricas globales del negocio
+  // Obtener métricas globales del negocio
   const metrics = getGlobalMetrics(state.tareas, state.ventas, state.productos, filtroGeneral);
 
-   // --- ACTIONS: GESTOR DE TAREAS ---
+  // --- ACTIONS: GESTOR DE TAREAS ---
   
   const handleAddTarea = async (newTarea: Omit<Tarea, 'id'>) => {
     const assignedUser = state.usuarios.find(u => u.id === newTarea.asignado_a);
@@ -828,24 +829,28 @@ export default function App() {
     if (!isSupabaseConfigured()) {
       setState(prev => ({
         ...prev,
-          tareas: [tarea, ...prev.tareas]
+        tareas: [tarea, ...prev.tareas]
       }));
       pushNotification(`Nueva tarea asignada a ${assignedName} (Local).`, 'info');
       return;
     }
 
     try {
-       // 1. Guardar en la nube (Supabase-First)
+      // 1. Guardar en la nube (Supabase-First)
       const ok = await insertDailyTaskInSupabase(tarea, assignedName);
       if (!ok) {
         console.error('Error Supabase INSERT: returned false');
         alert('Error al crear tarea en la nube: No se pudo guardar el registro.');
-        
+        triggerPushToast({
+          kind: 'standard',
+          type: 'alert',
+          text: 'Fallo al guardar la tarea en la nube.'
+        });
         pushNotification('Fallo al guardar la tarea en la nube.', 'alert');
         return;
       }
 
-       // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
+      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
       await cargarDatosSilencioso();
       pushNotification(`Nueva tarea asignada a ${assignedName}.`, 'info');
     } catch (err: any) {
@@ -857,7 +862,7 @@ export default function App() {
   const handleAddTareasBulk = async (newTareas: Omit<Tarea, 'id'>[]): Promise<boolean> => {
     if (newTareas.length === 0) return true;
 
-     // Generar tareas con IDs completamente únicos usando timestamp, índice y sufijo aleatorio para evitar colisiones
+    // Generar tareas con IDs completamente únicos usando timestamp, índice y sufijo aleatorio para evitar colisiones
     const processedTareas: Tarea[] = newTareas.map((t, idx) => {
       const uniqueSuffix = Math.random().toString(36).substring(2, 6);
       const TareaId = `tsk-${Date.now()}-${idx}-${uniqueSuffix}`;
@@ -871,14 +876,14 @@ export default function App() {
     if (!isSupabaseConfigured()) {
       setState(prev => ({
         ...prev,
-          tareas: [...processedTareas, ...prev.tareas]
+        tareas: [...processedTareas, ...prev.tareas]
       }));
       pushNotification(`${processedTareas.length} tareas oficiales generadas correctamente (Local).`, 'info');
       return true;
     }
 
     try {
-       // Registrar tareas una por una de forma simultánea en Supabase para evitar roundtrips secuenciales de recarga
+      // Registrar tareas una por una de forma simultánea en Supabase para evitar roundtrips secuenciales de recarga
       const promises = processedTareas.map(async (t) => {
         const assignedUser = state.usuarios.find(u => u.id === t.asignado_a);
         const assignedName = assignedUser?.nombre || 'empleado';
@@ -893,7 +898,7 @@ export default function App() {
         alert('Algunas tareas no se pudieron guardar en la nube. Verifique la conexión.');
       }
 
-       // Sincronizar en memoria una sola vez al terminar todo el lote
+      // Sincronizar en memoria una sola vez al terminar todo el lote
       await cargarDatosSilencioso();
       pushNotification(`${processedTareas.length} tareas oficiales guardadas en lote correctamente.`, 'info');
       return allOk;
@@ -911,25 +916,29 @@ export default function App() {
     if (!isSupabaseConfigured()) {
       setState(prev => ({
         ...prev,
-          tareas: prev.tareas.map(t => t.id === updatedTarea.id ? updatedTarea : t)
+        tareas: prev.tareas.map(t => t.id === updatedTarea.id ? updatedTarea : t)
       }));
       pushNotification(`Tarea "${updatedTarea.titulo}" actualizada correctamente (Local).`, 'info');
       return;
     }
 
     try {
-       // 1. Guardar en la nube (Supabase-First)
+      // 1. Guardar en la nube (Supabase-First)
       const assignedUser = state.usuarios.find(u => u.id === updatedTarea.asignado_a);
       const ok = await insertDailyTaskInSupabase(updatedTarea, assignedUser?.nombre);
       if (!ok) {
         console.error('Error Supabase UPDATE: returned false');
         alert('Error al actualizar la tarea en la nube: No se pudo guardar el registro.');
-        
+        triggerPushToast({
+          kind: 'standard',
+          type: 'alert',
+          text: 'Fallo al guardar la edición de tarea en la nube.'
+        });
         pushNotification('Fallo al actualizar la tarea en la nube.', 'alert');
         return;
       }
 
-       // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
+      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
       await cargarDatosSilencioso();
       pushNotification(`Tarea "${updatedTarea.titulo}" actualizada correctamente.`, 'info');
     } catch (err: any) {
@@ -945,24 +954,28 @@ export default function App() {
     if (!isSupabaseConfigured()) {
       setState(prev => ({
         ...prev,
-          tareas: prev.tareas.filter(t => t.id !== id)
+        tareas: prev.tareas.filter(t => t.id !== id)
       }));
       pushNotification(`Tarea eliminada: "${deleted.titulo}" (Local)`, 'alert');
       return;
     }
 
     try {
-       // 1. Borrar en la nube (Supabase-First)
+      // 1. Borrar en la nube (Supabase-First)
       const ok = await deleteDailyTaskFromSupabase(id);
       if (!ok) {
         console.error('Error Supabase DELETE: returned false');
         alert('Error al borrar en la nube: No se pudo eliminar el registro.');
-        
+        triggerPushToast({
+          kind: 'standard',
+          type: 'alert',
+          text: 'Fallo al eliminar la tarea de la nube.'
+        });
         pushNotification('Fallo al eliminar la tarea de la nube.', 'alert');
         return;
       }
 
-       // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
+      // 2. Solo si fue exitoso en Supabase, refrescar silenciosamente
       await cargarDatosSilencioso();
       pushNotification(`Tarea eliminada: "${deleted.titulo}"`, 'alert');
     } catch (err: any) {
@@ -976,7 +989,7 @@ export default function App() {
     if (!isSupabaseConfigured()) {
       setState(prev => ({
         ...prev,
-          tareas: prev.tareas.filter(t => t.fecha && getLocalDateString(t.fecha) !== targetFecha)
+        tareas: prev.tareas.filter(t => t.fecha && getLocalDateString(t.fecha) !== targetFecha)
       }));
       pushNotification(`Todas las tareas de la fecha ${targetFecha} han sido eliminadas (Local)`, 'alert');
       return;
@@ -1002,7 +1015,7 @@ export default function App() {
   const handleUpdateTaskOrders = async (orders: {id: string, orden: number}[]) => {
     setState(prev => ({
       ...prev,
-          tareas: prev.tareas.map(t => {
+      tareas: prev.tareas.map(t => {
         const orderMatch = orders.find(o => o.id === t.id);
         if (orderMatch) {
           return { ...t, orden: orderMatch.orden };
@@ -1026,10 +1039,10 @@ export default function App() {
     const now = new Date();
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-     // 1. Actualización optimista INMEDIATA del estado local en React (0ms de latencia)
+    // 1. Actualización optimista INMEDIATA del estado local en React (0ms de latencia)
     setState(prev => ({
       ...prev,
-          tareas: prev.tareas.map(t => {
+      tareas: prev.tareas.map(t => {
         if (t.id === id) {
           const updated: Tarea = { ...t, estado };
           if (estado === 'En proceso') {
@@ -1056,11 +1069,9 @@ export default function App() {
     pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');
 
     if (!isSupabaseConfigured()) return;
-    const localCards = localStorage.getItem('coccole_tarjetas_regalo');
-    if (localCards) setTarjetasRegalo(JSON.parse(localCards));
 
     try {
-       // 2. Guardar en Supabase en segundo plano sin congelar la UI
+      // 2. Guardar en Supabase en segundo plano sin congelar la UI
       const isCompleted = estado === 'Completada';
       const success = await updateDailyTaskStatusInSupabase(
         id,
@@ -1082,13 +1093,13 @@ export default function App() {
             (!t.fecha || getLocalDateString(t.fecha) === hoyStr)
           );
           const deduplicatedMap = new Map<string, Tarea>();
-            userTasksRaw.forEach(t => {
+          userTasksRaw.forEach(t => {
             const key = (t.titulo || '').trim().toLowerCase();
             const isComp = t.id === id ? estado === 'Completada' : t.estado === 'Completada';
             if (!deduplicatedMap.has(key)) {
-            deduplicatedMap.set(key, { ...t, estado: isComp ? 'Completada' : t.estado });
+              deduplicatedMap.set(key, { ...t, estado: isComp ? 'Completada' : t.estado });
             } else if (isComp) {
-            deduplicatedMap.set(key, { ...t, estado: 'Completada' });
+              deduplicatedMap.set(key, { ...t, estado: 'Completada' });
             }
           });
           const userTasks = Array.from(deduplicatedMap.values());
@@ -1102,7 +1113,7 @@ export default function App() {
     }
   };
 
-   // --- ACTIONS: PRODUCTOS A PROMOCIONAR ---
+  // --- ACTIONS: PRODUCTOS A PROMOCIONAR ---
 
   const handleAddProducto = async (newProd: Omit<ProductoPromocion, 'id'>) => {
     const fechaHoy = newProd.fecha || getLocalDateString();
@@ -1112,14 +1123,14 @@ export default function App() {
       fecha: fechaHoy
     };
 
-     // Actualización local limpia sin duplicados por empleado
+    // Actualización local limpia sin duplicados por empleado
     setState(prev => {
       const existingFiltered = (prev.productos || []).filter(
-          // p => p.nombre_producto.trim().toLowerCase() !== mainProd.nombre_producto.trim().toLowerCase()
+        p => p.nombre_producto.trim().toLowerCase() !== mainProd.nombre_producto.trim().toLowerCase()
       );
       return {
         ...prev,
-          productos: [mainProd, ...existingFiltered]
+        productos: [mainProd, ...existingFiltered]
       };
     });
 
@@ -1137,10 +1148,10 @@ export default function App() {
   };
 
   const handleEditProducto = async (updatedProd: ProductoPromocion) => {
-     // Actualización local para velocidad inmediata de interfaz
+    // Actualización local para velocidad inmediata de interfaz
     setState(prev => ({
       ...prev,
-          productos: prev.productos.map(p => p.id === updatedProd.id ? updatedProd : p)
+      productos: prev.productos.map(p => p.id === updatedProd.id ? updatedProd : p)
     }));
 
     if (!isSupabaseConfigured()) {
@@ -1165,10 +1176,10 @@ export default function App() {
     const prodToDelete = state.productos.find(p => p.id === id);
     if (!prodToDelete) return;
 
-     // Actualización local para velocidad inmediata de interfaz
+    // Actualización local para velocidad inmediata de interfaz
     setState(prev => ({
       ...prev,
-          productos: prev.productos.filter(p => p.id !== id)
+      productos: prev.productos.filter(p => p.id !== id)
     }));
 
     if (!isSupabaseConfigured()) {
@@ -1189,18 +1200,18 @@ export default function App() {
     }
   };
 
-   // --- ACTIONS: VENTAS SUGERIDAS (+1 CONTADOR EXPRESS) ---
+  // --- ACTIONS: VENTAS SUGERIDAS (+1 CONTADOR EXPRESS) ---
 
   const handleAddVentaSugerida = (producto_id: string, usuario_id: string, metodo_pago: string) => {
     const todayStr = getLocalDateString();
     
     setState(prev => {
-       // Buscar si ya hay un registro de este producto y usuario hoy para acumularlo, o crear uno nuevo
+      // Buscar si ya hay un registro de este producto y usuario hoy para acumularlo, o crear uno nuevo
       const existingIdx = prev.ventas.findIndex(v => v.producto_id === producto_id && v.usuario_id === usuario_id && v.fecha === todayStr);
       
       let updatedVentas = [...prev.ventas];
       if (existingIdx !== -1) {
-          updatedVentas[existingIdx] = {
+        updatedVentas[existingIdx] = {
           ...updatedVentas[existingIdx],
           unidades_contadas: updatedVentas[existingIdx].unidades_contadas + 1,
           metodo_pago
@@ -1219,7 +1230,7 @@ export default function App() {
       
       return {
         ...prev,
-          ventas: updatedVentas
+        ventas: updatedVentas
       };
     });
 
@@ -1230,10 +1241,18 @@ export default function App() {
     const nombreProd = prod?.nombre_producto || 'Venta Sugerida';
     const precioProd = prodCat?.precio || 45.00;
 
+    triggerPushToast({
+      kind: 'sale_ticket',
+      colaborador: emp?.nombre || 'Empleado',
+      articulos: [{ nombre: nombreProd, cantidad: 1 }],
+      total: precioProd,
+      metodoPago: metodo_pago || 'efectivo'
+    });
+
     pushNotification(`¡${emp?.nombre} vendió 1 adición de ${nombreProd}! (+${prod?.puntos_por_unidad || 5} pts)`, 'success');
   };
 
-   // --- ACTIONS: FICHAJE / ASISTENCIA ---
+  // --- ACTIONS: FICHAJE / ASISTENCIA ---
 
   const handleRegistrarFichaje = async (usuario_id: string, tipo: 'entrada' | 'salida', horaPersonalizada?: string) => {
     const todayStr = getLocalDateString();
@@ -1243,13 +1262,13 @@ export default function App() {
     const empObj = state.usuarios.find(u => u.id === usuario_id);
     const empNombre = empObj?.nombre || 'Empleado';
 
-     // Evaluar puntualidad de manera inteligente basada en el horario asignado al trabajador para el día de hoy
+    // Evaluar puntualidad de manera inteligente basada en el horario asignado al trabajador para el día de hoy
     const evaluacionPuntualidad = evaluarPuntualidadFichaje(
       timeStr,
       usuario_id,
       state.horarios || [],
       todayStr,
-      10
+      10 // 10 minutos de tolerancia tras la hora de inicio de turno
     );
     const punctual = evaluacionPuntualidad.puntual;
 
@@ -1265,8 +1284,8 @@ export default function App() {
           puntual: punctual,
           activo: true
         };
-          updatedFichajes[existingIdx] = updated;
-          // fichajeToSave = updated;
+        updatedFichajes[existingIdx] = updated;
+        fichajeToSave = updated;
       } else {
         const newFichaje: Fichaje = {
           id: `f-${Date.now()}`,
@@ -1276,23 +1295,23 @@ export default function App() {
           puntual: punctual,
           activo: true
         };
-            updatedFichajes.push(newFichaje);
-          // fichajeToSave = newFichaje;
+        updatedFichajes.push(newFichaje);
+        fichajeToSave = newFichaje;
       }
       pushNotification(`${empNombre} registró ENTRADA a las ${timeStr} — ${evaluacionPuntualidad.mensaje}`, punctual ? 'success' : 'info');
     } else {
-          // Salida: actualizar registro activo de hoy
+      // Salida: actualizar registro activo de hoy
       let duracionTexto = '';
-          updatedFichajes = updatedFichajes.map(f => {
+      updatedFichajes = updatedFichajes.map(f => {
         if ((f.usuario_id === usuario_id || (f as any).empleado_id === usuario_id) && (f.activo || !f.hora_salida)) {
           const dur = calcularHorasTurno(f.hora_entrada, timeStr);
-          // duracionTexto = dur.texto;
+          duracionTexto = dur.texto;
           const updated = {
             ...f,
-          // hora_salida: timeStr,
-          // activo: false
+            hora_salida: timeStr,
+            activo: false
           };
-          // fichajeToSave = updated;
+          fichajeToSave = updated;
           return updated;
         }
         return f;
@@ -1304,17 +1323,17 @@ export default function App() {
       }
     }
 
-     // Actualizar estado local inmediatamente
+    // Actualizar estado local inmediatamente
     setState(prev => ({
       ...prev,
-          fichajes: updatedFichajes
+      fichajes: updatedFichajes
     }));
 
     try {
       localStorage.setItem('coccole_fichajes', JSON.stringify(updatedFichajes));
     } catch (e) {}
 
-     // Guardar en Supabase en la nube
+    // Guardar en Supabase en la nube
     if (fichajeToSave) {
       try {
         const ok = await saveFichajeToSupabase(fichajeToSave, empNombre);
@@ -1337,7 +1356,7 @@ export default function App() {
       } catch (e) {}
       return {
         ...prev,
-          fichajes: updated
+        fichajes: updated
       };
     });
 
@@ -1350,7 +1369,7 @@ export default function App() {
     pushNotification('Registro de asistencia eliminado de la bitácora.', 'info');
   };
 
-   // --- ACTIONS: GESTION DE TRABAJADORES (EDITAR, ELIMINAR, CREAR) ---
+  // --- ACTIONS: GESTION DE TRABAJADORES (EDITAR, ELIMINAR, CREAR) ---
 
   const handleCreateUsuario = async (newUsr: Omit<Usuario, 'id'>): Promise<boolean> => {
     try {
@@ -1413,15 +1432,15 @@ export default function App() {
       const emp = prev.usuarios.find(u => u.id === id);
       return {
         ...prev,
-          usuarios: prev.usuarios.filter(u => u.id !== id),
-          tareas: prev.tareas.filter(t => t.asignado_a !== id),
-          fichajes: prev.fichajes.filter(f => f.usuario_id !== id)
+        usuarios: prev.usuarios.filter(u => u.id !== id),
+        tareas: prev.tareas.filter(t => t.asignado_a !== id),
+        fichajes: prev.fichajes.filter(f => f.usuario_id !== id)
       };
     });
     pushNotification('Trabajador eliminado del sistema de Coccole Fit.', 'alert');
   };
 
-   // --- ACTIONS: REGISTRO DE FEEDBACK / CONVERSACIONES ---
+  // --- ACTIONS: REGISTRO DE FEEDBACK / CONVERSACIONES ---
 
   const handleAddFeedback = (newFb: Omit<Feedback, 'id' | 'fecha'>) => {
     const now = new Date();
@@ -1435,14 +1454,14 @@ export default function App() {
 
     setState(prev => ({
       ...prev,
-          feedbacks: [fb, ...(prev.feedbacks || [])]
+      feedbacks: [fb, ...(prev.feedbacks || [])]
     }));
 
     const empName = state.usuarios.find(u => u.id === newFb.usuario_id)?.nombre || 'Trabajador';
     pushNotification(`Conversación registrada para ${empName}: "${newFb.titulo}"`, 'success');
   };
 
-   // --- ACTIONS: INCIDENCIAS ---
+  // --- ACTIONS: INCIDENCIAS ---
 
   const handleAddIncidencia = (newInc: Omit<Incidencia, 'id'>) => {
     const inc: Incidencia = {
@@ -1451,7 +1470,7 @@ export default function App() {
     };
     setState(prev => ({
       ...prev,
-          incidencias: [inc, ...prev.incidencias]
+      incidencias: [inc, ...prev.incidencias]
     }));
     pushNotification(`ALERTA: Reporte de ${newInc.tipo} enviado por ${currentUser.nombre}.`, 'alert');
   };
@@ -1459,12 +1478,12 @@ export default function App() {
   const handleResolveIncidencia = (id: string) => {
     setState(prev => ({
       ...prev,
-          incidencias: prev.incidencias.map(i => i.id === id ? { ...i, estado: 'Resuelta' } : i)
+      incidencias: prev.incidencias.map(i => i.id === id ? { ...i, estado: 'Resuelta' } : i)
     }));
     pushNotification('Incidencia resuelta por el administrador.', 'success');
   };
 
-   // --- ACTIONS: INVENTARIO INTEGRADO ---
+  // --- ACTIONS: INVENTARIO INTEGRADO ---
 
   const handleUpdateStock = async (itemId: string, newStock: number, nombreUsuario: string) => {
     const now = new Date();
@@ -1479,29 +1498,50 @@ export default function App() {
       const updatedInventario = (prev.inventario || []).map(item => {
         if (item.id === itemId) {
           const updated = {
-            ...item
+            ...item,
+            stock_actual: Number(newStock),
+            ultima_actualizacion_fecha: dateStr,
+            ultima_actualizacion_por: nombreUsuario
           };
+          targetItemToPersist = updated;
           
           if (updated.stock_actual <= updated.stock_minimo_alerta) {
             const hasIncidencia = prev.incidencias.some(i => i.titulo.includes(item.nombre) && i.estado === 'Pendiente');
             if (!hasIncidencia) {
-              // Alerta de stock bajo
+              extraIncidencia = {
+                id: `inc-auto-${Date.now()}`,
+                usuario_id: 'usr-admin',
+                fecha: new Date().toISOString().split('T')[0],
+                titulo: `Alerta: Stock bajo en ${item.nombre}`,
+                descripcion: `El nivel bajó a ${updated.stock_actual} ${item.unidad} (mínimo de seguridad: ${item.stock_minimo_alerta} ${item.unidad}).`,
+                tipo: 'insumo',
+                estado: 'Pendiente'
+              };
             }
           }
 
           if (updated.stock_actual === 0) {
-            // Stock agotado
+            extraAlertaPanico = {
+              id: `panic-${Date.now()}`,
+              usuario_id: currentUser.id,
+              usuario_nombre: currentUser.nombre,
+              insumo_id: itemId,
+              insumo_nombre: item.nombre,
+              fecha_hora: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')} del ${now.getDate()}/${now.getMonth() + 1}`,
+              atendida: false
+            };
           }
 
           return updated;
         }
         return item;
       });
+
       return {
         ...prev,
-          inventario: updatedInventario,
-          // incidencias: extraIncidencia ? [extraIncidencia, ...prev.incidencias] : prev.incidencias,
-          alertasPanico: extraAlertaPanico ? [extraAlertaPanico, ...(prev.alertasPanico || [])] : (prev.alertasPanico || [])
+        inventario: updatedInventario,
+        incidencias: extraIncidencia ? [extraIncidencia, ...prev.incidencias] : prev.incidencias,
+        alertasPanico: extraAlertaPanico ? [extraAlertaPanico, ...(prev.alertasPanico || [])] : (prev.alertasPanico || [])
       };
     });
 
@@ -1513,7 +1553,7 @@ export default function App() {
     if (item) {
       if (Number(newStock) === 0) {
         pushNotification(`ALERTA DE PÁNICO: Se reportó STOCK CERO en "${item.nombre}" por ${currentUser.nombre}!`, 'alert');
-        // playPanicSound();
+        playPanicSound();
       } else if (Number(newStock) <= item.stock_minimo_alerta) {
         pushNotification(`Stock de "${item.nombre}" actualizado a ${newStock} ${item.unidad} (BAJO EL MÍNIMO!)`, 'alert');
       } else {
@@ -1525,7 +1565,7 @@ export default function App() {
   const handleAtenderAlertaPanico = (alertaId: string) => {
     setState(prev => ({
       ...prev,
-          alertasPanico: (prev.alertasPanico || []).map(a => a.id === alertaId ? { ...a, atendida: true } : a)
+      alertasPanico: (prev.alertasPanico || []).map(a => a.id === alertaId ? { ...a, atendida: true } : a)
     }));
     pushNotification('La alerta de pánico ha sido atendida y reabastecida.', 'success');
   };
@@ -1537,10 +1577,11 @@ export default function App() {
     };
     setState(prev => ({
       ...prev,
-          cuadresCaja: [nuevoCuadre, ...(prev.cuadresCaja || [])]
+      cuadresCaja: [nuevoCuadre, ...(prev.cuadresCaja || [])]
     }));
 
-     // Sincronizar Cierre de Turno / Cuadre en Supabase
+    // Sincronizar Cierre de Turno / Cuadre en Supabase
+    saveCashClosureToSupabase(nuevoCuadre);
     insertTimeEntryInSupabase(nuevoCuadre);
 
     const colaborador = cuadre.empleado_nombre || cuadre.usuario_nombre || 'Colaborador';
@@ -1554,11 +1595,24 @@ export default function App() {
     let estadoValidacion = "Efectivo Conciliado (Sin Diferencia)";
     if (Math.abs(dif) >= 0.01) {
       if (dif < 0) {
-          // estadoValidacion = `Diferencia en Efectivo: -$${Math.abs(dif).toFixed(2)} (Faltante en caja)`;
+        estadoValidacion = `Diferencia en Efectivo: -$${Math.abs(dif).toFixed(2)} (Faltante en caja)`;
       } else {
-          // estadoValidacion = `Diferencia en Efectivo: +$${dif.toFixed(2)} (Sobrante en caja)`;
+        estadoValidacion = `Diferencia en Efectivo: +$${dif.toFixed(2)} (Sobrante en caja)`;
       }
     }
+
+    triggerPushToast({
+      kind: 'cash_closure',
+      colaborador,
+      totalGeneral,
+      desglose: {
+        efectivo: ef,
+        tarjeta: tar,
+        transferencia: tr,
+        rappi: rap
+      },
+      estadoValidacion
+    });
 
     pushNotification(`Cierre de caja de ${colaborador} enviado a revisión. Total: $${totalGeneral.toFixed(2)}`, 'success');
   };
@@ -1594,12 +1648,12 @@ export default function App() {
     
     const duplicated = baseTurnos.map(t => ({
       ...t,
-          // id: `shift_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+      id: `shift_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
     }));
     
     setState(prev => ({
       ...prev,
-          horarios: duplicated
+      horarios: duplicated
     }));
 
     try {
@@ -1612,14 +1666,13 @@ export default function App() {
 
   const handleSaveInventarioItem = async (item: Omit<InventarioItem, 'id'> & { id?: string }) => {
     let savedItem: InventarioItem;
-    const nowStr = getLocalDateString();
     if (item.id) {
       const items = state.inventario || [];
       const existing = items.find(i => i.id === item.id);
       savedItem = {
         ...existing,
         ...item,
-        ultima_actualizacion_fecha: nowStr,
+        ultima_actualizacion_fecha: new Date().toISOString().substring(0, 16).replace('T', ' '),
         ultima_actualizacion_por: 'Administrador'
       } as InventarioItem;
       setState(prev => {
@@ -1627,19 +1680,19 @@ export default function App() {
         const updated = currentItems.map(i => i.id === item.id ? savedItem : i);
         return { ...prev, inventario: updated };
       });
-      pushNotification('Item de inventario guardado exitosamente.', 'success');
+      pushNotification(`Item de inventario "${item.nombre}" modificado exitosamente.`, 'success');
     } else {
       savedItem = {
         ...item,
-        id: item.id || `inv-${Date.now()}`,
-        ultima_actualizacion_fecha: nowStr,
+        id: `inv-${Date.now()}`,
+        ultima_actualizacion_fecha: new Date().toISOString().substring(0, 16).replace('T', ' '),
         ultima_actualizacion_por: 'Administrador'
       } as InventarioItem;
       setState(prev => {
         const currentItems = prev.inventario || [];
         return { ...prev, inventario: [...currentItems, savedItem] };
       });
-      pushNotification('Item de inventario guardado exitosamente.', 'success');
+      pushNotification(`Nuevo item "${item.nombre}" ingresado al inventario.`, 'success');
     }
 
     try {
@@ -1668,6 +1721,8 @@ export default function App() {
       });
       return { ...prev, inventario: existing };
     });
+
+    if (isSupabaseConfigured()) {
       try {
         await upsertInventoryBatchInSupabase(items);
         const latestInventory = await fetchInventoryFromSupabase();
@@ -1677,6 +1732,7 @@ export default function App() {
       } catch (err) {
         console.error('Error guardando lote de inventario en Supabase:', err);
       }
+    }
   };
 
   const handleDeleteInventarioItem = async (id: string) => {
@@ -1700,7 +1756,7 @@ export default function App() {
     }
   };
 
-   // --- ACTIONS: GESTIÓN DE HORARIOS Y TURNOS ---
+  // --- ACTIONS: GESTIÓN DE HORARIOS Y TURNOS ---
 
   const handleSaveTurno = async (turno: Omit<TurnoSemanal, 'id'> & { id?: string }) => {
     const emp = state.usuarios.find(u => u.id === turno.usuario_id);
@@ -1720,10 +1776,10 @@ export default function App() {
     setState(prev => {
       const turnos = prev.horarios || [];
       if (turno.id) {
-          updatedHorarios = turnos.map(t => t.id === turno.id ? turnoFinal : t);
+        updatedHorarios = turnos.map(t => t.id === turno.id ? turnoFinal : t);
         pushNotification(`Turno de ${empNombre} actualizado para el ${turno.dia_semana}.`, 'success');
       } else {
-          updatedHorarios = [...turnos, turnoFinal];
+        updatedHorarios = [...turnos, turnoFinal];
         pushNotification(`Turno programado para ${empNombre} el ${turno.dia_semana}.`, 'success');
       }
       try {
@@ -1754,8 +1810,8 @@ export default function App() {
     if (!usuarioId || !diaSemana) {
       const match = (state.horarios || []).find(t => t.id === id);
       if (match) {
-          // usuarioId = match.usuario_id;
-          // diaSemana = match.dia_semana;
+        usuarioId = match.usuario_id;
+        diaSemana = match.dia_semana;
       }
     }
 
@@ -1781,34 +1837,7 @@ export default function App() {
     }
   };
 
-   // --- ACTIONS: GASTOS ---
-  
-  const handleAddTarjetaRegalo = async (card: TarjetaRegalo) => {
-    setTarjetasRegalo(prev => [card, ...prev.filter(c => c.id !== card.id && c.codigo !== card.codigo)]);
-    await insertGiftCardInSupabase(card);
-    pushNotification(`Tarjeta Regalo ${card.codigo} por ${formatMoney(card.monto_inicial)} creada exitosamente.`, 'info');
-  };
-
-  const handleRedeemTarjetaRegalo = async (codigo: string, monto: number): Promise<{ success: boolean; saldoRestante: number; error?: string }> => {
-    const res = await redeemGiftCardInSupabase(codigo, monto);
-    if (res.success) {
-      const updated = await fetchGiftCardsFromSupabase();
-      if (updated && updated.length > 0) {
-        setTarjetasRegalo(updated);
-      } else {
-        const local = localStorage.getItem('coccole_tarjetas_regalo');
-        if (local) setTarjetasRegalo(JSON.parse(local));
-      }
-    }
-    return res;
-  };
-
-  const handleDeleteTarjetaRegalo = async (id: string) => {
-    setTarjetasRegalo(prev => prev.filter(c => c.id !== id));
-    await deleteGiftCardFromSupabase(id);
-    pushNotification('Tarjeta regalo eliminada correctamente.', 'info');
-  };
-
+  // --- ACTIONS: GASTOS ---
   const handleSaveGasto = async (gastoData: Omit<Gasto, 'id'> & { id?: string }) => {
     const id = gastoData.id || `gasto-${Date.now()}`;
     const nuevoGasto: Gasto = {
@@ -1826,9 +1855,9 @@ export default function App() {
       const existingIdx = (prev.gastos || []).findIndex(g => g.id === id);
       let updated: Gasto[];
       if (existingIdx !== -1) {
-          updated = (prev.gastos || []).map(g => g.id === id ? nuevoGasto : g);
+        updated = (prev.gastos || []).map(g => g.id === id ? nuevoGasto : g);
       } else {
-          updated = [nuevoGasto, ...(prev.gastos || [])];
+        updated = [nuevoGasto, ...(prev.gastos || [])];
       }
       try {
         localStorage.setItem('coccole_gastos', JSON.stringify(updated));
@@ -1852,7 +1881,7 @@ export default function App() {
     await deleteGastoFromSupabase(id);
   };
 
-   // --- ACTIONS: ANUNCIOS ---
+  // --- ACTIONS: ANUNCIOS ---
 
   const handleAddAnuncio = async (newAn: Anuncio | Omit<Anuncio, 'id'>) => {
     const hasPreassignedId = Boolean((newAn as any).id);
@@ -1866,11 +1895,11 @@ export default function App() {
 
     setState(prev => ({
       ...prev,
-          anuncios: [an, ...prev.anuncios.filter(a => a.id !== anId)]
+      anuncios: [an, ...prev.anuncios.filter(a => a.id !== anId)]
     }));
     pushNotification('Nuevo comunicado publicado en el tablero.', 'success');
 
-     // Si no fue guardado previamente con ID asignado, guardar en Supabase
+    // Si no fue guardado previamente con ID asignado, guardar en Supabase
     if (!hasPreassignedId && isSupabaseConfigured()) {
       try {
         await insertAnnouncementInSupabase({
@@ -1889,7 +1918,7 @@ export default function App() {
   const handleDeleteAnuncio = async (id: string) => {
     setState(prev => ({
       ...prev,
-          anuncios: prev.anuncios.filter(an => an.id !== id)
+      anuncios: prev.anuncios.filter(an => an.id !== id)
     }));
     pushNotification('Comunicado eliminado del sistema.', 'alert');
 
@@ -1905,7 +1934,7 @@ export default function App() {
   const handleToggleAnuncioActivo = async (id: string, activo: boolean) => {
     setState(prev => ({
       ...prev,
-          anuncios: prev.anuncios.map(an => an.id === id ? { ...an, activo } : an)
+      anuncios: prev.anuncios.map(an => an.id === id ? { ...an, activo } : an)
     }));
     pushNotification(activo ? 'Comunicado activado.' : 'Comunicado desactivado.', 'info');
 
@@ -1918,7 +1947,7 @@ export default function App() {
     }
   };
 
-   // --- ACTIONS: CATÁLOGO DE PRODUCTOS (CÓDIGOS Y PRECIOS) ---
+  // --- ACTIONS: CATÁLOGO DE PRODUCTOS (CÓDIGOS Y PRECIOS) ---
 
   const handleSaveProductoCatalogo = async (prod: Omit<Producto, 'id'> & { id?: string }) => {
     const finalId = prod.id || `cat-${Date.now()}`;
@@ -1953,10 +1982,10 @@ export default function App() {
       const isExisting = catalog.some(p => p.id === productToSave.id || p.codigo === productToSave.codigo);
       let updatedCatalog: Producto[];
       if (isExisting) {
-          updatedCatalog = catalog.map(p => (p.id === productToSave.id || p.codigo === productToSave.codigo) ? productToSave : p);
+        updatedCatalog = catalog.map(p => (p.id === productToSave.id || p.codigo === productToSave.codigo) ? productToSave : p);
         pushNotification(`Producto "${productToSave.nombre}" actualizado en catálogo.`, 'success');
       } else {
-          updatedCatalog = [...catalog, productToSave];
+        updatedCatalog = [...catalog, productToSave];
         pushNotification(`Producto "${productToSave.nombre}" registrado con código ${productToSave.codigo}.`, 'success');
       }
       try {
@@ -1969,17 +1998,58 @@ export default function App() {
 
     if (isSupabaseConfigured()) {
       try {
-        await upsertCatalogProductInSupabase(productToSave);
-      } catch (e) {
-        console.error('Error al guardar en Supabase:', e);
+        const saved = await upsertCatalogProductInSupabase(productToSave);
+        if (saved) {
+          triggerPushToast({
+            kind: 'standard',
+            type: 'success',
+            text: `Producto ${productToSave.codigo} sincronizado en la nube de Supabase.`
+          });
+        } else {
+          console.warn('No se pudo confirmar guardado en Supabase para:', productToSave.codigo);
+        }
+      } catch (err) {
+        console.error('Error al guardar producto en catálogo de Supabase:', err);
       }
     }
   };
 
-  const handleBulkImportCatalog = async (processedProducts: Producto[]) => {
+  const handleBulkSaveProductosCatalogo = async (newProducts: Omit<Producto, 'id'>[]) => {
+    if (!newProducts || newProducts.length === 0) return;
+
+    const processedProducts: Producto[] = newProducts.map((p, idx) => {
+      const finalId = `cat-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`;
+      const cleanCodigo = (p.codigo || '').toUpperCase().trim();
+      const cleanNombre = (p.nombre || '').trim();
+      const vb = Number(p.valor_bruto != null ? p.valor_bruto : p.precio) || 0;
+      const desc = Number(p.descuento || 0);
+      const subt = Number(p.subtotal != null ? p.subtotal : Math.max(0, vb - desc));
+      const imp = Number(p.impuesto_cargo || 0);
+      const tot = Number(p.total != null ? p.total : p.precio) || (subt + imp);
+      const costo = Number(p.precio_costo || 0);
+      const ganancia = Number(p.margen_ganancia != null ? p.margen_ganancia : (tot - costo));
+
+      return {
+        ...p,
+        id: finalId,
+        codigo: cleanCodigo,
+        nombre: cleanNombre,
+        categoria: p.categoria || 'General',
+        valor_bruto: vb,
+        descuento: desc,
+        subtotal: subt,
+        impuesto_cargo: imp,
+        total: tot,
+        precio: tot,
+        precio_costo: costo,
+        margen_ganancia: ganancia
+      };
+    });
+
     setState(prev => {
       const catalog = prev.productosCatalogo || [];
       const updatedCatalog = [...catalog];
+
       processedProducts.forEach(newP => {
         const existingIdx = updatedCatalog.findIndex(cp => cp.codigo === newP.codigo);
         if (existingIdx >= 0) {
@@ -2001,18 +2071,31 @@ export default function App() {
 
     if (isSupabaseConfigured()) {
       try {
-        await upsertCatalogProductsBatchInSupabase(processedProducts);
+        const ok = await upsertCatalogProductsBatchInSupabase(processedProducts);
+        if (ok) {
+          triggerPushToast({
+            kind: 'standard',
+            type: 'success',
+            text: `Se sincronizaron ${processedProducts.length} productos en la nube de Supabase.`
+          });
+        }
       } catch (err) {
-        console.error('Error batch saving catalog:', err);
+        console.error('Error en carga masiva a Supabase:', err);
       }
     }
   };
 
   const handleDeleteProductoCatalogo = async (id: string) => {
-    setState(prev => ({
-      ...prev,
-      productosCatalogo: (prev.productosCatalogo || []).filter(p => p.id !== id)
-    }));
+    setState(prev => {
+      const filtered = (prev.productosCatalogo || []).filter(p => p.id !== id);
+      try {
+        localStorage.setItem('coccole_productos_catalogo', JSON.stringify(filtered));
+      } catch (e) {
+        console.error('Error saving coccole_productos_catalogo to localStorage:', e);
+      }
+      pushNotification('Producto removido del catálogo de ventas.', 'alert');
+      return { ...prev, productosCatalogo: filtered };
+    });
 
     if (isSupabaseConfigured()) {
       try {
@@ -2022,7 +2105,8 @@ export default function App() {
       }
     }
   };
-   // --- ACTIONS: REGISTRO DE VENTAS DEL DÍA (EMPLEADOS) ---
+
+  // --- ACTIONS: REGISTRO DE VENTAS DEL DÍA (EMPLEADOS) ---
 
   const handleRegistrarVenta = (nuevaVenta: Omit<Venta, 'id' | 'vendedor_nombre'>) => {
     const seller = state.usuarios.find(u => u.id === nuevaVenta.usuario_id || u.id === (nuevaVenta as any).cajero_id);
@@ -2045,15 +2129,15 @@ export default function App() {
         const existing = updatedClientes[existingIdx];
         const updatedCli = {
           ...existing,
-          // nombre: nuevaVenta.cliente_nombre || existing.nombre,
-          // total_compras_monto: existing.total_compras_monto + nuevaVenta.total,
-          // total_compras_count: existing.total_compras_count + 1,
-          // ultima_fecha_compra: today
+          nombre: nuevaVenta.cliente_nombre || existing.nombre,
+          total_compras_monto: existing.total_compras_monto + nuevaVenta.total,
+          total_compras_count: existing.total_compras_count + 1,
+          ultima_fecha_compra: today
         };
-          updatedClientes[existingIdx] = updatedCli;
+        updatedClientes[existingIdx] = updatedCli;
         upsertCustomerInSupabase(updatedCli);
       } else if (nuevaVenta.cliente_nombre) {
-        const newCli: Cliente = {
+        const newCli = {
           id: `cli-${Date.now()}`,
           nombre: nuevaVenta.cliente_nombre,
           telefono: cleanPhone,
@@ -2062,17 +2146,18 @@ export default function App() {
           total_compras_count: 1,
           ultima_fecha_compra: today
         };
+        updatedClientes.push(newCli);
         upsertCustomerInSupabase(newCli);
       }
     }
 
     setState(prev => ({
       ...prev,
-          ventasRegistradas: [venta, ...(prev.ventasRegistradas || [])],
-          clientes: updatedClientes
+      ventasRegistradas: [venta, ...(prev.ventasRegistradas || [])],
+      clientes: updatedClientes
     }));
 
-     // Sincronizar Venta en Supabase
+    // Sincronizar Venta en Supabase
     insertSaleInSupabase(venta);
 
     const rawItems = nuevaVenta.productos_vendidos || (nuevaVenta as any).productos || [];
@@ -2080,6 +2165,16 @@ export default function App() {
       nombre: p.nombre,
       cantidad: p.cantidad || 1
     }));
+
+    triggerPushToast({
+      kind: 'sale_ticket',
+      colaborador: vendedorNombre,
+      articulos: articulos.length > 0 ? articulos : [{ nombre: 'Venta Directa POS', cantidad: 1 }],
+      total: nuevaVenta.total,
+      metodoPago: nuevaVenta.metodo_pago || 'efectivo',
+      clienteNombre: nuevaVenta.cliente_nombre,
+      clienteTelefono: nuevaVenta.cliente_telefono
+    });
 
     pushNotification(`¡Venta registrada con éxito por ${vendedorNombre}! Total: ${formatMoney(nuevaVenta.total)} (${nuevaVenta.metodo_pago || 'efectivo'})`, 'success');
   };
@@ -2108,12 +2203,12 @@ export default function App() {
       pushNotification(`Venta ${ventaActualizada.id} actualizada correctamente por el Administrador.`, 'success');
       return {
         ...prev,
-          ventasRegistradas: updatedVentas,
-          clientes: updatedClientes
+        ventasRegistradas: updatedVentas,
+        clientes: updatedClientes
       };
     });
 
-     // Sincronizar Edición de Venta en Supabase
+    // Sincronizar Edición de Venta en Supabase
     updateSaleInSupabase(ventaActualizada);
   };
 
@@ -2122,6 +2217,7 @@ export default function App() {
     setState(prev => {
       const targetVenta = (prev.ventasRegistradas || []).find(v => v.id === ventaId);
       if (!targetVenta) return prev;
+
       anuladaVenta = {
         ...targetVenta,
         estado: 'Anulada' as const,
@@ -2162,7 +2258,7 @@ export default function App() {
       };
     });
 
-    if (anuladaVenta) {
+    if (anuladaVenta!) {
       updateSaleInSupabase(anuladaVenta);
     }
   };
@@ -2170,8 +2266,14 @@ export default function App() {
   // --- REINICIAR DATOS DEL SIMULADOR ---
   const handleResetData = () => {
     if (window.confirm('¿Seguro que deseas reiniciar los datos de simulación? Se borrará todo el historial creado.')) {
+      // localStorage eliminado
       setActiveUserRole(null);
       setState({ usuarios: [], tareas: [], productos: [], ventas: [], fichajes: [], incidencias: [], anuncios: [], feedbacks: [], inventario: [], horarios: [], productosCatalogo: [], ventasRegistradas: [], alertasPanico: [], cuadresCaja: [], clientes: [] });
+      triggerPushToast({
+        kind: 'standard',
+        type: 'success',
+        text: 'Datos reiniciados con éxito'
+      });
     }
   };
 
@@ -2191,10 +2293,10 @@ export default function App() {
               <Logo size="sm" />
               <div>
                 <h1 className="font-bold text-base text-[#2C3E50] tracking-tight leading-none">
-                  // COCCOLE FIT
+                  COCCOLE FIT
                 </h1>
                 <p className="text-[9px] text-gray-500 tracking-widest font-semibold leading-none mt-1">
-                  // Placer sin culpa
+                  Placer sin culpa
                 </p>
               </div>
             </div>
@@ -2233,6 +2335,7 @@ export default function App() {
               >
                 Cerrar Sesión
               </button>
+            </div>
           </div>
 
           {/* Derecha: Botón de reset y simulador */}
@@ -2243,7 +2346,11 @@ export default function App() {
                 setSoundEnabled(prev => !prev);
                 pushNotification(soundEnabled ? 'Alarma sonora desactivada.' : 'Alarma sonora activada.', 'info');
               }}
-              className={`p-1.5 rounded-lg border text-xs font-bold transition-all flex items-center gap-1.5 ${soundEnabled ? 'bg-sky-50 text-sky-800 border-[#AED6F1]' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
+              className={`p-1.5 rounded-lg border text-xs font-bold transition-all flex items-center gap-1.5 ${
+                soundEnabled 
+                  ? 'bg-sky-50 text-sky-800 border-[#AED6F1]' 
+                  : 'bg-slate-100 text-slate-500 border-slate-200'
+              }`}
               title="Activar/Desactivar Alerta Sonora de Stock Cero"
             >
               <span>{soundEnabled ? 'Alarma Activa' : 'Alarma Inactiva'}</span>
@@ -2257,8 +2364,7 @@ export default function App() {
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
-        </div>
-        </div>
+          </div>
         </div>
         {/* Abajo del Header: Menú principal con las pestañas (solo visible si es Admin) */}
         {currentUser.rol === 'admin' && (
@@ -2403,26 +2509,26 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-red-900 text-sm uppercase tracking-wider">
-                    // ¡ALERTA CRÍTICA: DETECTADO STOCK CERO!
+                    ¡ALERTA CRÍTICA: DETECTADO STOCK CERO!
                   </h3>
                   <p className="text-xs text-red-700 font-medium mt-1">
-                    // Se han agotado insumos críticos que detienen la preparación en la estación de comida. Atienda de inmediato.
+                    Se han agotado insumos críticos que detienen la preparación en la estación de comida. Atienda de inmediato.
                   </p>
                 </div>
               </div>
               <span className="text-[10px] bg-red-600 text-white font-extrabold px-3 py-1 rounded-full shrink-0">
-                // Prioridad Alta (Urgente)
+                Prioridad Alta (Urgente)
               </span>
             </div>
 
             <div className="divide-y divide-red-100 bg-white border border-red-200 rounded-xl overflow-hidden shadow-2xs">
               {state.alertasPanico.filter(a => !a.atendida).map(alerta => (
                 <div key={alerta.id} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 hover:bg-red-50/35 transition-colors">
-                   <div className="space-y-1">
-                     <p className="text-xs font-bold text-slate-900">
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-slate-900">
                       Insumo Agotado: <span className="font-black text-red-600">{alerta.insumo_nombre}</span>
                     </p>
-                     <p className="text-[11px] text-slate-500">
+                    <p className="text-[11px] text-slate-500">
                       Reportado por: <strong>{alerta.usuario_nombre}</strong> a las <strong>{alerta.fecha_hora}</strong>
                     </p>
                   </div>
@@ -2436,7 +2542,7 @@ export default function App() {
                       Atender / Reabastecer
                     </button>
                   ) : (
-                     <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2.5 py-1 rounded-lg">
+                    <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2.5 py-1 rounded-lg">
                       Esperando Administrador
                     </span>
                   )}
@@ -2445,8 +2551,11 @@ export default function App() {
             </div>
           </div>
         )}
-
+        
         {currentUser.rol === 'admin' ? (
+          /* ========================================================= */
+          /* VISTA ADMINISTRADOR (VISTA DEL DUEÑO / MARIANA SILVA) */
+          /* ========================================================= */
           <div className="w-full">
             <AdminDashboard
               openTabs={openTabs}
@@ -2458,6 +2567,7 @@ export default function App() {
               upsellRules={upsellRules}
               onUpdateUpsellRules={handleUpdateUpsellRules}
               usuarios={state.usuarios}
+
               tareas={state.tareas}
               productos={state.productos}
               ventas={state.ventas}
@@ -2470,8 +2580,6 @@ export default function App() {
               productosCatalogo={state.productosCatalogo || []}
               ventasRegistradas={state.ventasRegistradas || []}
               cuadresCaja={state.cuadresCaja || []}
-              tarjetasRegalo={tarjetasRegalo}
-              onRedeemTarjetaRegalo={handleRedeemTarjetaRegalo}
               alertasPanico={state.alertasPanico || []}
               clientes={state.clientes || []}
               onAddTarea={handleAddTarea}
@@ -2498,19 +2606,20 @@ export default function App() {
               onDeleteTurno={handleDeleteTurno}
               onDeleteFichaje={handleDeleteFichaje}
               onSaveProductoCatalogo={handleSaveProductoCatalogo}
-              onBulkSaveProductosCatalogo={handleBulkImportCatalog}
+              onBulkSaveProductosCatalogo={handleBulkSaveProductosCatalogo}
               onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
               onDuplicarHorarios={handleDuplicarHorarios}
               onUpdateVenta={handleUpdateVenta}
               onAnularVenta={handleAnularVenta}
               gastos={state.gastos || []}
-              onAddTarjetaRegalo={handleAddTarjetaRegalo}
-              onDeleteTarjetaRegalo={handleDeleteTarjetaRegalo}
               onSaveGasto={handleSaveGasto}
               onDeleteGasto={handleDeleteGasto}
             />
           </div>
         ) : (
+          /* ========================================================= */
+          /* VISTA EMPLEADO (ESTACIÓN DE TRABAJO PC DE NUTRIFIT)       */
+          /* ========================================================= */
           <div className="space-y-6 max-w-7xl mx-auto py-4">
             <EmployeeWorkspace
               empleado={currentUser}
@@ -2535,6 +2644,7 @@ export default function App() {
               onResolveIncidencia={handleResolveIncidencia}
               onUpdateTareaEstado={handleUpdateTareaEstado}
               onUpdateTaskOrders={handleUpdateTaskOrders}
+
               onAddVentaSugerida={handleAddVentaSugerida}
               onRegistrarFichaje={handleRegistrarFichaje}
               onAddIncidencia={handleAddIncidencia}
@@ -2546,6 +2656,7 @@ export default function App() {
               onSaveGasto={handleSaveGasto}
               onDeleteGasto={handleDeleteGasto}
             />
+
           </div>
         )}
 
