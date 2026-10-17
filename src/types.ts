@@ -295,6 +295,28 @@ export function isRappi(method?: string): boolean {
   return m === 'rappi' || m.includes('rappi') || m.includes('pedidos') || m.includes('domicilio');
 }
 
+export function isTarjetaRegalo(method?: string): boolean {
+  if (!method) return false;
+  const m = method.toLowerCase().trim();
+  return m.includes('regalo') || m.includes('gift') || m.includes('bono');
+}
+
+export interface TarjetaRegalo {
+  id: string;
+  codigo: string;
+  monto_inicial: number;
+  saldo_inicial?: number;
+  saldo_actual: number;
+  cliente_id?: string;
+  cliente_nombre?: string;
+  fecha_creacion: string;
+  fecha_canje?: string;
+  estado?: 'activa' | 'agotada' | 'cancelada' | 'canjeada' | string;
+  activa?: boolean;
+  creado_por_nombre?: string;
+  notas?: string;
+}
+
 export interface AlertaPanico {
   id: string;
   insumo_id: string;

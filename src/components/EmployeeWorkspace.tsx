@@ -723,6 +723,7 @@ export default function EmployeeWorkspace({
   const [cuadrePosContadoInput, setCuadrePosContadoInput] = useState('');
   const [cuadrePosSuccess, setCuadrePosSuccess] = useState(false);
   const [filtroHistorialVentas, setFiltroHistorialVentas] = useState<'todas' | 'mias'>('todas');
+  const [cuadreFechaFiltro, setCuadreFechaFiltro] = useState(getLocalDateString());
 
   const yaCuadrado = (cuadresCaja || []).some(
     c => c.usuario_id === empleado.id && c.fecha === getLocalDateString()
@@ -2049,17 +2050,15 @@ export default function EmployeeWorkspace({
                 <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-xs">
                   {(() => {
                     const todayStr = getLocalDateString();
-                    const utcTodayStr = new Date().toISOString().split('T')[0];
+                    const selectedDate = cuadreFechaFiltro || todayStr;
+                    const isToday = selectedDate === todayStr;
                     
                     const normalizeDate = (v: any) => {
-                      let saleFecha = v?.fecha || v?.date || (v as any)?.fecha_venta;
-                      if (saleFecha && typeof saleFecha === 'string') {
-                        if (saleFecha.includes('T')) {
-                          saleFecha = saleFecha.split('T')[0];
-                        } else if (saleFecha.includes(' ')) {
-                          saleFecha = saleFecha.split(' ')[0];
-                        }
-                        saleFecha = saleFecha.trim();
+                      let saleFecha = v?.fecha;
+                      if (saleFecha && saleFecha.includes('T')) {
+                        saleFecha = saleFecha.split('T')[0];
+                      } else if (saleFecha && saleFecha.includes(' ')) {
+                        saleFecha = saleFecha.split(' ')[0];
                       }
                       if (!saleFecha && v?.created_at) {
                         try {
@@ -2071,19 +2070,13 @@ export default function EmployeeWorkspace({
                       return saleFecha;
                     };
 
-                    const isMatchingToday = (v: any) => {
-                      const norm = normalizeDate(v);
-                      if (!norm) return false;
-                      return norm === todayStr || norm === utcTodayStr;
-                    };
-
-                    // Ventas del día registradas por todos los colaboradores
+                    // Ventas de la fecha seleccionada registradas por todos los colaboradores
                     const allTodaySales = (ventasRegistradas || []).filter(v => {
                       if (!v) return false;
-                      return isMatchingToday(v);
+                      return normalizeDate(v) === selectedDate;
                     });
 
-                    // Ventas del día del empleado actual
+                    // Ventas de la fecha seleccionada del empleado actual
                     const myTodaySales = allTodaySales.filter(v => {
                       return (
                         !v.usuario_id || 
@@ -2109,10 +2102,10 @@ export default function EmployeeWorkspace({
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-3">
                           <div>
                             <h4 className="text-xs font-black text-[#2C3E50] uppercase tracking-wider">
-                              Historial Transaccional del Día ({todayStr})
+                              Historial Transaccional {isToday ? `del Día (${todayStr})` : `(${selectedDate})`}
                             </h4>
                             <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                              Registro en tiempo real de ventas procesadas durante la jornada activa.
+                              Registro de ventas procesadas durante la jornada seleccionada.
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center gap-2.5">
@@ -2127,7 +2120,7 @@ export default function EmployeeWorkspace({
                                     : 'text-slate-500 hover:text-slate-800'
                                 }`}
                               >
-                                Todas del Día ({allTodaySales.length})
+                                {isToday ? 'Todas del Día' : 'Todas'} ({allTodaySales.length})
                               </button>
                               <button
                                 type="button"
@@ -2144,7 +2137,7 @@ export default function EmployeeWorkspace({
 
                             <div className="text-left sm:text-right bg-[#EBF5FB]/80 border border-[#AED6F1] px-3.5 py-1.5 rounded-lg shadow-2xs">
                               <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
-                                {filtroHistorialVentas === 'todas' ? 'Total Ventas del Día' : 'Mis Ventas de Hoy'}
+                                {filtroHistorialVentas === 'todas' ? (isToday ? 'Total Ventas del Día' : `Total (${selectedDate})`) : 'Mis Ventas'}
                               </span>
                               <span className="text-sm font-black text-[#4B9CD3]">
                                 {formatMoney(filtroHistorialVentas === 'todas' ? totalVentasDiaTodos : totalVentasMias)}
@@ -2156,7 +2149,7 @@ export default function EmployeeWorkspace({
                         {sortedSales.length === 0 ? (
                           <div className="py-8 text-center bg-[#F8FAFC] rounded-lg border border-dashed border-[#CBD5E1]">
                             <p className="text-xs font-medium text-slate-400 italic">
-                              No hay ventas registradas en esta vista para el día de hoy ({todayStr}).
+                              No hay ventas registradas en esta vista para la fecha ({selectedDate}).
                             </p>
                           </div>
                         ) : (
@@ -2276,21 +2269,24 @@ export default function EmployeeWorkspace({
                 </div>
               </div>
 
-              {/* FORMULARIO DE CUADRE DE CAJA DIARIO (VENTAS DEL DÍA DE TODOS LOS EMPLEADOS) */}
+              {/* FORMULARIO DE CUADRE DE CAJA DIARIO (VENTAS DEL DÍA DE TODOS LOS EMPLEADOS CON FILTRO) */}
               <div className="mt-8 pt-6 border-t border-dashed border-[#E2E8F0]">
                 {(() => {
                   const todayStr = getLocalDateString();
-                  const utcTodayStr = new Date().toISOString().split('T')[0];
+                  const selectedDate = cuadreFechaFiltro || todayStr;
+                  const isToday = selectedDate === todayStr;
+
+                  // Calcular fecha de ayer para acceso rápido
+                  const dYesterday = new Date();
+                  dYesterday.setDate(dYesterday.getDate() - 1);
+                  const yesterdayStr = `${dYesterday.getFullYear()}-${(dYesterday.getMonth() + 1).toString().padStart(2, '0')}-${dYesterday.getDate().toString().padStart(2, '0')}`;
                   
                   const normalizeDate = (v: any) => {
-                    let saleFecha = v?.fecha || v?.date || (v as any)?.fecha_venta;
-                    if (saleFecha && typeof saleFecha === 'string') {
-                      if (saleFecha.includes('T')) {
-                        saleFecha = saleFecha.split('T')[0];
-                      } else if (saleFecha.includes(' ')) {
-                        saleFecha = saleFecha.split(' ')[0];
-                      }
-                      saleFecha = saleFecha.trim();
+                    let saleFecha = v?.fecha;
+                    if (saleFecha && saleFecha.includes('T')) {
+                      saleFecha = saleFecha.split('T')[0];
+                    } else if (saleFecha && saleFecha.includes(' ')) {
+                      saleFecha = saleFecha.split(' ')[0];
                     }
                     if (!saleFecha && v?.created_at) {
                       try {
@@ -2302,25 +2298,19 @@ export default function EmployeeWorkspace({
                     return saleFecha;
                   };
 
-                  const isMatchingToday = (v: any) => {
-                    const norm = normalizeDate(v);
-                    if (!norm) return false;
-                    return norm === todayStr || norm === utcTodayStr;
-                  };
-
-                  // Filtrar únicamente las ventas del DÍA DE HOY registradas por TODOS LOS EMPLEADOS (excluyendo únicamente ventas anuladas)
+                  // Filtrar únicamente las ventas de la fecha seleccionada registradas por TODOS LOS EMPLEADOS (excluyendo ventas anuladas)
                   const ventasDelDia = (ventasRegistradas || []).filter(v => {
                     if (!v || v.estado === 'Anulada') return false;
-                    return isMatchingToday(v);
+                    return normalizeDate(v) === selectedDate;
                   });
 
-                  // Desglose por medio de pago de todos los colaboradores
+                  // Desglose por medio de pago de todos los colaboradores para la fecha seleccionada
                   const totalEfectivo = ventasDelDia.filter(v => isEfectivo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
                   const totalTarjeta = ventasDelDia.filter(v => isTarjeta(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
                   const totalTransferencia = ventasDelDia.filter(v => isTransferencia(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
                   const totalRappi = ventasDelDia.filter(v => isRappi(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
                   
-                  // Total ventas del día registrado por todos los empleados
+                  // Total ventas de la fecha registrado por todos los empleados
                   const totalVentasDia = totalEfectivo + totalTarjeta + totalTransferencia + totalRappi;
 
                   const contadoParsed = parseFloat(cuadrePosContadoInput);
@@ -2329,23 +2319,67 @@ export default function EmployeeWorkspace({
 
                   return (
                     <div className="space-y-3">
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                      {/* CABECERA CON FILTRO DE FECHA (PREDETERMINADO: HOY) */}
+                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-100 shadow-2xs">
                         <div>
                           <h5 className="font-extrabold text-[#2C3E50] text-xs flex items-center gap-1.5">
                             <DollarSign className="w-4 h-4 text-[#4B9CD3]" />
                             Cuadre de Caja Diario / Cierre de Turno
                           </h5>
                           <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                            Total consolidado de ventas del día ({todayStr}) registrado por todos los colaboradores.
+                            {isToday 
+                              ? `Total consolidado de ventas de hoy (${todayStr}) registrado por todos los colaboradores.`
+                              : `Total consolidado de ventas del día (${selectedDate}) registrado por todos los colaboradores.`}
                           </p>
                         </div>
-                        <div className="text-left sm:text-right bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-lg shadow-2xs">
-                          <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider block">
-                            Total Ventas del Día
-                          </span>
-                          <span className="text-sm font-black text-emerald-800">
-                            {formatMoney(totalVentasDia)}
-                          </span>
+
+                        {/* Barra de Filtro de Fecha: Predeterminado Hoy */}
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <div className="flex items-center gap-1 bg-[#FFFDF6] border border-[#E2E8F0] rounded-lg p-1 shadow-2xs">
+                            <span className="text-[10px] font-black uppercase text-slate-500 pl-1.5 pr-1 flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                              Filtro:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setCuadreFechaFiltro(todayStr)}
+                              className={`px-2.5 py-1 text-[10px] font-black rounded-md transition-all cursor-pointer ${
+                                isToday
+                                  ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                                  : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                              }`}
+                            >
+                              Hoy
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCuadreFechaFiltro(yesterdayStr)}
+                              className={`px-2.5 py-1 text-[10px] font-black rounded-md transition-all cursor-pointer ${
+                                selectedDate === yesterdayStr
+                                  ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                                  : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                              }`}
+                            >
+                              Ayer
+                            </button>
+                            <input
+                              type="date"
+                              value={selectedDate}
+                              max={todayStr}
+                              onChange={(e) => setCuadreFechaFiltro(e.target.value || todayStr)}
+                              className="text-xs px-2 py-0.5 border border-slate-200 rounded-md bg-white font-bold text-slate-700 focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] cursor-pointer"
+                              title="Seleccionar fecha para cuadre de caja"
+                            />
+                          </div>
+
+                          <div className="text-left sm:text-right bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-lg shadow-2xs">
+                            <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider block">
+                              {isToday ? 'Total Ventas del Día' : `Total (${selectedDate})`}
+                            </span>
+                            <span className="text-sm font-black text-emerald-800">
+                              {formatMoney(totalVentasDia)}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -2353,7 +2387,7 @@ export default function EmployeeWorkspace({
                         <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 text-xs font-bold flex items-center justify-between shadow-2xs animate-in fade-in duration-200">
                           <div className="flex items-center gap-2">
                             <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>¡Corte de caja diario enviado correctamente para revisión del administrador!</span>
+                            <span>¡Corte de caja ({selectedDate}) enviado correctamente para revisión del administrador!</span>
                           </div>
                           <button
                             type="button"
@@ -2372,7 +2406,7 @@ export default function EmployeeWorkspace({
                           const contadoVal = parseFloat(formData.get('efectivo_contado') as string) || 0;
                           
                           const newCuadre = {
-                            fecha: todayStr,
+                            fecha: selectedDate,
                             hora_cierre: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
                             empleado_id: empleado.id,
                             empleado_nombre: empleado.nombre,
@@ -2396,14 +2430,14 @@ export default function EmployeeWorkspace({
                       >
                         {/* TARJETAS RESUMEN: TOTAL DEL DÍA + MEDIOS DE PAGO */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 bg-white p-3.5 rounded-xl border border-slate-100 shadow-2xs">
-                          {/* 1. TOTAL GENERAL DE VENTAS DEL DÍA */}
+                          {/* 1. TOTAL GENERAL DE VENTAS */}
                           <div className="bg-[#EBF5FB] border-2 border-[#4B9CD3]/50 p-3 rounded-xl flex flex-col justify-between col-span-2 sm:col-span-1 lg:col-span-1 shadow-2xs">
                             <div className="flex items-center justify-between">
                               <span className="text-[9px] font-black uppercase text-[#2C3E50] tracking-wider">
-                                Total Ventas (Día)
+                                {isToday ? 'Total Ventas (Hoy)' : `Total (${selectedDate})`}
                               </span>
                               <span className="text-[8px] font-black bg-[#4B9CD3] text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider">
-                                Todos
+                                {isToday ? 'Hoy' : 'Filtrado'}
                               </span>
                             </div>
                             <div className="mt-2">
@@ -2411,7 +2445,7 @@ export default function EmployeeWorkspace({
                                 {formatMoney(totalVentasDia)}
                               </span>
                               <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">
-                                {ventasDelDia.length} {ventasDelDia.length === 1 ? 'venta hoy' : 'ventas hoy'}
+                                {ventasDelDia.length} {ventasDelDia.length === 1 ? 'venta' : 'ventas'} ({selectedDate})
                               </span>
                             </div>
                           </div>
@@ -2540,7 +2574,7 @@ export default function EmployeeWorkspace({
                           type="submit" 
                           className="w-full bg-[#2C3E50] hover:bg-slate-800 text-white font-black text-xs py-2.5 rounded-lg transition-colors cursor-pointer shadow-xs uppercase tracking-wider"
                         >
-                          Enviar Corte de Caja Diario
+                          {isToday ? 'Enviar Corte de Caja Diario' : `Enviar Corte de Caja (${selectedDate})`}
                         </button>
                       </form>
                     </div>
