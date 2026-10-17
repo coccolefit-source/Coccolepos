@@ -2046,14 +2046,19 @@ export default function EmployeeWorkspace({
                 </div>
               </div>
 
-              {/* MÓDULO DE HISTORIAL TRANSACCIONAL DEL TURNO */}
+              {/* MÓDULO DE HISTORIAL TRANSACCIONAL DEL TURNO / DÍA */}
               <div className="mt-8 pt-6 border-t border-dashed border-[#E2E8F0]">
                 <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-xs">
                   {(() => {
                     const todayStr = getLocalDateString();
+                    const dYesterday = new Date();
+                    dYesterday.setDate(dYesterday.getDate() - 1);
+                    const yesterdayStr = getLocalDateString(dYesterday);
+
                     const selectedDate = cuadreFechaFiltro || todayStr;
                     const isToday = selectedDate === todayStr;
-                    
+                    const isYesterday = selectedDate === yesterdayStr;
+
                     const normalizeDate = (v: any) => {
                       let saleFecha = v?.fecha;
                       if (saleFecha && saleFecha.includes('T')) {
@@ -2080,23 +2085,29 @@ export default function EmployeeWorkspace({
                     // Ventas de la fecha seleccionada del empleado actual
                     const myTodaySales = allTodaySales.filter(v => {
                       return (
-                        !v.usuario_id || 
-                        v.usuario_id === empleado.id || 
-                        v.vendedor_id === empleado.id || 
-                        (v as any).cajero_id === empleado.id || 
+                        !v.usuario_id ||
+                        v.usuario_id === empleado.id ||
+                        v.vendedor_id === empleado.id ||
+                        (v as any).cajero_id === empleado.id ||
                         v.vendedor_nombre === empleado.nombre
                       );
                     });
 
                     const activeList = filtroHistorialVentas === 'todas' ? allTodaySales : myTodaySales;
                     const validActiveSales = activeList.filter(v => v.estado !== 'Anulada');
-                    const totalVentasDiaTodos = allTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-                    const totalVentasMias = myTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalVentasDiaTodos = allTodaySales
+                      .filter(v => v.estado !== 'Anulada')
+                      .reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalVentasMias = myTodaySales
+                      .filter(v => v.estado !== 'Anulada')
+                      .reduce((sum, v) => sum + (Number(v.total) || 0), 0);
                     const totalMostrado = filtroHistorialVentas === 'todas' ? totalVentasDiaTodos : totalVentasMias;
 
                     // Desglose por método de pago sobre las ventas activas de la vista actual
                     const ventasEfectivo = validActiveSales.filter(v => isEfectivo(v.metodo_pago));
-                    const ventasTarjeta = validActiveSales.filter(v => isTarjeta(v.metodo_pago) && !isTarjetaRegalo(v.metodo_pago));
+                    const ventasTarjeta = validActiveSales.filter(
+                      v => isTarjeta(v.metodo_pago) && !isTarjetaRegalo(v.metodo_pago)
+                    );
                     const ventasTransferencia = validActiveSales.filter(v => isTransferencia(v.metodo_pago));
                     const ventasRappi = validActiveSales.filter(v => isRappi(v.metodo_pago));
                     const ventasRegalo = validActiveSales.filter(v => isTarjetaRegalo(v.metodo_pago));
@@ -2145,15 +2156,17 @@ export default function EmployeeWorkspace({
                         amountClass: 'text-amber-700'
                       },
                       ...(ventasRegalo.length > 0 || totalRegalo > 0
-                        ? [{
-                            key: 'regalo',
-                            label: 'Tarjeta Regalo',
-                            total: totalRegalo,
-                            count: ventasRegalo.length,
-                            dotClass: 'bg-pink-500',
-                            activeClass: 'bg-pink-50/90 border-pink-200 text-pink-900',
-                            amountClass: 'text-pink-700'
-                          }]
+                        ? [
+                            {
+                              key: 'regalo',
+                              label: 'Tarjeta Regalo',
+                              total: totalRegalo,
+                              count: ventasRegalo.length,
+                              dotClass: 'bg-pink-500',
+                              activeClass: 'bg-pink-50/90 border-pink-200 text-pink-900',
+                              amountClass: 'text-pink-700'
+                            }
+                          ]
                         : [])
                     ];
 
@@ -2177,7 +2190,43 @@ export default function EmployeeWorkspace({
                             </p>
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
+                          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
+                            {/* Filtro de Fecha con predeterminado Hoy */}
+                            <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                              <button
+                                type="button"
+                                onClick={() => setCuadreFechaFiltro(todayStr)}
+                                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors cursor-pointer ${
+                                  isToday
+                                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-black'
+                                    : 'text-slate-600 hover:bg-slate-200/70'
+                                }`}
+                              >
+                                Hoy
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCuadreFechaFiltro(yesterdayStr)}
+                                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors cursor-pointer ${
+                                  isYesterday
+                                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-black'
+                                    : 'text-slate-600 hover:bg-slate-200/70'
+                                }`}
+                              >
+                                Ayer
+                              </button>
+                              <div className="relative flex items-center">
+                                <Calendar className="w-3 h-3 text-slate-400 absolute left-2 pointer-events-none" />
+                                <input
+                                  type="date"
+                                  value={selectedDate}
+                                  max={todayStr}
+                                  onChange={e => setCuadreFechaFiltro(e.target.value || todayStr)}
+                                  className="pl-6 pr-2 py-0.5 text-[10px] font-bold text-[#2C3E50] bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#4B9CD3]"
+                                />
+                              </div>
+                            </div>
+
                             {/* Filtro: Todas vs Mías */}
                             <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
                               <button
@@ -2216,14 +2265,23 @@ export default function EmployeeWorkspace({
                               </div>
                               <div>
                                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
-                                  {filtroHistorialVentas === 'todas' ? (isToday ? 'Total Ventas del Día' : `Total Ventas (${selectedDate})`) : 'Total Mis Ventas'}
+                                  {filtroHistorialVentas === 'todas'
+                                    ? isToday
+                                      ? 'Total Ventas del Día'
+                                      : `Total Ventas (${selectedDate})`
+                                    : 'Total Mis Ventas'}
                                 </span>
                                 <span className="text-lg font-black text-[#2C3E50] leading-tight block">
                                   {formatMoney(totalMostrado)}
                                 </span>
                                 <span className="text-[10px] font-semibold text-slate-500">
-                                  {validActiveSales.length} {validActiveSales.length === 1 ? 'venta efectiva' : 'ventas efectivas'}
-                                  {metodosUsados.length > 0 ? ` · ${metodosUsados.length} ${metodosUsados.length === 1 ? 'método usado' : 'métodos usados'}` : ''}
+                                  {validActiveSales.length}{' '}
+                                  {validActiveSales.length === 1 ? 'venta efectiva' : 'ventas efectivas'}
+                                  {metodosUsados.length > 0
+                                    ? ` · ${metodosUsados.length} ${
+                                        metodosUsados.length === 1 ? 'método usado' : 'métodos usados'
+                                      }`
+                                    : ''}
                                 </span>
                               </div>
                             </div>
@@ -2236,7 +2294,7 @@ export default function EmployeeWorkspace({
                                 </span>
                               </div>
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                {metodosPagoList.map((m) => {
+                                {metodosPagoList.map(m => {
                                   const isUsed = m.count > 0 || m.total > 0;
                                   return (
                                     <div
@@ -2249,14 +2307,26 @@ export default function EmployeeWorkspace({
                                     >
                                       <div className="flex items-center justify-between gap-1">
                                         <span className="text-[9px] font-black uppercase tracking-wider truncate flex items-center gap-1">
-                                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isUsed ? m.dotClass : 'bg-slate-300'}`} />
+                                          <span
+                                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                              isUsed ? m.dotClass : 'bg-slate-300'
+                                            }`}
+                                          />
                                           {m.label}
                                         </span>
-                                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full ${isUsed ? 'bg-white/80 text-slate-700' : 'text-slate-400'}`}>
+                                        <span
+                                          className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full ${
+                                            isUsed ? 'bg-white/80 text-slate-700' : 'text-slate-400'
+                                          }`}
+                                        >
                                           {m.count}
                                         </span>
                                       </div>
-                                      <div className={`text-xs font-black mt-1 ${isUsed ? m.amountClass : 'text-slate-400'}`}>
+                                      <div
+                                        className={`text-xs font-black mt-1 ${
+                                          isUsed ? m.amountClass : 'text-slate-400'
+                                        }`}
+                                      >
                                         {formatMoney(m.total)}
                                       </div>
                                     </div>
@@ -2302,12 +2372,15 @@ export default function EmployeeWorkspace({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-[#F1F5F9]">
-                                {sortedSales.map((v) => {
+                                {sortedSales.map(v => {
                                   const isAnulada = v.estado === 'Anulada';
-                                  
+
                                   let payLabel = 'Efectivo';
                                   let payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                                  if (isTarjeta(v.metodo_pago)) {
+                                  if (isTarjetaRegalo(v.metodo_pago)) {
+                                    payLabel = 'Tarjeta Regalo';
+                                    payStyle = 'bg-pink-50 text-pink-700 border-pink-200';
+                                  } else if (isTarjeta(v.metodo_pago)) {
                                     payLabel = 'Tarjeta';
                                     payStyle = 'bg-blue-50 text-blue-700 border-blue-200';
                                   } else if (isTransferencia(v.metodo_pago)) {
@@ -2323,7 +2396,8 @@ export default function EmployeeWorkspace({
                                     payLabel = v.metodo_pago;
                                   }
 
-                                  const colaboradorNombre = v.vendedor_nombre || (v as any).cajero_nombre || 'Colaborador';
+                                  const colaboradorNombre =
+                                    v.vendedor_nombre || (v as any).cajero_nombre || 'Colaborador';
 
                                   return (
                                     <tr key={v.id} className="hover:bg-[#F8FAFC]/60 transition-colors">
@@ -2350,7 +2424,10 @@ export default function EmployeeWorkspace({
                                           <div className="space-y-0.5 max-w-xs">
                                             {v.productos_vendidos.map((prod, pIdx) => (
                                               <div key={pIdx} className="text-xs text-[#2C3E50]">
-                                                <span className="font-extrabold text-[#4B9CD3]">{prod.cantidad}x</span> {prod.nombre}
+                                                <span className="font-extrabold text-[#4B9CD3]">
+                                                  {prod.cantidad}x
+                                                </span>{' '}
+                                                {prod.nombre}
                                               </div>
                                             ))}
                                           </div>
@@ -2359,7 +2436,9 @@ export default function EmployeeWorkspace({
                                         )}
                                       </td>
                                       <td className="py-3 px-3 text-xs whitespace-nowrap">
-                                        <span className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${payStyle}`}>
+                                        <span
+                                          className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${payStyle}`}
+                                        >
                                           {payLabel}
                                         </span>
                                       </td>
