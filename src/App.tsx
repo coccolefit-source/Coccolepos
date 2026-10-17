@@ -461,6 +461,9 @@ export default function App() {
       if (supaUpsell && supaUpsell.length > 0) {
         setUpsellRules(supaUpsell);
       }
+      if (supaGiftCards) {
+        setTarjetasRegalo(supaGiftCards);
+      }
 
        // Notificación Toast discreta de éxito
 
@@ -491,8 +494,6 @@ export default function App() {
   // Effect para Sincronización Inicial con Supabase y Realtime Channel
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
-    const localCards = localStorage.getItem('coccole_tarjetas_regalo');
-    if (localCards) setTarjetasRegalo(JSON.parse(localCards));
 
     async function syncFromSupabase() {
       try {
@@ -578,6 +579,10 @@ export default function App() {
             };
           }) : prev.fichajes
         }));
+
+        if (supaGiftCards) {
+          setTarjetasRegalo(supaGiftCards);
+        }
       } catch (e) {
         console.warn('Error sincronizando con Supabase:', e);
       }
@@ -1140,8 +1145,6 @@ export default function App() {
     pushNotification(`${currentUser.nombre} ${label} la tarea: "${originalTask.titulo}"`, estado === 'Completada' ? 'success' : 'info');
 
     if (!isSupabaseConfigured()) return;
-    const localCards = localStorage.getItem('coccole_tarjetas_regalo');
-    if (localCards) setTarjetasRegalo(JSON.parse(localCards));
 
     try {
        // 2. Guardar en Supabase en segundo plano sin congelar la UI
@@ -1868,29 +1871,36 @@ export default function App() {
    // --- ACTIONS: GASTOS ---
   
   const handleAddTarjetaRegalo = async (card: TarjetaRegalo) => {
-    setTarjetasRegalo(prev => [card, ...prev.filter(c => c.id !== card.id && c.codigo !== card.codigo)]);
-    await insertGiftCardInSupabase(card);
-    pushNotification(`Tarjeta Regalo ${card.codigo} por ${formatMoney(card.monto_inicial)} creada exitosamente.`, 'info');
+    const res = await insertGiftCardInSupabase(card);
+    if (!res.success) {
+      pushNotification(res.error || 'Error al guardar la tarjeta en Supabase.', 'alert');
+      return;
+    }
+    const updated = await fetchGiftCardsFromSupabase();
+    if (updated) {
+      setTarjetasRegalo(updated);
+    }
+    pushNotification(`Tarjeta Regalo ${card.codigo} por ${formatMoney(card.monto_inicial)} creada exitosamente en Supabase.`, 'info');
   };
 
   const handleRedeemTarjetaRegalo = async (codigo: string, monto: number): Promise<{ success: boolean; saldoRestante: number; error?: string }> => {
     const res = await redeemGiftCardInSupabase(codigo, monto);
     if (res.success) {
       const updated = await fetchGiftCardsFromSupabase();
-      if (updated && updated.length > 0) {
+      if (updated) {
         setTarjetasRegalo(updated);
-      } else {
-        const local = localStorage.getItem('coccole_tarjetas_regalo');
-        if (local) setTarjetasRegalo(JSON.parse(local));
       }
     }
     return res;
   };
 
   const handleDeleteTarjetaRegalo = async (id: string) => {
-    setTarjetasRegalo(prev => prev.filter(c => c.id !== id));
     await deleteGiftCardFromSupabase(id);
-    pushNotification('Tarjeta regalo eliminada correctamente.', 'info');
+    const updated = await fetchGiftCardsFromSupabase();
+    if (updated) {
+      setTarjetasRegalo(updated);
+    }
+    pushNotification('Tarjeta regalo eliminada correctamente de Supabase.', 'info');
   };
 
   const handleSaveGasto = async (gastoData: Omit<Gasto, 'id'> & { id?: string }) => {

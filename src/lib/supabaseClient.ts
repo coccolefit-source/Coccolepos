@@ -1620,6 +1620,9 @@ export function subscribeToRealtimeUpdates(
     .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
       if (onSalesUpdate) onSalesUpdate();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'gift_cards' }, () => {
+      if (onSalesUpdate) onSalesUpdate();
+    })
     .subscribe();
 
   return () => {
@@ -4475,155 +4478,150 @@ export async function upsertCatalogProductsBatchInSupabase(products: Producto[])
 // =========================================================
 // MÓDULO DE TARJETAS REGALO Y BÓNOS REDIMIBLES
 // =========================================================
+// MÓDULO DE TARJETAS REGALO (PERSISTENCIA DIRECTA EN SUPABASE gift_cards)
+// =========================================================
 
 export async function fetchGiftCardsFromSupabase(): Promise<TarjetaRegalo[]> {
   try {
     const client = getSupabaseClient();
     if (!client) {
-      const local = localStorage.getItem('coccole_tarjetas_regalo');
-      return local ? JSON.parse(local) : [];
+      return [];
     }
 
     const { data, error } = await client
-      .from('tarjetas_regalo')
+      .from('gift_cards')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('code', { ascending: true });
 
     if (error) {
-      console.warn('[Supabase] error fetching tarjetas_regalo:', error.message);
-      const local = localStorage.getItem('coccole_tarjetas_regalo');
-      return local ? JSON.parse(local) : [];
+      console.warn('[Supabase] error fetching gift_cards:', error.message);
+      return [];
     }
 
-    if (data && data.length >= 0) {
-      localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(data));
-      return data as TarjetaRegalo[];
+    if (data && Array.isArray(data)) {
+      return data.map((c: any) => {
+        const balance = Number(c.current_balance ?? c.saldo_actual ?? 0);
+        const isActive = c.is_active !== undefined ? Boolean(c.is_active) : (c.estado === 'activa');
+        return {
+          id: c.id ? String(c.id) : ('gift-' + (c.code || c.codigo)),
+          codigo: String(c.code || c.codigo || '').trim().toUpperCase(),
+          monto_inicial: Number(c.initial_balance ?? c.monto_inicial ?? balance),
+          saldo_actual: balance,
+          estado: (!isActive || balance <= 0) ? 'canjeada' : 'activa',
+          fecha_creacion: c.fecha_creacion || (c.created_at ? getLocalDateString(c.created_at) : getLocalDateString()),
+          creado_por_nombre: c.creado_por_nombre || 'Administrador',
+          cliente_nombre: c.cliente_nombre || '',
+          notas: c.notas || ''
+        };
+      });
     }
 
-    const local = localStorage.getItem('coccole_tarjetas_regalo');
-    return local ? JSON.parse(local) : [];
+    return [];
   } catch (err) {
     console.error('Error in fetchGiftCardsFromSupabase:', err);
-    const local = localStorage.getItem('coccole_tarjetas_regalo');
-    return local ? JSON.parse(local) : [];
+    return [];
   }
 }
 
 export async function insertGiftCardInSupabase(card: TarjetaRegalo): Promise<{ success: boolean; data?: TarjetaRegalo; error?: string }> {
   try {
     const client = getSupabaseClient();
-    
-    // Guardar en LocalStorage primero
-    const local = localStorage.getItem('coccole_tarjetas_regalo');
-    const cards: TarjetaRegalo[] = local ? JSON.parse(local) : [];
-    const updatedCards = [card, ...cards.filter(c => c.id !== card.id && c.codigo !== card.codigo)];
-    localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(updatedCards));
-
     if (!client) {
-      return { success: true, data: card };
+      return { success: false, error: 'No se detectó cliente de Supabase configurado.' };
     }
 
-    const payload = {
-      id: card.id,
-      codigo: card.codigo.trim().toUpperCase(),
-      monto_inicial: card.monto_inicial,
-      saldo_actual: card.saldo_actual,
-      estado: card.estado || 'activa',
-      fecha_creacion: card.fecha_creacion || getLocalDateString(),
-      creado_por_nombre: card.creado_por_nombre || 'Administrador',
+    const cleanCode = (card.codigo || '').trim().toUpperCase();
+    if (!cleanCode) {
+      return { success: false, error: 'El código de la tarjeta no puede estar vacío.' };
+    }
+
+    const balance = Number(card.saldo_actual ?? card.monto_inicial ?? 0);
+    const isActive = card.estado !== 'canjeada' && card.estado !== 'inactiva' && balance > 0;
+
+    const payload: any = {
+      code: cleanCode,
+      current_balance: balance,
+      is_active: isActive,
+      initial_balance: Number(card.monto_inicial || balance),
       cliente_nombre: card.cliente_nombre || '',
       notas: card.notas || ''
     };
 
-    const { data, error } = await client
-      .from('tarjetas_regalo')
-      .upsert(payload, { onConflict: 'codigo' })
-      .select()
-      .single();
-
-    if (error) {
-      console.warn('[Supabase] error upserting tarjeta_regalo:', error.message);
-      return { success: true, data: card };
+    const res = await insertWithResilientColumns(client, 'gift_cards', payload);
+    if (!res.success) {
+      console.error('[Supabase] Error al insertar en gift_cards:', res.error);
+      return { success: false, error: res.error?.message || 'Error al guardar tarjeta en tabla gift_cards de Supabase.' };
     }
 
-    return { success: true, data: data as TarjetaRegalo };
+    return {
+      success: true,
+      data: {
+        ...card,
+        codigo: cleanCode,
+        saldo_actual: balance,
+        estado: isActive ? 'activa' : 'canjeada'
+      }
+    };
   } catch (err: any) {
     console.error('Error in insertGiftCardInSupabase:', err);
-    return { success: true, data: card };
+    return { success: false, error: err.message || 'Error inesperado al registrar tarjeta.' };
   }
 }
 
 export async function redeemGiftCardInSupabase(codigo: string, montoACanjejar: number): Promise<{ success: boolean; saldoRestante: number; error?: string }> {
   try {
-    const codeClean = codigo.trim().toUpperCase();
+    const codeClean = (codigo || '').trim().toUpperCase();
     const client = getSupabaseClient();
-
-    const local = localStorage.getItem('coccole_tarjetas_regalo');
-    let cards: TarjetaRegalo[] = local ? JSON.parse(local) : [];
-    let targetCard = cards.find(c => c.codigo.toUpperCase() === codeClean);
-
-    if (client) {
-      const { data } = await client.from('tarjetas_regalo').select('*').eq('codigo', codeClean).maybeSingle();
-      if (data) {
-        targetCard = data as TarjetaRegalo;
-      }
+    if (!client) {
+      return { success: false, saldoRestante: 0, error: 'No hay conexión con Supabase.' };
     }
 
-    if (!targetCard) {
-      return { success: false, saldoRestante: 0, error: 'El código de tarjeta regalo ingresado no existe.' };
+    const { data: rpcResult, error: rpcError } = await client.rpc('debit_gift_card', {
+      p_code: codeClean,
+      p_amount: montoACanjejar
+    });
+
+    if (rpcError) {
+      console.error('Error en RPC debit_gift_card:', rpcError);
+      return { success: false, saldoRestante: 0, error: rpcError.message || 'Error al debitar tarjeta.' };
     }
 
-    if (targetCard.estado !== 'activa' || targetCard.saldo_actual <= 0) {
-      return { success: false, saldoRestante: 0, error: 'La tarjeta regalo ya fue canjeada totalmente o no está activa.' };
+    const isSuccess =
+      rpcResult === true ||
+      (typeof rpcResult === 'object' && rpcResult !== null && (rpcResult.success === true || rpcResult.status === 'success'));
+
+    if (!isSuccess && typeof rpcResult === 'object' && rpcResult !== null && rpcResult.success === false) {
+      return { success: false, saldoRestante: 0, error: rpcResult.error || rpcResult.message || 'Fondos insuficientes o tarjeta inactiva.' };
     }
 
-    const nuevoSaldo = Math.max(0, targetCard.saldo_actual - montoACanjejar);
-    const nuevoEstado = nuevoSaldo <= 0 ? 'canjeada' : 'activa';
-    const fechaCanje = getLocalDateString();
+    const { data: cardRow } = await client
+      .from('gift_cards')
+      .select('code, current_balance, is_active')
+      .ilike('code', codeClean)
+      .maybeSingle();
 
-    const updatedCard: TarjetaRegalo = {
-      ...targetCard,
-      saldo_actual: nuevoSaldo,
-      estado: nuevoEstado,
-      fecha_canje: fechaCanje
-    };
-
-    cards = cards.map(c => c.codigo.toUpperCase() === codeClean ? updatedCard : c);
-    localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(cards));
-
-    if (client) {
-      await client
-        .from('tarjetas_regalo')
-        .update({
-          saldo_actual: nuevoSaldo,
-          estado: nuevoEstado,
-          fecha_canje: fechaCanje,
-          updated_at: new Date().toISOString()
-        })
-        .eq('codigo', codeClean);
-    }
-
-    return { success: true, saldoRestante: nuevoSaldo };
+    const saldoRestante = cardRow ? Number(cardRow.current_balance || 0) : 0;
+    return { success: true, saldoRestante };
   } catch (err: any) {
     console.error('Error in redeemGiftCardInSupabase:', err);
-    return { success: false, saldoRestante: 0, error: err.message || 'Error al canjear la tarjeta regalo.' };
+    return { success: false, saldoRestante: 0, error: err.message || 'Error al canjear tarjeta de regalo.' };
   }
 }
 
-export async function deleteGiftCardFromSupabase(id: string): Promise<boolean> {
+export async function deleteGiftCardFromSupabase(idOrCode: string): Promise<boolean> {
   try {
-    const local = localStorage.getItem('coccole_tarjetas_regalo');
-    if (local) {
-      const cards: TarjetaRegalo[] = JSON.parse(local);
-      const filtered = cards.filter(c => c.id !== id);
-      localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(filtered));
-    }
-
     const client = getSupabaseClient();
-    if (client) {
-      await client.from('tarjetas_regalo').delete().eq('id', id);
-    }
+    if (!client) return false;
 
+    const clean = (idOrCode || '').trim();
+    const { error } = await client
+      .from('gift_cards')
+      .delete()
+      .or(`code.ilike.${clean},id.eq.${clean}`);
+
+    if (error) {
+      await client.from('gift_cards').delete().ilike('code', clean);
+    }
     return true;
   } catch (err) {
     console.error('Error in deleteGiftCardFromSupabase:', err);
