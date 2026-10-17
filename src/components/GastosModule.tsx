@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Gasto, Usuario, Venta } from '../types';
+import { Gasto, Usuario, Venta, isEfectivo, isTarjeta, isTransferencia, isRappi, isTarjetaRegalo } from '../types';
 import { DollarSign, Plus, Trash2, Calendar, Filter, X, ShoppingCart, Wallet } from 'lucide-react';
 import { formatMoney } from '../utils/metrics';
 import { getLocalDateString } from '../lib/supabaseClient';
@@ -116,6 +116,21 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
   const ventasHoy = ventasActivas.filter(v => !v.fecha || v.fecha === hoyStr);
   const totalVentasHoy = ventasHoy.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
 
+  // Desglose por método de pago de las ventas del día
+  const ventasHoyEfectivo = ventasHoy.filter(v => isEfectivo(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+  const ventasHoyTarjeta = ventasHoy.filter(v => isTarjeta(v.metodo_pago) && !isTarjetaRegalo(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+  const ventasHoyTransf = ventasHoy.filter(v => isTransferencia(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+  const ventasHoyRappi = ventasHoy.filter(v => isRappi(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+  const ventasHoyRegalo = ventasHoy.filter(v => isTarjetaRegalo(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+
+  const metodosVentasHoy = [
+    { label: 'Efectivo', total: ventasHoyEfectivo, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    { label: 'Tarjeta', total: ventasHoyTarjeta, color: 'bg-blue-50 text-blue-700 border-blue-200' },
+    { label: 'Transferencia', total: ventasHoyTransf, color: 'bg-purple-50 text-purple-700 border-purple-200' },
+    { label: 'Rappi', total: ventasHoyRappi, color: 'bg-amber-50 text-amber-700 border-amber-200' },
+    ...(ventasHoyRegalo > 0 ? [{ label: 'T. Regalo', total: ventasHoyRegalo, color: 'bg-pink-50 text-pink-700 border-pink-200' }] : [])
+  ];
+
   const ventasFiltradas = ventasActivas.filter(v => {
     if (!v.fecha) return true;
     if (tipoFiltro === 'hoy') return v.fecha === hoyStr;
@@ -141,14 +156,29 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
       {/* Header / Resumen Financiero: Total Ventas del Día, Gastos del Día, Balance y Filtro */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1: TOTAL DE VENTAS DEL DÍA */}
-        <div id="kpi-ventas-del-dia" className="bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-xs flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-[#EBF5FB] text-[#4B9CD3] flex items-center justify-center font-bold text-lg shrink-0">
-            <ShoppingCart className="w-6 h-6" />
+        <div id="kpi-ventas-del-dia" className="bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-xs flex flex-col justify-between gap-3">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-[#EBF5FB] text-[#4B9CD3] flex items-center justify-center font-bold text-lg shrink-0">
+              <ShoppingCart className="w-6 h-6" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Total Ventas del Día</p>
+              <p className="text-xl font-black text-[#2C3E50]">{formatMoney(totalVentasHoy)}</p>
+              <p className="text-[11px] text-[#4B9CD3] font-semibold truncate">{ventasHoy.length} ventas hoy</p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Total Ventas del Día</p>
-            <p className="text-xl font-black text-[#2C3E50]">{formatMoney(totalVentasHoy)}</p>
-            <p className="text-[11px] text-[#4B9CD3] font-semibold truncate">{ventasHoy.length} ventas hoy</p>
+          <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-1.5">
+            {metodosVentasHoy.map(m => (
+              <div
+                key={m.label}
+                className={`px-2 py-1 rounded-md border text-[10px] flex items-center justify-between gap-1 ${
+                  m.total > 0 ? m.color : 'bg-slate-50 text-slate-400 border-slate-100'
+                }`}
+              >
+                <span className="font-bold truncate">{m.label}:</span>
+                <span className="font-black whitespace-nowrap">{formatMoney(m.total)}</span>
+              </div>
+            ))}
           </div>
         </div>
 

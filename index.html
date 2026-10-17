@@ -9,36 +9,38 @@
     <meta property="og:description" content="Plataforma integral para la gestión de tareas diarias, control de asistencia, registro de incidencias, impulso de ventas sugeridas, cuadre de caja y tableros operativos de Coccole Fit." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
     <script>
-      // Ignore Vite HMR WebSocket errors in iframe environment per environment guidelines
-      const _origConsoleError = console.error;
-      console.error = function (...args) {
-        if (
-          args.some(
-            arg =>
-              typeof arg === 'string' &&
-              (arg.includes('[vite] failed to connect to websocket') ||
-                arg.includes('WebSocket closed without opened') ||
-                arg.includes('@vite/client'))
-          )
-        ) {
-          return;
+      // Prevent Vite HMR WebSocket errors in iframe environment where HMR is disabled
+      (function () {
+        const OrigWebSocket = window.WebSocket;
+        if (OrigWebSocket) {
+          const PatchedWebSocket = function (url, protocols) {
+            if (protocols === 'vite-hmr' || protocols === 'vite-ping') {
+              return {
+                url: String(url || ''),
+                readyState: 1,
+                OPEN: 1,
+                CONNECTING: 0,
+                CLOSING: 2,
+                CLOSED: 3,
+                send: function () {},
+                close: function () {},
+                addEventListener: function () {},
+                removeEventListener: function () {},
+              };
+            }
+            return protocols !== undefined
+              ? new OrigWebSocket(url, protocols)
+              : new OrigWebSocket(url);
+          };
+          PatchedWebSocket.prototype = OrigWebSocket.prototype;
+          PatchedWebSocket.CONNECTING = OrigWebSocket.CONNECTING;
+          PatchedWebSocket.OPEN = OrigWebSocket.OPEN;
+          PatchedWebSocket.CLOSING = OrigWebSocket.CLOSING;
+          PatchedWebSocket.CLOSED = OrigWebSocket.CLOSED;
+          window.WebSocket = PatchedWebSocket;
         }
-        _origConsoleError.apply(console, args);
-      };
-      window.addEventListener('unhandledrejection', function (event) {
-        if (
-          event.reason &&
-          (event.reason.message?.includes('WebSocket') ||
-            event.reason.message?.includes('closed without opened') ||
-            String(event.reason?.stack || '').includes('@vite/client'))
-        ) {
-          event.preventDefault();
-        }
-      });
+      })();
     </script>
   </head>
   <body>

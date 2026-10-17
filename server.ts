@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import { execSync } from 'child_process';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -610,9 +611,116 @@ Responde de forma concisa, precisa y analítica en español.`;
     }
   });
 
+  // Endpoint directo para descargar el código fuente actualizado (.zip) desde el servidor en vivo
+  app.get('/api/download-source-zip', (req, res) => {
+    try {
+      const pyScript = [
+        "import os, io, zipfile, base64",
+        "buf = io.BytesIO()",
+        "root_dir = os.getcwd()",
+        "with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:",
+        "    for r, dirs, files in os.walk(root_dir):",
+        "        dirs[:] = [x for x in dirs if x not in ('node_modules', '.git', 'tmp', '.aistudio')]",
+        "        for f in files:",
+        "            if f.endswith('.zip') or f.startswith('.dev'): continue",
+        "            full = os.path.join(r, f)",
+        "            zf.write(full, os.path.relpath(full, root_dir))",
+        "print(base64.b64encode(buf.getvalue()).decode('ascii'))"
+      ].join("\n");
+      const base64Zip = execSync("python3 -", {
+        input: pyScript,
+        cwd: process.cwd(),
+        maxBuffer: 50 * 1024 * 1024
+      }).toString().trim();
+
+      if (req.query.direct === '1') {
+        const zipBuffer = Buffer.from(base64Zip, 'base64');
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', 'attachment; filename="coccole-fit-codigo-actualizado.zip"');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(zipBuffer);
+      }
+
+      res.json({
+        filename: `coccole-fit-codigo-actualizado.zip`,
+        base64: base64Zip
+      });
+    } catch (err: any) {
+      console.error('Error generating source zip:', err);
+      res.status(500).json({ error: err.message || 'Error generando ZIP' });
+    }
+  });
+
   // Serve static files / Vite middleware
-  const isProd = process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
+  const kService = process.env.K_SERVICE || '';
+  const isProd =
+    process.env.NODE_ENV === "production" ||
+    Boolean(kService && !kService.startsWith("ais-dev")) ||
+    Boolean(process.env.RENDER) ||
+    Boolean(process.argv[1] && process.argv[1].includes("server.cjs"));
   if (!isProd) {
+    // Serve a WebSocket-free /@vite/client module so HMR-disabled mode never throws WebSocket connection errors
+    app.get('/@vite/client', (_req, res) => {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.send(`
+const sheetsMap = new Map();
+if ("document" in globalThis) {
+  document.querySelectorAll("style[data-vite-dev-id]").forEach((el) => {
+    sheetsMap.set(el.getAttribute("data-vite-dev-id"), el);
+  });
+}
+let lastInsertedStyle;
+export function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement("style");
+    style.setAttribute("type", "text/css");
+    style.setAttribute("data-vite-dev-id", id);
+    style.textContent = content;
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => { lastInsertedStyle = undefined; }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement("afterend", style);
+    }
+    lastInsertedStyle = style;
+  } else {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    document.head.removeChild(style);
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+export function injectQuery(url, queryToInject) {
+  if (url[0] !== "." && url[0] !== "/") return url;
+  const pathname = url.replace(/[?#].*$/, "");
+  const { search, hash } = new URL(url, "http://vite.dev");
+  return \`\${pathname}?\${queryToInject}\${search ? "&" + search.slice(1) : ""}\${hash || ""}\`;
+}
+export class ErrorOverlay {}
+`);
+    });
+
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },

@@ -280,7 +280,29 @@ export function isEfectivo(method?: string): boolean {
 export function isTarjeta(method?: string): boolean {
   if (!method) return false;
   const m = method.toLowerCase().trim();
+  if (m.includes('regalo') || m.includes('bono') || m.includes('gift')) return false;
   return m === 'tarjeta' || m.includes('tarjeta') || m.includes('datafono') || m.includes('datáfono') || m.includes('debito') || m.includes('débito') || m.includes('credito') || m.includes('crédito') || m.includes('pos');
+}
+
+export function isTarjetaRegalo(method?: string): boolean {
+  if (!method) return false;
+  const m = method.toLowerCase().trim();
+  return m === 'tarjeta_regalo' || m === 'tarjeta regalo' || m.includes('regalo') || m.includes('bono') || m.includes('gift');
+}
+
+export interface TarjetaRegalo {
+  id: string;
+  codigo: string;
+  monto_inicial: number;
+  saldo_actual: number;
+  estado: 'activa' | 'canjeada' | 'inactiva' | string;
+  fecha_creacion: string;
+  fecha_canje?: string;
+  creado_por_nombre?: string;
+  cliente_nombre?: string;
+  notas?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export function isTransferencia(method?: string): boolean {
@@ -293,28 +315,6 @@ export function isRappi(method?: string): boolean {
   if (!method) return false;
   const m = method.toLowerCase().trim();
   return m === 'rappi' || m.includes('rappi') || m.includes('pedidos') || m.includes('domicilio');
-}
-
-export function isTarjetaRegalo(method?: string): boolean {
-  if (!method) return false;
-  const m = method.toLowerCase().trim();
-  return m.includes('regalo') || m.includes('gift') || m.includes('bono');
-}
-
-export interface TarjetaRegalo {
-  id: string;
-  codigo: string;
-  monto_inicial: number;
-  saldo_inicial?: number;
-  saldo_actual: number;
-  cliente_id?: string;
-  cliente_nombre?: string;
-  fecha_creacion: string;
-  fecha_canje?: string;
-  estado?: 'activa' | 'agotada' | 'cancelada' | 'canjeada' | string;
-  activa?: boolean;
-  creado_por_nombre?: string;
-  notas?: string;
 }
 
 export interface AlertaPanico {

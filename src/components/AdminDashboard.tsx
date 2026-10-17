@@ -2661,13 +2661,13 @@ export default function AdminDashboard({
         const filteredClientes = allClientes.filter(c => {
           if (clienteSearch.trim()) {
             const q = clienteSearch.toLowerCase();
-            const matchName = c.nombre.toLowerCase().includes(q);
-            const matchPhone = c.telefono.includes(q);
+            const matchName = (c.nombre || '').toLowerCase().includes(q);
+            const matchPhone = (c.telefono || '').includes(q);
             if (!matchName && !matchPhone) return false;
           }
 
           if (clienteSegmentoFilter === 'frecuentes') {
-            return c.total_compras_count > 3;
+            return (c.total_compras_count || 0) > 3;
           }
           if (clienteSegmentoFilter === 'inactivos') {
             if (!c.ultima_fecha_compra) return true;
@@ -2677,14 +2677,14 @@ export default function AdminDashboard({
             return diffDays > 30;
           }
           if (clienteSegmentoFilter === 'nuevos') {
-            return c.fecha_registro.startsWith(monthStartStr);
+            return (c.fecha_registro || '').startsWith(monthStartStr);
           }
           return true;
         });
 
         const totalClientesCount = allClientes.length;
-        const recurrentesCount = allClientes.filter(c => c.total_compras_count > 3).length;
-        const totalMontoComprado = allClientes.reduce((sum, c) => sum + c.total_compras_monto, 0);
+        const recurrentesCount = allClientes.filter(c => (c.total_compras_count || 0) > 3).length;
+        const totalMontoComprado = allClientes.reduce((sum, c) => sum + (Number(c.total_compras_monto) || 0), 0);
         const ticketPromedioCliente = totalClientesCount > 0 ? totalMontoComprado / totalClientesCount : 0;
 
         const handleExportClientesCSV = () => {
@@ -2692,10 +2692,10 @@ export default function AdminDashboard({
           const rows = filteredClientes.map(c => [
             c.nombre,
             c.telefono,
-            c.fecha_registro,
-            c.total_compras_monto.toFixed(2),
-            c.total_compras_count,
-            c.ultima_fecha_compra
+            c.fecha_registro || '',
+            (Number(c.total_compras_monto) || 0).toFixed(2),
+            c.total_compras_count || 1,
+            c.ultima_fecha_compra || ''
           ]);
           downloadCSV('fidelizacion_clientes_coccolefit.csv', headers, rows);
         };
@@ -2720,6 +2720,7 @@ export default function AdminDashboard({
              salesPaymentMethod === 'tarjeta' ? isTarjeta(v.metodo_pago) :
              salesPaymentMethod === 'transferencia' ? isTransferencia(v.metodo_pago) :
              salesPaymentMethod === 'rappi' ? isRappi(v.metodo_pago) :
+             salesPaymentMethod === 'tarjeta_regalo' ? isTarjetaRegalo(v.metodo_pago) :
              v.metodo_pago === salesPaymentMethod);
             
           return matchesStartDate && matchesEndDate && matchesSeller && matchesSearch && matchesPaymentMethod;

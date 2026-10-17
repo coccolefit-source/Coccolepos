@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Usuario, Venta, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio, Producto, Gasto, CuadreCaja } from '../types';
+import { Usuario, Venta, TarjetaRegalo, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio, Producto, Gasto } from '../types';
 
 // Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
@@ -473,57 +473,6 @@ DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'gastos') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.gastos;
-  END IF;
-END $$;
-
--- 12. Tabla: cash_closures (Cuadres de Caja y Cierres de Turno Diario)
-CREATE TABLE IF NOT EXISTS public.cash_closures (
-  id TEXT PRIMARY KEY,
-  fecha TEXT DEFAULT CURRENT_DATE::text,
-  hora_cierre TEXT,
-  empleado_id TEXT,
-  empleado_nombre TEXT,
-  total_ventas_dia NUMERIC DEFAULT 0,
-  efectivo_esperado NUMERIC DEFAULT 0,
-  efectivo_contado NUMERIC DEFAULT 0,
-  tarjeta_esperado NUMERIC DEFAULT 0,
-  transferencia_esperado NUMERIC DEFAULT 0,
-  rappi_esperado NUMERIC DEFAULT 0,
-  diferencia_total NUMERIC DEFAULT 0,
-  observaciones TEXT,
-  estado TEXT DEFAULT 'pendiente_revision',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS total_ventas_dia NUMERIC DEFAULT 0;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS efectivo_esperado NUMERIC DEFAULT 0;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS efectivo_contado NUMERIC DEFAULT 0;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS tarjeta_esperado NUMERIC DEFAULT 0;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS transferencia_esperado NUMERIC DEFAULT 0;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS rappi_esperado NUMERIC DEFAULT 0;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS diferencia_total NUMERIC DEFAULT 0;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS observaciones TEXT;
-ALTER TABLE public.cash_closures ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'pendiente_revision';
-
-ALTER TABLE public.cash_closures ENABLE ROW LEVEL SECURITY;
-
-DO $$ 
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies 
-    WHERE tablename = 'cash_closures' AND policyname = 'Permitir acceso publico total a cash_closures'
-  ) THEN
-    CREATE POLICY "Permitir acceso publico total a cash_closures" 
-    ON public.cash_closures FOR ALL TO public USING (true) WITH CHECK (true);
-  END IF;
-END $$;
-
-ALTER TABLE public.cash_closures REPLICA IDENTITY FULL;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'cash_closures') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.cash_closures;
   END IF;
 END $$;
 `;
@@ -1236,7 +1185,7 @@ export async function updateSaleInSupabase(venta: Venta): Promise<boolean> {
 export async function fetchCustomersFromSupabase(): Promise<Cliente[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
-  const { data, error } = await client.from('customers').select('*');
+  const { data, error } = await client.from('customers').select('*').order('created_at', { ascending: false });
   if (error) {
     console.warn('Supabase fetchCustomers error:', error.message);
     return null;
@@ -1246,32 +1195,58 @@ export async function fetchCustomersFromSupabase(): Promise<Cliente[] | null> {
     id: c.id,
     telefono: c.phone || c.telefono || '',
     nombre: c.full_name || c.nombre || 'Cliente',
-    total_compras_count: c.total_visits ?? c.visitas_acumuladas ?? c.total_compras_count ?? 1,
-    visitas_acumuladas: c.total_visits ?? c.visitas_acumuladas ?? 1,
+    total_compras_count: Number(c.total_visits ?? c.visitas_acumuladas ?? c.total_compras_count ?? 1),
+    visitas_acumuladas: Number(c.total_visits ?? c.visitas_acumuladas ?? 1),
     total_compras_monto: Number(c.total_amount ?? c.total_gastado ?? c.total_compras_monto ?? 0),
-    ultima_fecha_compra: c.fecha_ultima_compra ? c.fecha_ultima_compra.split('T')[0] : new Date().toISOString().split('T')[0]
+    ultima_fecha_compra: c.fecha_ultima_compra ? c.fecha_ultima_compra.split('T')[0] : getLocalDateString(),
+    fecha_registro: c.fecha_registro ? c.fecha_registro.split('T')[0] : (c.created_at ? c.created_at.split('T')[0] : getLocalDateString())
   })) as Cliente[];
 }
 
 export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
-  const { error } = await client.from('customers').upsert({
-    id: cliente.id,
-    phone: cliente.telefono,
-    telefono: cliente.telefono,
-    full_name: cliente.nombre,
-    nombre: cliente.nombre,
-    total_visits: cliente.visitas_acumuladas || cliente.total_compras_count || 1,
-    visitas_acumuladas: cliente.visitas_acumuladas || cliente.total_compras_count || 1,
-    total_gastado: cliente.total_compras_monto || 0,
-    fecha_ultima_compra: cliente.fecha_ultima_compra || new Date().toISOString()
-  });
-  if (error) {
-    console.error('Supabase upsertCustomer error:', error.message);
+  try {
+    const cleanPhone = (cliente.telefono || '').trim();
+    let finalId = cliente.id;
+
+    // Si el cliente ya existe en Supabase por teléfono, usar su ID existente para evitar violar restricciones UNIQUE
+    if (cleanPhone) {
+      try {
+        const { data: existing } = await client
+          .from('customers')
+          .select('id')
+          .or(`phone.eq.${cleanPhone},telefono.eq.${cleanPhone}`)
+          .limit(1)
+          .maybeSingle();
+        if (existing && existing.id) {
+          finalId = existing.id;
+        }
+      } catch (e) {}
+    }
+
+    const payload = {
+      id: finalId,
+      phone: cleanPhone,
+      telefono: cleanPhone,
+      full_name: cliente.nombre,
+      nombre: cliente.nombre,
+      total_visits: Number(cliente.visitas_acumuladas || cliente.total_compras_count || 1),
+      visitas_acumuladas: Number(cliente.visitas_acumuladas || cliente.total_compras_count || 1),
+      total_gastado: Number(cliente.total_compras_monto || 0),
+      fecha_ultima_compra: cliente.fecha_ultima_compra || new Date().toISOString()
+    };
+
+    const { error } = await client.from('customers').upsert(payload);
+    if (error) {
+      console.error('Supabase upsertCustomer error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.error('Exception in upsertCustomerInSupabase:', err);
     return false;
   }
-  return true;
 }
 
 // ------------------------------------------------------------------
@@ -1486,81 +1461,6 @@ export async function deleteTimeEntryFromSupabase(fichajeId: string): Promise<bo
   }
 }
 
-export async function saveCashClosureToSupabase(cuadre: CuadreCaja | any): Promise<boolean> {
-  const client = getSupabaseClient();
-  if (!client) return false;
-  try {
-    const todayStr = (cuadre.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(cuadre.fecha).trim()))
-      ? String(cuadre.fecha).trim()
-      : getLocalDateString();
-
-    const payload: any = {
-      id: cuadre.id || `cuadre-${Date.now()}`,
-      fecha: todayStr,
-      hora_cierre: cuadre.hora_cierre || cuadre.hora || new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-      empleado_id: cuadre.empleado_id || cuadre.usuario_id || 'usr-1',
-      empleado_nombre: cuadre.empleado_nombre || cuadre.usuario_nombre || 'Colaborador',
-      total_ventas_dia: Number(cuadre.total_ventas_dia ?? 0),
-      efectivo_esperado: Number(cuadre.efectivo_esperado ?? 0),
-      efectivo_contado: Number(cuadre.efectivo_contado ?? 0),
-      tarjeta_esperado: Number(cuadre.tarjeta_esperado ?? 0),
-      transferencia_esperado: Number(cuadre.transferencia_esperado ?? 0),
-      rappi_esperado: Number(cuadre.rappi_esperado ?? 0),
-      diferencia_total: Number(cuadre.diferencia_total ?? 0),
-      observaciones: cuadre.observaciones || '',
-      estado: cuadre.estado || 'pendiente_revision'
-    };
-
-    const { error } = await client.from('cash_closures').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Supabase cash_closures upsert aviso:', error.message);
-      const { error: insertErr } = await client.from('cash_closures').insert(payload);
-      if (insertErr) {
-        console.warn('Supabase cash_closures fallback insert error:', insertErr.message);
-      }
-    }
-    return true;
-  } catch (err) {
-    console.error('Error guardando cash_closure en Supabase:', err);
-    return false;
-  }
-}
-
-export async function fetchCashClosuresFromSupabase(): Promise<CuadreCaja[] | null> {
-  const client = getSupabaseClient();
-  if (!client) return null;
-  try {
-    const { data, error } = await client.from('cash_closures').select('*').order('created_at', { ascending: false });
-    if (error) {
-      console.warn('Supabase fetchCashClosures error:', error.message);
-      return null;
-    }
-    if (!data) return [];
-    return data.map((c: any) => ({
-      id: c.id,
-      fecha: c.fecha || getLocalDateString(c.created_at),
-      hora: c.hora_cierre || c.hora || '12:00',
-      hora_cierre: c.hora_cierre || c.hora || '12:00',
-      empleado_id: c.empleado_id || c.usuario_id,
-      empleado_nombre: c.empleado_nombre || c.usuario_nombre || 'Colaborador',
-      usuario_id: c.empleado_id || c.usuario_id,
-      usuario_nombre: c.empleado_nombre || c.usuario_nombre || 'Colaborador',
-      total_ventas_dia: Number(c.total_ventas_dia ?? 0),
-      efectivo_esperado: Number(c.efectivo_esperado ?? 0),
-      efectivo_contado: Number(c.efectivo_contado ?? 0),
-      tarjeta_esperado: Number(c.tarjeta_esperado ?? 0),
-      transferencia_esperado: Number(c.transferencia_esperado ?? 0),
-      rappi_esperado: Number(c.rappi_esperado ?? 0),
-      diferencia_total: Number(c.diferencia_total ?? 0),
-      observaciones: c.observaciones || '',
-      estado: c.estado || 'pendiente_revision'
-    }));
-  } catch (err) {
-    console.warn('Error fetching cash_closures from Supabase:', err);
-    return null;
-  }
-}
-
 // ------------------------------------------------------------------
 // REALTIME SUBSCRIPTION HELPER
 // ------------------------------------------------------------------
@@ -1572,14 +1472,21 @@ export function subscribeToRealtimeUpdates(
   onCatalogUpdate?: () => void,
   onTimeEntriesUpdate?: () => void,
   onSchedulesUpdate?: () => void,
-  onGastosUpdate?: () => void,
-  onCashClosuresUpdate?: () => void
+  onGastosUpdate?: () => void
 ) {
   const client = getSupabaseClient();
   if (!client) return () => {};
 
+  try {
+    const existing = client.getChannels().filter(ch => ch.topic && ch.topic.includes('coccole_realtime'));
+    existing.forEach(ch => {
+      try { client.removeChannel(ch); } catch (e) {}
+    });
+  } catch (err) {}
+
+  const channelName = `coccole_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const channel = client
-    .channel('coccole_realtime')
+    .channel(channelName)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
       if (onSalesUpdate) onSalesUpdate();
     })
@@ -1616,13 +1523,15 @@ export function subscribeToRealtimeUpdates(
     .on('postgres_changes', { event: '*', schema: 'public', table: 'gastos' }, () => {
       if (onGastosUpdate) onGastosUpdate();
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_closures' }, () => {
-      if (onCashClosuresUpdate) onCashClosuresUpdate();
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
+      if (onSalesUpdate) onSalesUpdate();
     })
     .subscribe();
 
   return () => {
-    client.removeChannel(channel);
+    try {
+      client.removeChannel(channel);
+    } catch (e) {}
   };
 }
 
@@ -1668,7 +1577,7 @@ export async function fetchActiveAnnouncementsFromSupabase(): Promise<Anuncio[] 
       titulo: a.titulo || a.title || 'Comunicado',
       contenido: a.contenido || a.content || '',
       fecha_creacion: a.fecha_creacion || a.created_at || new Date().toISOString(),
-      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || new Date().toISOString().split('T')[0]),
+      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || getLocalDateString()),
       activo: a.activo !== false,
       creador_nombre: a.creador_nombre || a.author || 'Mariana Silva (Admin)',
       lecturas_confirmadas: a.lecturas_confirmadas || []
@@ -1698,7 +1607,7 @@ export async function fetchAllAnnouncementsFromSupabase(): Promise<Anuncio[] | n
       titulo: a.titulo || a.title || 'Comunicado',
       contenido: a.contenido || a.content || '',
       fecha_creacion: a.fecha_creacion || a.created_at || new Date().toISOString(),
-      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || new Date().toISOString().split('T')[0]),
+      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || getLocalDateString()),
       activo: a.activo !== false,
       creador_nombre: a.creador_nombre || a.author || 'Mariana Silva (Admin)',
       lecturas_confirmadas: a.lecturas_confirmadas || []
@@ -1831,8 +1740,16 @@ export function subscribeToAnnouncementsRealtime(onAnnouncementChange: () => voi
   const client = getSupabaseClient();
   if (!client) return () => {};
 
+  try {
+    const existing = client.getChannels().filter(ch => ch.topic && ch.topic.includes('announcements_realtime_stream'));
+    existing.forEach(ch => {
+      try { client.removeChannel(ch); } catch (e) {}
+    });
+  } catch (err) {}
+
+  const channelName = `announcements_realtime_stream_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const channel = client
-    .channel('announcements_realtime_stream')
+    .channel(channelName)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
       try {
         onAnnouncementChange();
@@ -1843,7 +1760,9 @@ export function subscribeToAnnouncementsRealtime(onAnnouncementChange: () => voi
     .subscribe();
 
   return () => {
-    client.removeChannel(channel);
+    try {
+      client.removeChannel(channel);
+    } catch (e) {}
   };
 }
 
@@ -2246,6 +2165,30 @@ export function getLocalDateString(dateInput?: Date | string | null): string {
     return `${yyyy}-${mm}-${dd}`;
   }
 }
+
+
+export function getBogotaDateDaysAgo(daysAgo: number): string {
+  try {
+    const nowStr = getLocalDateString();
+    const [year, month, day] = nowStr.split('-').map(Number);
+    const utcDate = new Date(Date.UTC(year, month - 1, day - daysAgo, 12, 0, 0));
+    const y = utcDate.getUTCFullYear();
+    const m = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(utcDate.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  } catch {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return getLocalDateString(d);
+  }
+}
+
+export function getBogotaFirstDayOfMonth(): string {
+  const nowStr = getLocalDateString();
+  const parts = nowStr.split('-');
+  return `${parts[0]}-${parts[1]}-01`;
+}
+
 
 export function calcularHorasTurno(horaEntrada?: string | null, horaSalida?: string | null): { 
   horas: number; 
@@ -2703,8 +2646,8 @@ export async function insertDailyTaskInSupabase(tarea: Tarea, staffName?: string
       hora_fin: tarea.hora_fin,
       requires_photo: tarea.requiere_foto,
       requiere_foto: tarea.requiere_foto,
-      date: tarea.fecha || new Date().toISOString().split('T')[0],
-      fecha: tarea.fecha || new Date().toISOString().split('T')[0],
+      date: tarea.fecha || getLocalDateString(),
+      fecha: tarea.fecha || getLocalDateString(),
       orden: tarea.orden,
       order_index: tarea.orden,
       created_at: new Date().toISOString()
@@ -3375,7 +3318,7 @@ export const mostrarProductividadAdmin = async () => {
 
 // Ejemplo para el Empleado (ve únicamente su rendimiento del día o fecha seleccionada)
 export const mostrarProgresoEmpleadoActual = async (nombreEmpleado: string, fecha?: string) => {
-  const fechaBuscar = fecha || new Date().toISOString().split('T')[0];
+  const fechaBuscar = fecha || getLocalDateString();
   const registros = await cargarProgresoSupabase(nombreEmpleado);
   const hoyReg = registros.find((r: any) => r.fecha === fechaBuscar);
 
@@ -3390,7 +3333,7 @@ export const actualizarVistaProductividadEmpleado = async (nombreEmpleado: strin
   if (!client) return null;
 
   try {
-    const fechaBuscar = fecha || new Date().toISOString().split('T')[0]; // Fecha 'YYYY-MM-DD'
+    const fechaBuscar = fecha || getLocalDateString(); // Fecha 'YYYY-MM-DD'
     
     // Consultamos directamente la tabla task_progress de Supabase
     const { data, error } = await client
@@ -3414,7 +3357,7 @@ export const actualizarVistaProductividadEmpleado = async (nombreEmpleado: strin
     const labelPorcentaje = document.getElementById('label-porcentaje-prod');
     const labelDetalle = document.getElementById('label-detalle-prod');
 
-    const hoyStr = new Date().toISOString().split('T')[0];
+    const hoyStr = getLocalDateString();
     if (barra) barra.style.width = `${porcentaje}%`;
     if (labelPorcentaje) labelPorcentaje.textContent = `${porcentaje}%`;
     if (labelDetalle) labelDetalle.textContent = `${completadas} de ${totales} tareas completadas ${fechaBuscar === hoyStr ? 'hoy' : `el ${fechaBuscar}`}`;
@@ -3465,7 +3408,7 @@ export const renderizarSeccionProductividadEmpleado = async (nombreEmpleado: str
     if (!client) return;
 
     // 2. Consultar los datos reales del día o fecha seleccionada en Supabase
-    const fechaBuscar = fecha || new Date().toISOString().split('T')[0]; // Formato 'YYYY-MM-DD'
+    const fechaBuscar = fecha || getLocalDateString(); // Formato 'YYYY-MM-DD'
     
     const { data, error } = await client
       .from('task_progress')
@@ -3487,7 +3430,7 @@ export const renderizarSeccionProductividadEmpleado = async (nombreEmpleado: str
     const labelPorcentaje = document.getElementById('label-porcentaje-prod');
     const labelDetalle = document.getElementById('label-detalle-prod');
 
-    const hoyStr = new Date().toISOString().split('T')[0];
+    const hoyStr = getLocalDateString();
     if (barra) barra.style.width = `${porcentaje}%`;
     if (labelPorcentaje) labelPorcentaje.textContent = `${porcentaje}%`;
     if (labelDetalle) labelDetalle.textContent = `${completadas} de ${totales} tareas completadas ${fechaBuscar === hoyStr ? 'hoy' : `el ${fechaBuscar}`}`;
@@ -3763,7 +3706,7 @@ export async function fetchWorkerCompleteMetricsFromSupabase(
   localSales?: any[]
 ) {
   const client = getSupabaseClient();
-  const fechaHoy = new Date().toISOString().split('T')[0];
+  const fechaHoy = getLocalDateString();
   const fechaInicio = startDate || endDate || fechaHoy;
   const fechaFin = endDate || startDate || fechaHoy;
 
@@ -4430,6 +4373,166 @@ export async function upsertCatalogProductsBatchInSupabase(products: Producto[])
     return successCount > 0;
   } catch (err) {
     console.error('Exception in upsertCatalogProductsBatchInSupabase:', err);
+    return false;
+  }
+}
+
+
+// =========================================================
+// MÓDULO DE TARJETAS REGALO Y BÓNOS REDIMIBLES
+// =========================================================
+
+export async function fetchGiftCardsFromSupabase(): Promise<TarjetaRegalo[]> {
+  try {
+    const client = getSupabaseClient();
+    if (!client) {
+      const local = localStorage.getItem('coccole_tarjetas_regalo');
+      return local ? JSON.parse(local) : [];
+    }
+
+    const { data, error } = await client
+      .from('tarjetas_regalo')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('[Supabase] error fetching tarjetas_regalo:', error.message);
+      const local = localStorage.getItem('coccole_tarjetas_regalo');
+      return local ? JSON.parse(local) : [];
+    }
+
+    if (data && data.length >= 0) {
+      localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(data));
+      return data as TarjetaRegalo[];
+    }
+
+    const local = localStorage.getItem('coccole_tarjetas_regalo');
+    return local ? JSON.parse(local) : [];
+  } catch (err) {
+    console.error('Error in fetchGiftCardsFromSupabase:', err);
+    const local = localStorage.getItem('coccole_tarjetas_regalo');
+    return local ? JSON.parse(local) : [];
+  }
+}
+
+export async function insertGiftCardInSupabase(card: TarjetaRegalo): Promise<{ success: boolean; data?: TarjetaRegalo; error?: string }> {
+  try {
+    const client = getSupabaseClient();
+    
+    // Guardar en LocalStorage primero
+    const local = localStorage.getItem('coccole_tarjetas_regalo');
+    const cards: TarjetaRegalo[] = local ? JSON.parse(local) : [];
+    const updatedCards = [card, ...cards.filter(c => c.id !== card.id && c.codigo !== card.codigo)];
+    localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(updatedCards));
+
+    if (!client) {
+      return { success: true, data: card };
+    }
+
+    const payload = {
+      id: card.id,
+      codigo: card.codigo.trim().toUpperCase(),
+      monto_inicial: card.monto_inicial,
+      saldo_actual: card.saldo_actual,
+      estado: card.estado || 'activa',
+      fecha_creacion: card.fecha_creacion || getLocalDateString(),
+      creado_por_nombre: card.creado_por_nombre || 'Administrador',
+      cliente_nombre: card.cliente_nombre || '',
+      notas: card.notas || ''
+    };
+
+    const { data, error } = await client
+      .from('tarjetas_regalo')
+      .upsert(payload, { onConflict: 'codigo' })
+      .select()
+      .single();
+
+    if (error) {
+      console.warn('[Supabase] error upserting tarjeta_regalo:', error.message);
+      return { success: true, data: card };
+    }
+
+    return { success: true, data: data as TarjetaRegalo };
+  } catch (err: any) {
+    console.error('Error in insertGiftCardInSupabase:', err);
+    return { success: true, data: card };
+  }
+}
+
+export async function redeemGiftCardInSupabase(codigo: string, montoACanjejar: number): Promise<{ success: boolean; saldoRestante: number; error?: string }> {
+  try {
+    const codeClean = codigo.trim().toUpperCase();
+    const client = getSupabaseClient();
+
+    const local = localStorage.getItem('coccole_tarjetas_regalo');
+    let cards: TarjetaRegalo[] = local ? JSON.parse(local) : [];
+    let targetCard = cards.find(c => c.codigo.toUpperCase() === codeClean);
+
+    if (client) {
+      const { data } = await client.from('tarjetas_regalo').select('*').eq('codigo', codeClean).maybeSingle();
+      if (data) {
+        targetCard = data as TarjetaRegalo;
+      }
+    }
+
+    if (!targetCard) {
+      return { success: false, saldoRestante: 0, error: 'El código de tarjeta regalo ingresado no existe.' };
+    }
+
+    if (targetCard.estado !== 'activa' || targetCard.saldo_actual <= 0) {
+      return { success: false, saldoRestante: 0, error: 'La tarjeta regalo ya fue canjeada totalmente o no está activa.' };
+    }
+
+    const nuevoSaldo = Math.max(0, targetCard.saldo_actual - montoACanjejar);
+    const nuevoEstado = nuevoSaldo <= 0 ? 'canjeada' : 'activa';
+    const fechaCanje = getLocalDateString();
+
+    const updatedCard: TarjetaRegalo = {
+      ...targetCard,
+      saldo_actual: nuevoSaldo,
+      estado: nuevoEstado,
+      fecha_canje: fechaCanje
+    };
+
+    cards = cards.map(c => c.codigo.toUpperCase() === codeClean ? updatedCard : c);
+    localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(cards));
+
+    if (client) {
+      await client
+        .from('tarjetas_regalo')
+        .update({
+          saldo_actual: nuevoSaldo,
+          estado: nuevoEstado,
+          fecha_canje: fechaCanje,
+          updated_at: new Date().toISOString()
+        })
+        .eq('codigo', codeClean);
+    }
+
+    return { success: true, saldoRestante: nuevoSaldo };
+  } catch (err: any) {
+    console.error('Error in redeemGiftCardInSupabase:', err);
+    return { success: false, saldoRestante: 0, error: err.message || 'Error al canjear la tarjeta regalo.' };
+  }
+}
+
+export async function deleteGiftCardFromSupabase(id: string): Promise<boolean> {
+  try {
+    const local = localStorage.getItem('coccole_tarjetas_regalo');
+    if (local) {
+      const cards: TarjetaRegalo[] = JSON.parse(local);
+      const filtered = cards.filter(c => c.id !== id);
+      localStorage.setItem('coccole_tarjetas_regalo', JSON.stringify(filtered));
+    }
+
+    const client = getSupabaseClient();
+    if (client) {
+      await client.from('tarjetas_regalo').delete().eq('id', id);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Error in deleteGiftCardFromSupabase:', err);
     return false;
   }
 }
