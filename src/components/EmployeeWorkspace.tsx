@@ -565,7 +565,12 @@ export default function EmployeeWorkspace({
 
   // Estados Módulo de Fidelización de Clientes POS
   const [clienteTelefonoInput, setClienteTelefonoInput] = useState('');
-  const [selectedClient, setSelectedClient] = useState<{ nombre: string; telefono: string } | null>(null);
+  const [selectedClient, setSelectedClient] = useState<{
+    id?: string;
+    nombre: string;
+    telefono: string;
+    stickers_count?: number;
+  } | null>(null);
   const [phoneError, setPhoneError] = useState(false);
   const [newClientModal, setNewClientModal] = useState<{ open: boolean; phone: string; name: string }>({
     open: false,
@@ -573,8 +578,28 @@ export default function EmployeeWorkspace({
     name: ''
   });
   const [showQrModal, setShowQrModal] = useState(false);
+  const [posSaleSuccessModal, setPosSaleSuccessModal] = useState<{
+    open: boolean;
+    clienteNombre: string;
+    clienteTelefono: string;
+    prevStickers: number;
+    newStickers: number;
+    newStickersCycle: number;
+    totalVenta: number;
+    metodoPago: string;
+  } | null>(null);
 
-  const handleSearchClient = () => {
+  const resolveClientStickers = (c: any): number => {
+    return Math.max(
+      Number(c?.stickers_count ?? 0),
+      Number(c?.visitas_acumuladas ?? 0),
+      Number(c?.total_visits ?? 0),
+      Number(c?.total_compras_count ?? 0),
+      1
+    );
+  };
+
+  const handleSearchClient = async () => {
     const cleanPhone = clienteTelefonoInput.trim();
     if (!cleanPhone) {
       setPhoneError(true);
@@ -586,19 +611,50 @@ export default function EmployeeWorkspace({
     const cleanDigits = cleanPhone.replace(/\D/g, '');
     const existingClient = (clientes || []).find(c => {
       const cDigits = c.telefono.replace(/\D/g, '');
-      return (cDigits && cDigits === cleanDigits) || c.telefono === cleanPhone;
+      return (cDigits && cDigits === cleanDigits) || c.telefono === cleanPhone || c.id === cleanPhone;
     });
 
     if (existingClient) {
-      setSelectedClient({ nombre: existingClient.nombre, telefono: existingClient.telefono });
-    } else {
-      setSelectedClient(null);
-      setNewClientModal({
-        open: true,
-        phone: cleanPhone,
-        name: ''
+      const currentStickers = resolveClientStickers(existingClient);
+      setSelectedClient({
+        id: existingClient.id,
+        nombre: existingClient.nombre,
+        telefono: existingClient.telefono,
+        stickers_count: currentStickers
       });
+      return;
     }
+
+    // Consultar también en vivo en Supabase por si el cliente se acaba de registrar vía QR en su celular
+    try {
+      const supa = (window as any).supabase || getSupabaseClient();
+      if (supa) {
+        const { data: remoteFound } = await supa
+          .from('customers')
+          .select('*')
+          .or(`phone.eq.${cleanDigits || cleanPhone},telefono.eq.${cleanDigits || cleanPhone},id.eq.${cleanPhone}`)
+          .limit(1)
+          .maybeSingle();
+
+        if (remoteFound) {
+          const currentStickers = resolveClientStickers(remoteFound);
+          setSelectedClient({
+            id: remoteFound.id,
+            nombre: remoteFound.full_name || remoteFound.nombre || 'Cliente',
+            telefono: remoteFound.phone || remoteFound.telefono || cleanPhone,
+            stickers_count: currentStickers
+          });
+          return;
+        }
+      }
+    } catch (e) {}
+
+    setSelectedClient(null);
+    setNewClientModal({
+      open: true,
+      phone: cleanPhone,
+      name: ''
+    });
   };
 
   // Modal obligatorio de cobro previo a registro
@@ -792,6 +848,10 @@ export default function EmployeeWorkspace({
         metodo_complementario: metodoComplementario || null
       };
 
+      const prevStickers = Math.max(Number(selectedClient?.stickers_count ?? 1), 1);
+      const newStickers = prevStickers + 1;
+      const newStickersCycle = newStickers % 10 === 0 ? 10 : newStickers % 10;
+
       const ventaPayload: any = {
         id: ventaId,
         fecha: getLocalDateString(),
@@ -804,8 +864,10 @@ export default function EmployeeWorkspace({
         productos_vendidos: itemsVendidos,
         total: totalFactura,
         metodo_pago: metodoPagoFinal,
+        cliente_id: selectedClient?.id,
         cliente_nombre: clienteNombreFinal,
         cliente_telefono: cleanPhoneFinal,
+        cliente_stickers_count: newStickers,
         estado: 'completada',
         monto_tarjeta_regalo: montoADescontar,
         tarjeta_regalo_codigo: giftCardVerifiedData.code,
@@ -854,6 +916,16 @@ export default function EmployeeWorkspace({
         onAddVentaSugerida(mandatoryPaymentModal.sugeridaProdId, empleado.id, metodoPagoFinal);
       } else {
         onRegistrarVenta(ventaPayload);
+        setPosSaleSuccessModal({
+          open: true,
+          clienteNombre: clienteNombreFinal,
+          clienteTelefono: cleanPhoneFinal,
+          prevStickers,
+          newStickers,
+          newStickersCycle,
+          totalVenta: totalFactura,
+          metodoPago: metodoPagoFinal
+        });
       }
 
       // Limpiar carrito y cerrar modal
@@ -884,6 +956,10 @@ export default function EmployeeWorkspace({
     if (mandatoryPaymentModal.kind === 'sugerida' && mandatoryPaymentModal.sugeridaProdId) {
       onAddVentaSugerida(mandatoryPaymentModal.sugeridaProdId, empleado.id, metodo);
     } else if (mandatoryPaymentModal.kind === 'pos') {
+      const prevStickers = Math.max(Number(selectedClient?.stickers_count ?? 1), 1);
+      const newStickers = prevStickers + 1;
+      const newStickersCycle = newStickers % 10 === 0 ? 10 : newStickers % 10;
+
       const newVenta = {
         fecha: getLocalDateString(),
         hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
@@ -899,12 +975,24 @@ export default function EmployeeWorkspace({
         })),
         total: mandatoryPaymentModal.total,
         metodo_pago: metodo,
+        cliente_id: selectedClient?.id,
         cliente_nombre: selectedClient?.nombre,
         cliente_telefono: selectedClient?.telefono,
+        cliente_stickers_count: newStickers,
         estado: 'completada'
       };
 
       onRegistrarVenta(newVenta as any);
+      setPosSaleSuccessModal({
+        open: true,
+        clienteNombre: selectedClient?.nombre || 'Cliente',
+        clienteTelefono: selectedClient?.telefono || '',
+        prevStickers,
+        newStickers,
+        newStickersCycle,
+        totalVenta: mandatoryPaymentModal.total,
+        metodoPago: metodo
+      });
       setCartItems([]);
       setClienteTelefonoInput('');
       setSelectedClient(null);
@@ -914,7 +1002,7 @@ export default function EmployeeWorkspace({
     handleClosePaymentModal();
   };
 
-  const handleProcessPosSale = () => {
+  const handleProcessPosSale = async () => {
     if (cartItems.length === 0) return;
 
     const cleanPhone = clienteTelefonoInput.trim();
@@ -930,7 +1018,7 @@ export default function EmployeeWorkspace({
     const cleanDigits = cleanPhone.replace(/\D/g, '');
     const existingClient = (clientes || []).find(c => {
       const cDigits = c.telefono.replace(/\D/g, '');
-      return (cDigits && cDigits === cleanDigits) || c.telefono === cleanPhone;
+      return (cDigits && cDigits === cleanDigits) || c.telefono === cleanPhone || c.id === cleanPhone;
     });
 
     const items = cartItems.map(item => ({
@@ -950,21 +1038,57 @@ export default function EmployeeWorkspace({
     }
 
     if (existingClient) {
-      setSelectedClient({ nombre: existingClient.nombre, telefono: existingClient.telefono });
+      const currentStickers = resolveClientStickers(existingClient);
+      setSelectedClient({
+        id: existingClient.id,
+        nombre: existingClient.nombre,
+        telefono: existingClient.telefono,
+        stickers_count: currentStickers
+      });
       setMandatoryPaymentModal({
         kind: 'pos',
         articulos: items,
         total: total
       });
-    } else {
-      // Cliente nuevo: Abre modal emergente para solicitar nombre completo
-      // NO abre el modal de medio de pago sin registrar al cliente primero
-      setNewClientModal({
-        open: true,
-        phone: cleanPhone,
-        name: ''
-      });
+      return;
     }
+
+    // Consultar también en vivo en Supabase por si el cliente recién escaneó el QR de registro
+    try {
+      const supa = (window as any).supabase || getSupabaseClient();
+      if (supa) {
+        const { data: remoteFound } = await supa
+          .from('customers')
+          .select('*')
+          .or(`phone.eq.${cleanDigits || cleanPhone},telefono.eq.${cleanDigits || cleanPhone},id.eq.${cleanPhone}`)
+          .limit(1)
+          .maybeSingle();
+
+        if (remoteFound) {
+          const currentStickers = resolveClientStickers(remoteFound);
+          setSelectedClient({
+            id: remoteFound.id,
+            nombre: remoteFound.full_name || remoteFound.nombre || 'Cliente',
+            telefono: remoteFound.phone || remoteFound.telefono || cleanPhone,
+            stickers_count: currentStickers
+          });
+          setMandatoryPaymentModal({
+            kind: 'pos',
+            articulos: items,
+            total: total
+          });
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // Cliente nuevo: Abre modal emergente para solicitar nombre completo
+    // NO abre el modal de medio de pago sin registrar al cliente primero
+    setNewClientModal({
+      open: true,
+      phone: cleanPhone,
+      name: ''
+    });
   };
 
   // --- ESTADOS PARA REGISTRO DE VENTAS EN TIENDA (EMPLEADO) ---
@@ -2298,21 +2422,42 @@ export default function EmployeeWorkspace({
                         </div>
                       )}
 
-                      {selectedClient && (
-                        <div className="mt-2 p-2 bg-[#EBF5FB] border border-[#AED6F1] rounded-lg flex items-center justify-between text-xs">
-                          <div>
-                            <span className="text-[9px] font-black uppercase text-slate-400 block">Cliente Fidelizado</span>
-                            <span className="font-extrabold text-[#2C3E50]">{selectedClient.nombre}</span>
+                      {selectedClient && (() => {
+                        const sellosActuales = Math.max(Number(selectedClient.stickers_count ?? 1), 1);
+                        const sellosActualesCiclo = sellosActuales % 10 === 0 ? 10 : sellosActuales % 10;
+                        const sellosProyectados = (sellosActuales + 1) % 10 === 0 ? 10 : (sellosActuales + 1) % 10;
+                        return (
+                          <div className="mt-2 p-2.5 bg-[#EBF5FB] border border-[#AED6F1] rounded-lg space-y-1.5 text-xs">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <span className="text-[9px] font-black uppercase text-slate-400 block">Cliente Fidelizado</span>
+                                <span className="font-extrabold text-[#2C3E50]">{selectedClient.nombre}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-black">
+                                  Sellos: {sellosActualesCiclo}/10
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedClient(null)}
+                                  className="text-[10px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer underline"
+                                >
+                                  Quitar
+                                </button>
+                              </div>
+                            </div>
+                            {sellosActuales === 1 ? (
+                              <div className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1 flex items-center gap-1">
+                                <span>🎁 Ya cuenta con 1 sello de bienvenida · Con esta 1ra compra subirá a <strong>2/10 sellos</strong>.</span>
+                              </div>
+                            ) : (
+                              <div className="text-[10px] font-semibold text-[#2E6DA4]">
+                                Sumará +1 sello en esta visita → pasará a <strong>{sellosProyectados}/10 sellos</strong>.
+                              </div>
+                            )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedClient(null)}
-                            className="text-[10px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer underline"
-                          >
-                            Quitar
-                          </button>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
 
                     <div className="flex justify-between items-center text-sm">
@@ -3124,7 +3269,12 @@ export default function EmployeeWorkspace({
                 type="button"
                 onClick={() => {
                   const finalName = newClientModal.name.trim() || 'Cliente Coccole';
-                  setSelectedClient({ nombre: finalName, telefono: newClientModal.phone });
+                  // Cliente nuevo inicia con 1 sello de bienvenida (stickers_count: 1)
+                  setSelectedClient({
+                    nombre: finalName,
+                    telefono: newClientModal.phone,
+                    stickers_count: 1
+                  });
                   setNewClientModal({ open: false, phone: '', name: '' });
 
                   const items = cartItems.map(item => ({
@@ -3145,6 +3295,70 @@ export default function EmployeeWorkspace({
                 Registrar y Continuar Cobro
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE ÉXITO DE LA VENTA DEL POS (RESUMEN DE SELLOS DE FIDELIZACIÓN) */}
+      {posSaleSuccessModal?.open && (
+        <div
+          className="fixed inset-0 bg-slate-900/65 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setPosSaleSuccessModal(null)}
+        >
+          <div
+            className="bg-white border-2 border-emerald-400 rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-4 text-[#2C3E50] relative text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 mx-auto rounded-full bg-emerald-100 border-2 border-emerald-300 flex items-center justify-center text-emerald-600 shadow-xs">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="inline-block px-3 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black uppercase tracking-widest">
+                Fidelización COCCOLE FIT
+              </span>
+              <h3 className="text-lg font-black text-[#2C3E50]">
+                ¡Venta Registrada con Éxito!
+              </h3>
+            </div>
+
+            {/* Resumen claro requerido de sellos acumulados */}
+            <div className="p-4 bg-linear-to-br from-[#EBF5FB] to-emerald-50 border border-[#AED6F1] rounded-2xl space-y-2">
+              <p className="text-xs sm:text-sm font-extrabold text-[#2C3E50] leading-relaxed">
+                ¡Venta registrada! El cliente sumó 1 sello por su compra y ahora tiene {posSaleSuccessModal.newStickersCycle}/10 sellos acumulados.
+              </p>
+
+              {posSaleSuccessModal.prevStickers === 1 && (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100/90 border border-amber-300 text-amber-900 text-[11px] font-bold">
+                  <span>🎁 1 sello de bienvenida + 1 por la compra actual = 2/10 sellos</span>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1 text-left">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Cliente:</span>
+                <span className="font-extrabold text-[#2C3E50]">{posSaleSuccessModal.clienteNombre}</span>
+              </div>
+              {posSaleSuccessModal.clienteTelefono && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-semibold">Teléfono:</span>
+                  <span className="font-bold text-slate-700">{posSaleSuccessModal.clienteTelefono}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Total Facturado:</span>
+                <span className="font-black text-emerald-700">{formatMoney(posSaleSuccessModal.totalVenta)}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setPosSaleSuccessModal(null)}
+              className="w-full py-3 px-4 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-black text-xs rounded-xl transition-colors cursor-pointer shadow-md"
+            >
+              Continuar en Caja
+            </button>
           </div>
         </div>
       )}

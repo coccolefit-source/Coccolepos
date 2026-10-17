@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
   telefono TEXT,
   full_name TEXT,
   nombre TEXT,
+  stickers_count INT DEFAULT 1,
   total_visits INT DEFAULT 1,
   visitas_acumuladas INT DEFAULT 1,
   total_gastado NUMERIC DEFAULT 0,
@@ -129,6 +130,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
 
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS stickers_count INT DEFAULT 1;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS total_visits INT DEFAULT 1;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS habeas_data_accepted BOOLEAN DEFAULT true;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ DEFAULT NOW();
@@ -1321,16 +1323,26 @@ export async function fetchCustomersFromSupabase(): Promise<Cliente[] | null> {
     return null;
   }
   if (!data) return [];
-  return data.map((c: any) => ({
-    id: c.id,
-    telefono: c.phone || c.telefono || '',
-    nombre: c.full_name || c.nombre || 'Cliente',
-    total_compras_count: Number(c.total_visits ?? c.visitas_acumuladas ?? c.total_compras_count ?? 1),
-    visitas_acumuladas: Number(c.total_visits ?? c.visitas_acumuladas ?? 1),
-    total_compras_monto: Number(c.total_amount ?? c.total_gastado ?? c.total_compras_monto ?? 0),
-    ultima_fecha_compra: c.fecha_ultima_compra ? c.fecha_ultima_compra.split('T')[0] : getLocalDateString(),
-    fecha_registro: c.fecha_registro ? c.fecha_registro.split('T')[0] : (c.created_at ? c.created_at.split('T')[0] : getLocalDateString())
-  })) as Cliente[];
+  return data.map((c: any) => {
+    const effectiveStickers = Math.max(
+      Number(c.stickers_count ?? 0),
+      Number(c.visitas_acumuladas ?? 0),
+      Number(c.total_visits ?? 0),
+      Number(c.total_compras_count ?? 0),
+      1
+    );
+    return {
+      id: c.id,
+      telefono: c.phone || c.telefono || '',
+      nombre: c.full_name || c.nombre || 'Cliente',
+      stickers_count: effectiveStickers,
+      visitas_acumuladas: effectiveStickers,
+      total_compras_count: Number(c.total_visits ?? c.visitas_acumuladas ?? c.total_compras_count ?? 0),
+      total_compras_monto: Number(c.total_amount ?? c.total_gastado ?? c.total_compras_monto ?? 0),
+      ultima_fecha_compra: c.fecha_ultima_compra ? c.fecha_ultima_compra.split('T')[0] : getLocalDateString(),
+      fecha_registro: c.fecha_registro ? c.fecha_registro.split('T')[0] : (c.created_at ? c.created_at.split('T')[0] : getLocalDateString())
+    };
+  }) as Cliente[];
 }
 
 export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolean> {
@@ -1339,36 +1351,67 @@ export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolea
   try {
     const cleanPhone = (cliente.telefono || '').trim();
     let finalId = cliente.id;
+    let existingRecord: any = null;
 
     // Si el cliente ya existe en Supabase por teléfono, usar su ID existente para evitar violar restricciones UNIQUE
     if (cleanPhone) {
       try {
         const { data: existing } = await client
           .from('customers')
-          .select('id')
+          .select('*')
           .or(`phone.eq.${cleanPhone},telefono.eq.${cleanPhone}`)
           .limit(1)
           .maybeSingle();
         if (existing && existing.id) {
           finalId = existing.id;
+          existingRecord = existing;
         }
       } catch (e) {}
     }
 
-    const payload = {
+    const dbExistingStickers = existingRecord
+      ? Math.max(
+          Number(existingRecord.stickers_count ?? 0),
+          Number(existingRecord.visitas_acumuladas ?? 0),
+          Number(existingRecord.total_visits ?? 0),
+          1
+        )
+      : 0;
+
+    const requestedStickers = Number(
+      cliente.stickers_count ?? cliente.visitas_acumuladas ?? cliente.total_compras_count ?? 2
+    );
+
+    // Garantizar que si ya existía en BD con sello de bienvenida (1), al facturar suba al menos a dbExistingStickers + 1 o requestedStickers
+    const finalStickers = existingRecord
+      ? Math.max(requestedStickers, dbExistingStickers)
+      : Math.max(requestedStickers, 2);
+
+    const payload: any = {
       id: finalId,
       phone: cleanPhone,
       telefono: cleanPhone,
       full_name: cliente.nombre,
       nombre: cliente.nombre,
-      total_visits: Number(cliente.visitas_acumuladas || cliente.total_compras_count || 1),
-      visitas_acumuladas: Number(cliente.visitas_acumuladas || cliente.total_compras_count || 1),
+      stickers_count: finalStickers,
+      total_visits: finalStickers,
+      visitas_acumuladas: finalStickers,
       total_gastado: Number(cliente.total_compras_monto || 0),
       fecha_ultima_compra: cliente.fecha_ultima_compra || new Date().toISOString()
     };
 
     const { error } = await client.from('customers').upsert(payload);
     if (error) {
+      // Fallback resiliente si la tabla remota aún no tiene la columna stickers_count
+      if (error.message?.includes('stickers_count') || error.message?.includes('column') || error.code === '42703') {
+        const { stickers_count, ...fallbackPayload } = payload;
+        const { error: fallbackError } = await client.from('customers').upsert(fallbackPayload);
+        if (fallbackError) {
+          console.error('Supabase upsertCustomer fallback error:', fallbackError.message);
+          return false;
+        }
+        return true;
+      }
       console.error('Supabase upsertCustomer error:', error.message);
       return false;
     }

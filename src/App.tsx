@@ -39,6 +39,7 @@ import AdminDashboard from './components/AdminDashboard';
 import EmployeeWorkspace from './components/EmployeeWorkspace';
 import Login from './components/Login';
 import RegistroClientePublico from './components/RegistroClientePublico';
+import TarjetaFidelizacionDigital from './components/TarjetaFidelizacionDigital';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
 
@@ -536,7 +537,8 @@ export default function App() {
                   fecha_registro: s.fecha || getLocalDateString(),
                   total_compras_monto: Number(s.total || 0),
                   total_compras_count: 1,
-                  visitas_acumuladas: 1,
+                  visitas_acumuladas: 2,
+                  stickers_count: 2,
                   ultima_fecha_compra: s.fecha || getLocalDateString()
                 };
                 consolidatedClientes.push(newC);
@@ -864,7 +866,27 @@ export default function App() {
     return newAdminId;
   };
 
-  // Detección de ruta pública para registro de cliente desde QR
+  // Detección de rutas públicas para Registro de Cliente (/registro-cliente) y Tarjeta Digital Wallet (/tarjeta/:id)
+  const extractTarjetaClienteId = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    const path = window.location.pathname || '';
+    const hash = window.location.hash || '';
+    const searchParams = new URLSearchParams(window.location.search || '');
+
+    const pathMatch = path.match(/\/tarjeta\/([^/?#]+)/i);
+    if (pathMatch && pathMatch[1]) return decodeURIComponent(pathMatch[1]);
+
+    const hashMatch = hash.match(/\/tarjeta\/([^/?#]+)/i);
+    if (hashMatch && hashMatch[1]) return decodeURIComponent(hashMatch[1]);
+
+    if (searchParams.get('view') === 'tarjeta' && searchParams.get('id')) {
+      return searchParams.get('id');
+    }
+    return null;
+  };
+
+  const [tarjetaClienteId, setTarjetaClienteId] = useState<string | null>(() => extractTarjetaClienteId());
+
   const [isRegistroClienteRoute, setIsRegistroClienteRoute] = useState(() => {
     if (typeof window === 'undefined') return false;
     const path = (window.location.pathname || '').toLowerCase();
@@ -876,6 +898,7 @@ export default function App() {
   useEffect(() => {
     const handleLocationChange = () => {
       if (typeof window === 'undefined') return;
+      setTarjetaClienteId(extractTarjetaClienteId());
       const path = (window.location.pathname || '').toLowerCase();
       const hash = (window.location.hash || '').toLowerCase();
       const search = (window.location.search || '').toLowerCase();
@@ -889,6 +912,22 @@ export default function App() {
       window.removeEventListener('hashchange', handleLocationChange);
     };
   }, []);
+
+  if (tarjetaClienteId) {
+    return (
+      <TarjetaFidelizacionDigital
+        clienteId={tarjetaClienteId}
+        onCambiarCuenta={() => {
+          try {
+            localStorage.removeItem('coccole_cliente_wallet');
+            window.history.pushState({}, '', '/registro-cliente');
+          } catch (e) {}
+          setTarjetaClienteId(null);
+          setIsRegistroClienteRoute(true);
+        }}
+      />
+    );
+  }
 
   if (isRegistroClienteRoute) {
     return <RegistroClientePublico />;
@@ -2160,6 +2199,8 @@ export default function App() {
     };
 
     let updatedClientes = [...(state.clientes || [])];
+    let finalStickersAfterSale = 2;
+
     if (nuevaVenta.cliente_telefono) {
       const cleanPhone = nuevaVenta.cliente_telefono.trim();
       const existingIdx = updatedClientes.findIndex(
@@ -2169,17 +2210,32 @@ export default function App() {
 
       if (existingIdx >= 0) {
         const existing = updatedClientes[existingIdx];
+        // Reconocer que todo cliente registrado inicia con al menos 1 sello (Sello de Bienvenida)
+        const prevStickers = Math.max(
+          Number(existing.stickers_count ?? 0),
+          Number(existing.visitas_acumuladas ?? 0),
+          Number(existing.total_compras_count ?? 0),
+          1
+        );
+        const nextStickers = Number(nuevaVenta.cliente_stickers_count) || (prevStickers + 1);
+        finalStickersAfterSale = nextStickers;
+
         const updatedCli: Cliente = {
           ...existing,
           nombre: nuevaVenta.cliente_nombre || existing.nombre,
           total_compras_monto: Number(existing.total_compras_monto || 0) + Number(nuevaVenta.total || 0),
           total_compras_count: Number(existing.total_compras_count || 0) + 1,
-          visitas_acumuladas: Number(existing.visitas_acumuladas || existing.total_compras_count || 0) + 1,
+          visitas_acumuladas: nextStickers,
+          stickers_count: nextStickers,
           ultima_fecha_compra: today
         };
         updatedClientes[existingIdx] = updatedCli;
         upsertCustomerInSupabase(updatedCli);
       } else if (nuevaVenta.cliente_nombre) {
+        // Primera compra de cliente nuevo: 1 sello de bienvenida + 1 sello por la compra actual = 2 sellos
+        const nextStickers = Number(nuevaVenta.cliente_stickers_count) || 2;
+        finalStickersAfterSale = nextStickers;
+
         const newCli: Cliente = {
           id: (nuevaVenta as any).cliente_id || `cli-${cleanPhone.replace(/\D/g, '') || Date.now()}`,
           nombre: nuevaVenta.cliente_nombre,
@@ -2187,7 +2243,8 @@ export default function App() {
           fecha_registro: today,
           total_compras_monto: Number(nuevaVenta.total || 0),
           total_compras_count: 1,
-          visitas_acumuladas: 1,
+          visitas_acumuladas: nextStickers,
+          stickers_count: nextStickers,
           ultima_fecha_compra: today
         };
         updatedClientes.push(newCli);
@@ -2208,13 +2265,11 @@ export default function App() {
      // Sincronizar Venta en Supabase
     insertSaleInSupabase(venta);
 
-    const rawItems = nuevaVenta.productos_vendidos || (nuevaVenta as any).productos || [];
-    const articulos = rawItems.map((p: any) => ({
-      nombre: p.nombre,
-      cantidad: p.cantidad || 1
-    }));
-
-    pushNotification(`¡Venta registrada con éxito por ${vendedorNombre}! Total: ${formatMoney(nuevaVenta.total)} (${nuevaVenta.metodo_pago || 'efectivo'})`, 'success');
+    const sellosCiclo = finalStickersAfterSale % 10 === 0 ? 10 : finalStickersAfterSale % 10;
+    pushNotification(
+      `¡Venta registrada! El cliente sumó 1 sello por su compra y ahora tiene ${sellosCiclo}/10 sellos acumulados.`,
+      'success'
+    );
   };
 
   const handleUpdateVenta = (ventaActualizada: Venta) => {

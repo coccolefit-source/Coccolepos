@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import TarjetaFidelizacionDigital, { ClienteWalletData } from './TarjetaFidelizacionDigital';
 import {
   Sparkles,
-  CheckCircle2,
   ShieldCheck,
   Smartphone,
   User,
   ArrowRight,
-  Info,
   X,
   FileText,
   AlertCircle,
-  Gift,
-  HeartHandshake
+  CreditCard
 } from 'lucide-react';
 
 export default function RegistroClientePublico() {
@@ -23,9 +21,17 @@ export default function RegistroClientePublico() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [alreadyExists, setAlreadyExists] = useState(false);
-  const [registeredSuccess, setRegisteredSuccess] = useState(false);
-  const [registeredClientName, setRegisteredClientName] = useState('');
+
+  // Estado para redirigir/mostrar la tarjeta digital inmediatamente tras el registro
+  const [activeWalletClient, setActiveWalletClient] = useState<ClienteWalletData | null>(() => {
+    try {
+      const saved = localStorage.getItem('coccole_cliente_wallet');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {}
+    return null;
+  });
 
   // Formateador y validador de teléfono (10 dígitos colombianos)
   const cleanPhoneDigits = telefono.replace(/\D/g, '').slice(0, 10);
@@ -33,10 +39,19 @@ export default function RegistroClientePublico() {
   const isNameValid = nombre.trim().length >= 3;
   const isFormValid = isNameValid && isPhoneValid && habeasDataAccepted;
 
+  const redirectToWalletCard = (clientData: ClienteWalletData) => {
+    try {
+      localStorage.setItem('coccole_cliente_wallet', JSON.stringify(clientData));
+      const newUrl = `/tarjeta/${encodeURIComponent(clientData.id)}`;
+      window.history.pushState({ clienteId: clientData.id }, '', newUrl);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    } catch (e) {}
+    setActiveWalletClient(clientData);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    setAlreadyExists(false);
 
     if (!isNameValid) {
       setErrorMessage('Por favor ingresa tu nombre y apellido completo.');
@@ -69,7 +84,7 @@ export default function RegistroClientePublico() {
       // 1. Validar si el teléfono ya existe en la tabla customers
       const { data: existingClients, error: searchError } = await supabase
         .from('customers')
-        .select('id, nombre, full_name')
+        .select('*')
         .or(`phone.eq.${cleanPhone},telefono.eq.${cleanPhone}`)
         .limit(1);
 
@@ -79,13 +94,25 @@ export default function RegistroClientePublico() {
 
       if (existingClients && existingClients.length > 0) {
         const clientFound = existingClients[0];
-        setRegisteredClientName(clientFound.full_name || clientFound.nombre || cleanName);
-        setAlreadyExists(true);
+        const currentStickers = Math.max(
+          Number(clientFound.stickers_count ?? 0),
+          Number(clientFound.visitas_acumuladas ?? 0),
+          Number(clientFound.total_visits ?? 0),
+          1
+        );
+        const normalizedClient = {
+          ...clientFound,
+          stickers_count: currentStickers,
+          visitas_acumuladas: currentStickers,
+          total_visits: currentStickers
+        };
         setIsLoading(false);
+        // Redirigir de inmediato a su tarjeta digital existente
+        redirectToWalletCard(normalizedClient);
         return;
       }
 
-      // 2. Insertar nuevo cliente con el esquema requerido
+      // 2. Insertar nuevo cliente con Sello de Bienvenida (stickers_count: 1)
       const timestampId = `cli-${Date.now()}`;
       const payload: any = {
         id: timestampId,
@@ -93,8 +120,9 @@ export default function RegistroClientePublico() {
         telefono: cleanPhone,
         full_name: cleanName,
         nombre: cleanName,
-        total_visits: 0,
-        visitas_acumuladas: 0,
+        stickers_count: 1,
+        total_visits: 1,
+        visitas_acumuladas: 1,
         total_gastado: 0,
         habeas_data_accepted: true,
         accepted_at: new Date().toISOString(),
@@ -108,29 +136,61 @@ export default function RegistroClientePublico() {
       if (insertError) {
         console.error('Error insertando cliente en Supabase:', insertError);
 
-        // Si la tabla no tiene las columnas de habeas data, fallback con columnas canónicas
+        // Si la tabla no tiene alguna columna extendida (ej. habeas_data o stickers_count), hacer fallback progresivo
         if (insertError.message?.includes('habeas_data') || insertError.message?.includes('column') || insertError.code === '42703') {
-          const minimalPayload = {
+          const fallbackWithStickers = {
             id: timestampId,
             phone: cleanPhone,
             telefono: cleanPhone,
             full_name: cleanName,
             nombre: cleanName,
-            total_visits: 0,
-            visitas_acumuladas: 0,
+            stickers_count: 1,
+            total_visits: 1,
+            visitas_acumuladas: 1,
             total_gastado: 0
           };
-          const { error: fallbackErr } = await supabase.from('customers').insert([minimalPayload]);
-          if (fallbackErr) {
-            setErrorMessage('No pudimos completar tu registro: ' + fallbackErr.message);
-            setIsLoading(false);
-            return;
+          const { error: fallbackErr1 } = await supabase.from('customers').insert([fallbackWithStickers]);
+          if (fallbackErr1) {
+            // Segundo fallback si la columna stickers_count aún no fue agregada en Supabase
+            const minimalPayload = {
+              id: timestampId,
+              phone: cleanPhone,
+              telefono: cleanPhone,
+              full_name: cleanName,
+              nombre: cleanName,
+              total_visits: 1,
+              visitas_acumuladas: 1,
+              total_gastado: 0
+            };
+            const { error: fallbackErr2 } = await supabase.from('customers').insert([minimalPayload]);
+            if (fallbackErr2) {
+              setErrorMessage('No pudimos completar tu registro: ' + fallbackErr2.message);
+              setIsLoading(false);
+              return;
+            }
           }
         } else if (insertError.code === '23505') {
-          // Teléfono ya registrado
-          setRegisteredClientName(cleanName);
-          setAlreadyExists(true);
+          // Teléfono ya registrado: buscar el registro existente y redirigir a su tarjeta
+          const { data: retryExisting } = await supabase
+            .from('customers')
+            .select('*')
+            .or(`phone.eq.${cleanPhone},telefono.eq.${cleanPhone}`)
+            .limit(1)
+            .maybeSingle();
+
           setIsLoading(false);
+          const mergedExisting = retryExisting
+            ? {
+                ...retryExisting,
+                stickers_count: Math.max(
+                  Number(retryExisting.stickers_count ?? 0),
+                  Number(retryExisting.visitas_acumuladas ?? 0),
+                  Number(retryExisting.total_visits ?? 0),
+                  1
+                )
+              }
+            : payload;
+          redirectToWalletCard(mergedExisting);
           return;
         } else {
           setErrorMessage('Error al registrar: ' + insertError.message);
@@ -139,8 +199,8 @@ export default function RegistroClientePublico() {
         }
       }
 
-      setRegisteredClientName(cleanName);
-      setRegisteredSuccess(true);
+      // 3. Redirigir de inmediato a la Tarjeta Digital del cliente (/tarjeta/:id)
+      redirectToWalletCard(payload);
     } catch (err: any) {
       console.error('Excepción en registro de cliente:', err);
       setErrorMessage(err.message || 'Error inesperado de conexión.');
@@ -149,108 +209,23 @@ export default function RegistroClientePublico() {
     }
   };
 
-  // -------------------------------------------------------------
-  // VISTA: PANTALLA DE ÉXITO (NUEVO REGISTRO)
-  // -------------------------------------------------------------
-  if (registeredSuccess) {
+  // Si ya hay una sesión activa o recién se registró, mostrar la Tarjeta Digital
+  if (activeWalletClient) {
     return (
-      <div className="min-h-screen bg-linear-to-b from-[#EBF5FB] via-white to-slate-50 flex items-center justify-center p-4 antialiased font-sans">
-        <div className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-100 text-center relative overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-          <div className="absolute top-0 left-0 right-0 h-2.5 bg-linear-to-r from-[#4B9CD3] via-emerald-400 to-[#3A82B4]" />
-
-          {/* Icono de Celebración */}
-          <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-5 shadow-inner">
-            <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
-          </div>
-
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black uppercase tracking-wider mb-2">
-            <Sparkles className="w-3.5 h-3.5" />
-            ¡Registro Exitoso!
-          </span>
-
-          <h1 className="text-2xl font-black text-[#2C3E50] tracking-tight">
-            ¡Bienvenido/a a COCCOLE FIT!
-          </h1>
-
-          <p className="text-sm font-bold text-[#4B9CD3] mt-1">
-            {registeredClientName}
-          </p>
-
-          <p className="text-xs text-slate-600 mt-3 leading-relaxed">
-            Tu cuenta en nuestro <strong className="text-[#2C3E50]">Programa de Fidelización</strong> ya está <span className="text-emerald-700 font-bold">100% activa</span> para tu compra de hoy.
-          </p>
-
-          <div className="my-5 p-4 bg-[#EBF5FB] rounded-2xl border border-[#AED6F1] text-left space-y-2">
-            <div className="flex items-start gap-2.5">
-              <Gift className="w-5 h-5 text-[#4B9CD3] shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-xs font-extrabold text-[#2C3E50]">¿Cómo acumular tus visitas?</h4>
-                <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">
-                  Solo dile tu número de celular <strong className="text-[#2C3E50]">({telefono})</strong> a la persona en caja al momento de pagar.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setRegisteredSuccess(false);
-                setNombre('');
-                setTelefono('');
-                setHabeasDataAccepted(false);
-              }}
-              className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-            >
-              Registrar otro número
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------
-  // VISTA: PANTALLA CLIENTE YA EXISTENTE
-  // -------------------------------------------------------------
-  if (alreadyExists) {
-    return (
-      <div className="min-h-screen bg-linear-to-b from-[#EBF5FB] via-white to-slate-50 flex items-center justify-center p-4 antialiased font-sans">
-        <div className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-100 text-center relative overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-          <div className="absolute top-0 left-0 right-0 h-2 bg-[#4B9CD3]" />
-
-          <div className="w-16 h-16 bg-[#EBF5FB] text-[#4B9CD3] rounded-full flex items-center justify-center mx-auto mb-4">
-            <HeartHandshake className="w-8 h-8" />
-          </div>
-
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black uppercase tracking-wider mb-2">
-            Cliente Registrado
-          </span>
-
-          <h2 className="text-xl font-black text-[#2C3E50] tracking-tight">
-            ¡Hola, {registeredClientName}!
-          </h2>
-
-          <div className="my-5 p-4 bg-blue-50/70 border border-blue-200 rounded-2xl text-left flex items-start gap-3">
-            <Info className="w-5 h-5 text-[#4B9CD3] shrink-0 mt-0.5" />
-            <p className="text-xs font-bold text-[#2C3E50] leading-relaxed">
-              ¡Ya eres parte de nuestro programa! Comunica tu número en caja para registrar tus consumos y seguir acumulando beneficios.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setAlreadyExists(false);
-              setTelefono('');
-            }}
-            className="w-full py-3 px-4 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
-          >
-            Registrar otro teléfono
-          </button>
-        </div>
-      </div>
+      <TarjetaFidelizacionDigital
+        clienteId={activeWalletClient.id}
+        initialData={activeWalletClient}
+        onCambiarCuenta={() => {
+          try {
+            localStorage.removeItem('coccole_cliente_wallet');
+            window.history.pushState({}, '', '/registro-cliente');
+          } catch (e) {}
+          setActiveWalletClient(null);
+          setNombre('');
+          setTelefono('');
+          setHabeasDataAccepted(false);
+        }}
+      />
     );
   }
 
@@ -379,10 +354,11 @@ export default function RegistroClientePublico() {
             className="w-full py-3.5 px-6 bg-[#4B9CD3] hover:bg-[#3A82B4] disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-sm rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
           >
             {isLoading ? (
-              <span>Registrando...</span>
+              <span>Activando tu Tarjeta Digital...</span>
             ) : (
               <>
-                <span>Unirme al Programa</span>
+                <CreditCard className="w-4 h-4" />
+                <span>Unirme y Abrir mi Tarjeta Digital</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
