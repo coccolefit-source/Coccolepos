@@ -24,6 +24,7 @@ import {
   isTransferencia,
   isRappi,
   isTarjetaRegalo,
+  TarjetaRegalo,
   RankingWeights,
   UpsellRule,
   DEFAULT_UPSELL_RULES,
@@ -70,7 +71,9 @@ import {
   Camera,
   GripVertical,
   Megaphone,
-  ImageIcon
+  ImageIcon,
+  Gift,
+  ArrowLeft
 } from 'lucide-react';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
@@ -110,6 +113,8 @@ interface EmployeeWorkspaceProps {
   onConfirmarLecturaAnuncio: (anuncioId: string, usuarioId: string) => void;
   onSaveGasto: (gasto: Omit<Gasto, 'id'> & { id?: string }) => void;
   onDeleteGasto: (id: string) => void;
+  tarjetasRegalo?: TarjetaRegalo[];
+  onRedeemTarjetaRegalo?: (codigo: string, monto: number) => Promise<{ success: boolean; saldoRestante: number; error?: string }>;
 }
 
 const PHOTO_PRESETS = [
@@ -601,8 +606,277 @@ export default function EmployeeWorkspace({
     total: number;
   } | null>(null);
 
+  // Estados para el flujo de cobro con Tarjeta de Regalo conectada a Supabase
+  const [isGiftCardPaymentActive, setIsGiftCardPaymentActive] = useState<boolean>(false);
+  const [giftCardCodeInput, setGiftCardCodeInput] = useState<string>('');
+  const [isLoadingGiftCard, setIsLoadingGiftCard] = useState<boolean>(false);
+  const [giftCardError, setGiftCardError] = useState<string | null>(null);
+  const [giftCardVerifiedData, setGiftCardVerifiedData] = useState<{
+    code: string;
+    current_balance: number;
+    is_active: boolean;
+  } | null>(null);
+  const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState<string>('Efectivo');
+  const [isDebitingGiftCard, setIsDebitingGiftCard] = useState<boolean>(false);
+
+  const handleClosePaymentModal = () => {
+    setMandatoryPaymentModal(null);
+    setIsGiftCardPaymentActive(false);
+    setGiftCardCodeInput('');
+    setIsLoadingGiftCard(false);
+    setGiftCardError(null);
+    setGiftCardVerifiedData(null);
+    setSecondaryPaymentMethod('Efectivo');
+    setIsDebitingGiftCard(false);
+  };
+
+  const handleConsultarSaldoGiftCard = async () => {
+    const rawCode = giftCardCodeInput.trim();
+    const cleanCode = rawCode.replace(/\s+/g, '');
+    if (!cleanCode) {
+      setGiftCardError('Por favor ingresa el código de la tarjeta de regalo.');
+      return;
+    }
+
+    setIsLoadingGiftCard(true);
+    setGiftCardError(null);
+    setGiftCardVerifiedData(null);
+
+    try {
+      const client = (window as any).supabase || getSupabaseClient();
+      if (!client) {
+        setGiftCardError('No se encontró conexión con Supabase.');
+        setIsLoadingGiftCard(false);
+        return;
+      }
+
+      // Consulta a la tabla gift_cards buscando coincidencia exacta ignorando mayúsculas/minúsculas
+      const { data, error } = await client
+        .from('gift_cards')
+        .select('code, current_balance, is_active')
+        .ilike('code', cleanCode);
+
+      if (error) {
+        console.error('Error al consultar gift_cards en Supabase:', error.message);
+        setGiftCardError(`Error de Supabase: ${error.message}`);
+        setIsLoadingGiftCard(false);
+        return;
+      }
+
+      let matchedCard = (data || []).find((c: any) => 
+        (c.code || '').replace(/\s+/g, '').toLowerCase() === cleanCode.toLowerCase()
+      );
+
+      // Si no se encontró mediante ilike directo, realizar búsqueda amplia insensible a espacios
+      if (!matchedCard) {
+        const { data: allCards } = await client
+          .from('gift_cards')
+          .select('code, current_balance, is_active')
+          .limit(200);
+        if (allCards) {
+          matchedCard = allCards.find((c: any) => 
+            (c.code || '').replace(/\s+/g, '').toLowerCase() === cleanCode.toLowerCase()
+          );
+        }
+      }
+
+      // 1. Validar si no existe
+      if (!matchedCard) {
+        setGiftCardError('El código de tarjeta de regalo no existe.');
+        setIsLoadingGiftCard(false);
+        return;
+      }
+
+      // 2. Validar si is_active es false
+      if (!matchedCard.is_active) {
+        setGiftCardError('La tarjeta de regalo no está activa o se encuentra deshabilitada.');
+        setIsLoadingGiftCard(false);
+        return;
+      }
+
+      // 3. Validar si current_balance <= 0
+      const currentBalance = Number(matchedCard.current_balance || 0);
+      if (currentBalance <= 0) {
+        setGiftCardError('La tarjeta de regalo no tiene saldo disponible ($0).');
+        setIsLoadingGiftCard(false);
+        return;
+      }
+
+      // Si es válida, mostrar el saldo actual de forma visible
+      setGiftCardVerifiedData({
+        code: matchedCard.code,
+        current_balance: currentBalance,
+        is_active: Boolean(matchedCard.is_active)
+      });
+    } catch (err: any) {
+      console.error('Excepción al consultar saldo de tarjeta de regalo:', err);
+      setGiftCardError(err.message || 'Error de conexión al consultar saldo.');
+    } finally {
+      setIsLoadingGiftCard(false);
+    }
+  };
+
+  const handleConfirmarCobroGiftCard = async () => {
+    if (!mandatoryPaymentModal || !giftCardVerifiedData) return;
+
+    const totalFactura = mandatoryPaymentModal.total;
+    const saldoActual = Number(giftCardVerifiedData.current_balance || 0);
+    const isFullPayment = saldoActual >= totalFactura;
+    const montoADescontar = isFullPayment ? totalFactura : saldoActual;
+    const saldoRestanteProyectado = isFullPayment ? (saldoActual - totalFactura) : 0;
+    const montoComplementario = isFullPayment ? 0 : (totalFactura - saldoActual);
+    const metodoComplementario = isFullPayment ? undefined : secondaryPaymentMethod;
+
+    setIsDebitingGiftCard(true);
+    setGiftCardError(null);
+
+    try {
+      const client = (window as any).supabase || getSupabaseClient();
+      if (!client) {
+        setGiftCardError('No hay conexión con Supabase.');
+        setIsDebitingGiftCard(false);
+        return;
+      }
+
+      // 1. Ejecutar RPC debit_gift_card
+      const { data: rpcResult, error: rpcError } = await client.rpc('debit_gift_card', {
+        p_code: giftCardVerifiedData.code,
+        p_amount: montoADescontar
+      });
+
+      if (rpcError) {
+        console.error('Error al ejecutar RPC debit_gift_card:', rpcError);
+        setGiftCardError(rpcError.message || 'Error de base de datos al debitar la tarjeta.');
+        setIsDebitingGiftCard(false);
+        return;
+      }
+
+      // Validar respuesta del RPC
+      const isSuccess =
+        rpcResult === true ||
+        (typeof rpcResult === 'object' && rpcResult !== null && (rpcResult.success === true || rpcResult.status === 'success'));
+
+      if (!isSuccess && typeof rpcResult === 'object' && rpcResult !== null && rpcResult.success === false) {
+        setGiftCardError(rpcResult.error || rpcResult.message || 'La base de datos rechazó el débito.');
+        setIsDebitingGiftCard(false);
+        return;
+      }
+
+      // 2. Si el RPC responde success: true, guardar la venta registrando el desglose de pago
+      const ventaId = `vreg-${Date.now()}`;
+      const cleanPhone = clienteTelefonoInput.trim();
+      const cleanPhoneFinal = cleanPhone || selectedClient?.telefono || '';
+      const clienteNombreFinal = selectedClient?.nombre || (cleanPhone ? `Cliente ${cleanPhone}` : 'Cliente General');
+
+      const metodoPagoFinal = montoComplementario > 0
+        ? `Tarjeta Regalo ($${formatMoney(montoADescontar)}) + ${metodoComplementario} ($${formatMoney(montoComplementario)})`
+        : 'Tarjeta Regalo';
+
+      const itemsVendidos = mandatoryPaymentModal.articulos.map(art => ({
+        producto_id: 'prod-' + art.nombre,
+        nombre: art.nombre,
+        codigo: 'COD-' + art.nombre.substring(0, 3).toUpperCase(),
+        precio: art.cantidad > 0 ? art.subtotal / art.cantidad : art.subtotal,
+        cantidad: art.cantidad
+      }));
+
+      const desglosePago = {
+        tarjeta_regalo: montoADescontar,
+        codigo_tarjeta: giftCardVerifiedData.code,
+        saldo_anterior: saldoActual,
+        saldo_restante: saldoRestanteProyectado,
+        complementario: montoComplementario,
+        metodo_complementario: metodoComplementario || null
+      };
+
+      const ventaPayload: any = {
+        id: ventaId,
+        fecha: getLocalDateString(),
+        hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+        cajero_id: empleado.id,
+        cajero_nombre: empleado.nombre,
+        usuario_id: empleado.id,
+        vendedor_id: empleado.id,
+        vendedor_nombre: empleado.nombre,
+        productos_vendidos: itemsVendidos,
+        total: totalFactura,
+        metodo_pago: metodoPagoFinal,
+        cliente_nombre: clienteNombreFinal,
+        cliente_telefono: cleanPhoneFinal,
+        estado: 'completada',
+        monto_tarjeta_regalo: montoADescontar,
+        tarjeta_regalo_codigo: giftCardVerifiedData.code,
+        monto_complementario: montoComplementario,
+        metodo_pago_complementario: metodoComplementario || null,
+        desglose_pago: desglosePago
+      };
+
+      // Guardar en tabla 'orders' en Supabase si existe
+      try {
+        await client.from('orders').insert([{
+          id: ventaId,
+          order_id: ventaId,
+          staff_id: empleado.id,
+          vendedor_id: empleado.id,
+          vendedor_nombre: empleado.nombre,
+          customer_phone: cleanPhoneFinal,
+          cliente_id: selectedClient?.id || null,
+          cliente_nombre: clienteNombreFinal,
+          cliente_telefono: cleanPhoneFinal,
+          total_amount: totalFactura,
+          total: totalFactura,
+          payment_method: metodoPagoFinal,
+          metodo_pago: metodoPagoFinal,
+          gift_card_code: giftCardVerifiedData.code,
+          tarjeta_regalo_codigo: giftCardVerifiedData.code,
+          gift_card_amount: montoADescontar,
+          monto_tarjeta_regalo: montoADescontar,
+          complementary_amount: montoComplementario,
+          monto_complementario: montoComplementario,
+          complementary_payment_method: metodoComplementario || null,
+          metodo_pago_complementario: metodoComplementario || null,
+          desglose_pago: desglosePago,
+          items: itemsVendidos,
+          productos_vendidos: itemsVendidos,
+          fecha: getLocalDateString(),
+          hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+          estado: 'completada'
+        }]);
+      } catch (errOrders) {
+        console.warn('Nota: guardado en tabla orders:', errOrders);
+      }
+
+      // Guardar la venta en la aplicación y sincronizar con sales en Supabase
+      if (mandatoryPaymentModal.kind === 'sugerida' && mandatoryPaymentModal.sugeridaProdId) {
+        onAddVentaSugerida(mandatoryPaymentModal.sugeridaProdId, empleado.id, metodoPagoFinal);
+      } else {
+        onRegistrarVenta(ventaPayload);
+      }
+
+      // Limpiar carrito y cerrar modal
+      setCartItems([]);
+      setClienteTelefonoInput('');
+      setSelectedClient(null);
+      setPhoneError(false);
+      handleClosePaymentModal();
+    } catch (err: any) {
+      console.error('Error general al confirmar cobro con tarjeta de regalo:', err);
+      setGiftCardError(err.message || 'Error inesperado al registrar el cobro.');
+    } finally {
+      setIsDebitingGiftCard(false);
+    }
+  };
+
   const handleSelectMandatoryPayment = (metodo: string) => {
     if (!mandatoryPaymentModal) return;
+
+    if (metodo === 'Tarjeta Regalo') {
+      setIsGiftCardPaymentActive(true);
+      setGiftCardError(null);
+      setGiftCardVerifiedData(null);
+      setGiftCardCodeInput('');
+      return;
+    }
 
     if (mandatoryPaymentModal.kind === 'sugerida' && mandatoryPaymentModal.sugeridaProdId) {
       onAddVentaSugerida(mandatoryPaymentModal.sugeridaProdId, empleado.id, metodo);
@@ -634,7 +908,7 @@ export default function EmployeeWorkspace({
       setPhoneError(false);
     }
 
-    setMandatoryPaymentModal(null);
+    handleClosePaymentModal();
   };
 
   const handleProcessPosSale = () => {
@@ -724,7 +998,6 @@ export default function EmployeeWorkspace({
   const [cuadrePosContadoInput, setCuadrePosContadoInput] = useState('');
   const [cuadrePosSuccess, setCuadrePosSuccess] = useState(false);
   const [filtroHistorialVentas, setFiltroHistorialVentas] = useState<'todas' | 'mias'>('todas');
-  const [cuadreFechaFiltro, setCuadreFechaFiltro] = useState(getLocalDateString());
 
   const yaCuadrado = (cuadresCaja || []).some(
     c => c.usuario_id === empleado.id && c.fecha === getLocalDateString()
@@ -2046,19 +2319,12 @@ export default function EmployeeWorkspace({
                 </div>
               </div>
 
-              {/* MÓDULO DE HISTORIAL TRANSACCIONAL DEL TURNO / DÍA */}
+              {/* MÓDULO DE HISTORIAL TRANSACCIONAL DEL TURNO */}
               <div className="mt-8 pt-6 border-t border-dashed border-[#E2E8F0]">
                 <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-xs">
                   {(() => {
                     const todayStr = getLocalDateString();
-                    const dYesterday = new Date();
-                    dYesterday.setDate(dYesterday.getDate() - 1);
-                    const yesterdayStr = getLocalDateString(dYesterday);
-
-                    const selectedDate = cuadreFechaFiltro || todayStr;
-                    const isToday = selectedDate === todayStr;
-                    const isYesterday = selectedDate === yesterdayStr;
-
+                    
                     const normalizeDate = (v: any) => {
                       let saleFecha = v?.fecha;
                       if (saleFecha && saleFecha.includes('T')) {
@@ -2076,101 +2342,26 @@ export default function EmployeeWorkspace({
                       return saleFecha;
                     };
 
-                    // Ventas de la fecha seleccionada registradas por todos los colaboradores
+                    // Ventas del día registradas por todos los colaboradores
                     const allTodaySales = (ventasRegistradas || []).filter(v => {
                       if (!v) return false;
-                      return normalizeDate(v) === selectedDate;
+                      return normalizeDate(v) === todayStr;
                     });
 
-                    // Ventas de la fecha seleccionada del empleado actual
+                    // Ventas del día del empleado actual
                     const myTodaySales = allTodaySales.filter(v => {
                       return (
-                        !v.usuario_id ||
-                        v.usuario_id === empleado.id ||
-                        v.vendedor_id === empleado.id ||
-                        (v as any).cajero_id === empleado.id ||
+                        !v.usuario_id || 
+                        v.usuario_id === empleado.id || 
+                        v.vendedor_id === empleado.id || 
+                        (v as any).cajero_id === empleado.id || 
                         v.vendedor_nombre === empleado.nombre
                       );
                     });
 
                     const activeList = filtroHistorialVentas === 'todas' ? allTodaySales : myTodaySales;
-                    const validActiveSales = activeList.filter(v => v.estado !== 'Anulada');
-                    const totalVentasDiaTodos = allTodaySales
-                      .filter(v => v.estado !== 'Anulada')
-                      .reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-                    const totalVentasMias = myTodaySales
-                      .filter(v => v.estado !== 'Anulada')
-                      .reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-                    const totalMostrado = filtroHistorialVentas === 'todas' ? totalVentasDiaTodos : totalVentasMias;
-
-                    // Desglose por método de pago sobre las ventas activas de la vista actual
-                    const ventasEfectivo = validActiveSales.filter(v => isEfectivo(v.metodo_pago));
-                    const ventasTarjeta = validActiveSales.filter(
-                      v => isTarjeta(v.metodo_pago) && !isTarjetaRegalo(v.metodo_pago)
-                    );
-                    const ventasTransferencia = validActiveSales.filter(v => isTransferencia(v.metodo_pago));
-                    const ventasRappi = validActiveSales.filter(v => isRappi(v.metodo_pago));
-                    const ventasRegalo = validActiveSales.filter(v => isTarjetaRegalo(v.metodo_pago));
-
-                    const totalEfectivo = ventasEfectivo.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-                    const totalTarjeta = ventasTarjeta.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-                    const totalTransferencia = ventasTransferencia.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-                    const totalRappi = ventasRappi.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-                    const totalRegalo = ventasRegalo.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
-
-                    const metodosPagoList = [
-                      {
-                        key: 'efectivo',
-                        label: 'Efectivo',
-                        total: totalEfectivo,
-                        count: ventasEfectivo.length,
-                        dotClass: 'bg-emerald-500',
-                        activeClass: 'bg-emerald-50/90 border-emerald-200 text-emerald-900',
-                        amountClass: 'text-emerald-700'
-                      },
-                      {
-                        key: 'tarjeta',
-                        label: 'Tarjeta (Datáfono)',
-                        total: totalTarjeta,
-                        count: ventasTarjeta.length,
-                        dotClass: 'bg-blue-500',
-                        activeClass: 'bg-blue-50/90 border-blue-200 text-blue-900',
-                        amountClass: 'text-blue-700'
-                      },
-                      {
-                        key: 'transferencia',
-                        label: 'Transferencia',
-                        total: totalTransferencia,
-                        count: ventasTransferencia.length,
-                        dotClass: 'bg-purple-500',
-                        activeClass: 'bg-purple-50/90 border-purple-200 text-purple-900',
-                        amountClass: 'text-purple-700'
-                      },
-                      {
-                        key: 'rappi',
-                        label: 'Rappi',
-                        total: totalRappi,
-                        count: ventasRappi.length,
-                        dotClass: 'bg-amber-500',
-                        activeClass: 'bg-amber-50/90 border-amber-200 text-amber-900',
-                        amountClass: 'text-amber-700'
-                      },
-                      ...(ventasRegalo.length > 0 || totalRegalo > 0
-                        ? [
-                            {
-                              key: 'regalo',
-                              label: 'Tarjeta Regalo',
-                              total: totalRegalo,
-                              count: ventasRegalo.length,
-                              dotClass: 'bg-pink-500',
-                              activeClass: 'bg-pink-50/90 border-pink-200 text-pink-900',
-                              amountClass: 'text-pink-700'
-                            }
-                          ]
-                        : [])
-                    ];
-
-                    const metodosUsados = metodosPagoList.filter(m => m.count > 0 || m.total > 0);
+                    const totalVentasDiaTodos = allTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalVentasMias = myTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
 
                     const sortedSales = [...activeList].sort((a, b) => {
                       const timeA = `${a.fecha || ''} ${a.hora || ''}`;
@@ -2180,53 +2371,16 @@ export default function EmployeeWorkspace({
 
                     return (
                       <div className="space-y-4">
-                        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-3">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-3">
                           <div>
                             <h4 className="text-xs font-black text-[#2C3E50] uppercase tracking-wider">
-                              Historial Transaccional {isToday ? `del Día (${todayStr})` : `(${selectedDate})`}
+                              Historial Transaccional del Día ({todayStr})
                             </h4>
                             <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                              Registro de ventas procesadas durante la jornada seleccionada.
+                              Registro en tiempo real de ventas procesadas durante la jornada activa.
                             </p>
                           </div>
-
-                          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
-                            {/* Filtro de Fecha con predeterminado Hoy */}
-                            <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
-                              <button
-                                type="button"
-                                onClick={() => setCuadreFechaFiltro(todayStr)}
-                                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors cursor-pointer ${
-                                  isToday
-                                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-black'
-                                    : 'text-slate-600 hover:bg-slate-200/70'
-                                }`}
-                              >
-                                Hoy
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setCuadreFechaFiltro(yesterdayStr)}
-                                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors cursor-pointer ${
-                                  isYesterday
-                                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-black'
-                                    : 'text-slate-600 hover:bg-slate-200/70'
-                                }`}
-                              >
-                                Ayer
-                              </button>
-                              <div className="relative flex items-center">
-                                <Calendar className="w-3 h-3 text-slate-400 absolute left-2 pointer-events-none" />
-                                <input
-                                  type="date"
-                                  value={selectedDate}
-                                  max={todayStr}
-                                  onChange={e => setCuadreFechaFiltro(e.target.value || todayStr)}
-                                  className="pl-6 pr-2 py-0.5 text-[10px] font-bold text-[#2C3E50] bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#4B9CD3]"
-                                />
-                              </div>
-                            </div>
-
+                          <div className="flex flex-wrap items-center gap-2.5">
                             {/* Filtro: Todas vs Mías */}
                             <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
                               <button
@@ -2238,7 +2392,7 @@ export default function EmployeeWorkspace({
                                     : 'text-slate-500 hover:text-slate-800'
                                 }`}
                               >
-                                {isToday ? 'Todas del Día' : 'Todas'} ({allTodaySales.length})
+                                Todas del Día ({allTodaySales.length})
                               </button>
                               <button
                                 type="button"
@@ -2252,87 +2406,14 @@ export default function EmployeeWorkspace({
                                 Mis Ventas ({myTodaySales.length})
                               </button>
                             </div>
-                          </div>
-                        </div>
 
-                        {/* BLOQUE TOTAL VENTAS DEL DÍA + DESGLOSE POR MÉTODO DE PAGO */}
-                        <div className="bg-[#EBF5FB]/70 border border-[#AED6F1] p-3.5 rounded-xl shadow-2xs">
-                          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-                            {/* Total General */}
-                            <div className="flex items-center gap-3 pr-4 md:border-r md:border-[#AED6F1]/80">
-                              <div className="w-9 h-9 rounded-lg bg-[#4B9CD3] text-white flex items-center justify-center shrink-0 shadow-2xs">
-                                <DollarSign className="w-5 h-5" />
-                              </div>
-                              <div>
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
-                                  {filtroHistorialVentas === 'todas'
-                                    ? isToday
-                                      ? 'Total Ventas del Día'
-                                      : `Total Ventas (${selectedDate})`
-                                    : 'Total Mis Ventas'}
-                                </span>
-                                <span className="text-lg font-black text-[#2C3E50] leading-tight block">
-                                  {formatMoney(totalMostrado)}
-                                </span>
-                                <span className="text-[10px] font-semibold text-slate-500">
-                                  {validActiveSales.length}{' '}
-                                  {validActiveSales.length === 1 ? 'venta efectiva' : 'ventas efectivas'}
-                                  {metodosUsados.length > 0
-                                    ? ` · ${metodosUsados.length} ${
-                                        metodosUsados.length === 1 ? 'método usado' : 'métodos usados'
-                                      }`
-                                    : ''}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Desglose por Método de Pago */}
-                            <div className="flex-1 w-full">
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">
-                                  Métodos de pago utilizados y total por método
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                {metodosPagoList.map(m => {
-                                  const isUsed = m.count > 0 || m.total > 0;
-                                  return (
-                                    <div
-                                      key={m.key}
-                                      className={`px-3 py-2 rounded-lg border transition-all ${
-                                        isUsed
-                                          ? `${m.activeClass} shadow-2xs`
-                                          : 'bg-white/70 border-slate-200/80 text-slate-400'
-                                      }`}
-                                    >
-                                      <div className="flex items-center justify-between gap-1">
-                                        <span className="text-[9px] font-black uppercase tracking-wider truncate flex items-center gap-1">
-                                          <span
-                                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                              isUsed ? m.dotClass : 'bg-slate-300'
-                                            }`}
-                                          />
-                                          {m.label}
-                                        </span>
-                                        <span
-                                          className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full ${
-                                            isUsed ? 'bg-white/80 text-slate-700' : 'text-slate-400'
-                                          }`}
-                                        >
-                                          {m.count}
-                                        </span>
-                                      </div>
-                                      <div
-                                        className={`text-xs font-black mt-1 ${
-                                          isUsed ? m.amountClass : 'text-slate-400'
-                                        }`}
-                                      >
-                                        {formatMoney(m.total)}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                            <div className="text-left sm:text-right bg-[#EBF5FB]/80 border border-[#AED6F1] px-3.5 py-1.5 rounded-lg shadow-2xs">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                                {filtroHistorialVentas === 'todas' ? 'Total Ventas del Día' : 'Mis Ventas de Hoy'}
+                              </span>
+                              <span className="text-sm font-black text-[#4B9CD3]">
+                                {formatMoney(filtroHistorialVentas === 'todas' ? totalVentasDiaTodos : totalVentasMias)}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -2340,7 +2421,7 @@ export default function EmployeeWorkspace({
                         {sortedSales.length === 0 ? (
                           <div className="py-8 text-center bg-[#F8FAFC] rounded-lg border border-dashed border-[#CBD5E1]">
                             <p className="text-xs font-medium text-slate-400 italic">
-                              No hay ventas registradas en esta vista para la fecha ({selectedDate}).
+                              No hay ventas registradas en esta vista para el día de hoy ({todayStr}).
                             </p>
                           </div>
                         ) : (
@@ -2372,9 +2453,9 @@ export default function EmployeeWorkspace({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-[#F1F5F9]">
-                                {sortedSales.map(v => {
+                                {sortedSales.map((v) => {
                                   const isAnulada = v.estado === 'Anulada';
-
+                                  
                                   let payLabel = 'Efectivo';
                                   let payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
                                   if (isTarjetaRegalo(v.metodo_pago)) {
@@ -2396,8 +2477,7 @@ export default function EmployeeWorkspace({
                                     payLabel = v.metodo_pago;
                                   }
 
-                                  const colaboradorNombre =
-                                    v.vendedor_nombre || (v as any).cajero_nombre || 'Colaborador';
+                                  const colaboradorNombre = v.vendedor_nombre || (v as any).cajero_nombre || 'Colaborador';
 
                                   return (
                                     <tr key={v.id} className="hover:bg-[#F8FAFC]/60 transition-colors">
@@ -2424,10 +2504,7 @@ export default function EmployeeWorkspace({
                                           <div className="space-y-0.5 max-w-xs">
                                             {v.productos_vendidos.map((prod, pIdx) => (
                                               <div key={pIdx} className="text-xs text-[#2C3E50]">
-                                                <span className="font-extrabold text-[#4B9CD3]">
-                                                  {prod.cantidad}x
-                                                </span>{' '}
-                                                {prod.nombre}
+                                                <span className="font-extrabold text-[#4B9CD3]">{prod.cantidad}x</span> {prod.nombre}
                                               </div>
                                             ))}
                                           </div>
@@ -2436,9 +2513,7 @@ export default function EmployeeWorkspace({
                                         )}
                                       </td>
                                       <td className="py-3 px-3 text-xs whitespace-nowrap">
-                                        <span
-                                          className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${payStyle}`}
-                                        >
+                                        <span className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${payStyle}`}>
                                           {payLabel}
                                         </span>
                                       </td>
@@ -2467,6 +2542,288 @@ export default function EmployeeWorkspace({
                     );
                   })()}
                 </div>
+              </div>
+
+              {/* FORMULARIO DE CUADRE DE CAJA DIARIO (VENTAS DEL DÍA DE TODOS LOS EMPLEADOS) */}
+              <div className="mt-8 pt-6 border-t border-dashed border-[#E2E8F0]">
+                {(() => {
+                  const todayStr = getLocalDateString();
+                  
+                  const normalizeDate = (v: any) => {
+                    let saleFecha = v?.fecha;
+                    if (saleFecha && saleFecha.includes('T')) {
+                      saleFecha = saleFecha.split('T')[0];
+                    } else if (saleFecha && saleFecha.includes(' ')) {
+                      saleFecha = saleFecha.split(' ')[0];
+                    }
+                    if (!saleFecha && v?.created_at) {
+                      try {
+                        saleFecha = getLocalDateString(v.created_at);
+                      } catch (e) {
+                        saleFecha = String(v.created_at).split('T')[0];
+                      }
+                    }
+                    return saleFecha;
+                  };
+
+                  // Filtrar únicamente las ventas del DÍA DE HOY registradas por TODOS LOS EMPLEADOS (excluyendo únicamente ventas anuladas)
+                  const ventasDelDia = (ventasRegistradas || []).filter(v => {
+                    if (!v || v.estado === 'Anulada') return false;
+                    return normalizeDate(v) === todayStr;
+                  });
+
+                  // Desglose por medio de pago de todos los colaboradores
+                  const totalEfectivo = ventasDelDia.filter(v => isEfectivo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  const totalTarjeta = ventasDelDia.filter(v => isTarjeta(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  const totalTransferencia = ventasDelDia.filter(v => isTransferencia(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  const totalRappi = ventasDelDia.filter(v => isRappi(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  const totalTarjetaRegalo = ventasDelDia.filter(v => isTarjetaRegalo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  
+                  // Total ventas del día registrado por todos los empleados
+                  const totalVentasDia = totalEfectivo + totalTarjeta + totalTransferencia + totalRappi + totalTarjetaRegalo;
+
+                  const contadoParsed = parseFloat(cuadrePosContadoInput);
+                  const hasContadoVal = cuadrePosContadoInput.trim() !== '' && !isNaN(contadoParsed);
+                  const diferenciaCalculada = hasContadoVal ? (contadoParsed - totalEfectivo) : 0;
+
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                        <div>
+                          <h5 className="font-extrabold text-[#2C3E50] text-xs flex items-center gap-1.5">
+                            <DollarSign className="w-4 h-4 text-[#4B9CD3]" />
+                            Cuadre de Caja Diario / Cierre de Turno
+                          </h5>
+                          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                            Total consolidado de ventas del día ({todayStr}) registrado por todos los colaboradores.
+                          </p>
+                        </div>
+                        <div className="text-left sm:text-right bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-lg shadow-2xs">
+                          <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider block">
+                            Total Ventas del Día
+                          </span>
+                          <span className="text-sm font-black text-emerald-800">
+                            {formatMoney(totalVentasDia)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {cuadrePosSuccess && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 text-xs font-bold flex items-center justify-between shadow-2xs animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2">
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>¡Corte de caja diario enviado correctamente para revisión del administrador!</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setCuadrePosSuccess(false)}
+                            className="text-emerald-700 hover:text-emerald-900 text-xs font-black cursor-pointer ml-3 px-1.5 py-0.5 rounded hover:bg-emerald-100"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )}
+
+                      <form 
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const formData = new FormData(e.currentTarget);
+                          const contadoVal = parseFloat(formData.get('efectivo_contado') as string) || 0;
+                          
+                          const newCuadre = {
+                            fecha: todayStr,
+                            hora_cierre: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+                            empleado_id: empleado.id,
+                            empleado_nombre: empleado.nombre,
+                            total_ventas_dia: totalVentasDia,
+                            efectivo_esperado: totalEfectivo,
+                            efectivo_contado: contadoVal,
+                            tarjeta_esperado: totalTarjeta,
+                            transferencia_esperado: totalTransferencia,
+                            rappi_esperado: totalRappi,
+                            tarjeta_regalo_esperado: totalTarjetaRegalo,
+                            diferencia_total: contadoVal - totalEfectivo,
+                            observaciones: (formData.get('observaciones') as string) || '',
+                            estado: 'pendiente_revision'
+                          };
+                          
+                          onRegistrarCuadreCaja(newCuadre as any);
+                          e.currentTarget.reset();
+                          setCuadrePosContadoInput('');
+                          setCuadrePosSuccess(true);
+                        }}
+                        className="bg-[#FFFDF6] p-4 rounded-xl border border-[#E2E8F0] space-y-3.5"
+                      >
+                        {/* TARJETAS RESUMEN: TOTAL DEL DÍA + MEDIOS DE PAGO */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-white p-3.5 rounded-xl border border-slate-100 shadow-2xs">
+                          {/* 1. TOTAL GENERAL DE VENTAS DEL DÍA */}
+                          <div className="bg-[#EBF5FB] border-2 border-[#4B9CD3]/50 p-3 rounded-xl flex flex-col justify-between col-span-2 sm:col-span-1 lg:col-span-1 shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black uppercase text-[#2C3E50] tracking-wider">
+                                Total Ventas (Día)
+                              </span>
+                              <span className="text-[8px] font-black bg-[#4B9CD3] text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                                Todos
+                              </span>
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-[#2C3E50] block">
+                                {formatMoney(totalVentasDia)}
+                              </span>
+                              <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">
+                                {ventasDelDia.length} {ventasDelDia.length === 1 ? 'venta hoy' : 'ventas hoy'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 2. EFECTIVO SISTEMA */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Efectivo Sistema
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" title="Efectivo en caja" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-[#4B9CD3] block">
+                                {formatMoney(totalEfectivo)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Base a conciliar
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 3. TARJETA (DATÁFONO) */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Tarjeta (Datáfono)
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-blue-500" title="Datáfono POS" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-slate-700 block">
+                                {formatMoney(totalTarjeta)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Comprobantes POS
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 4. TRANSFERENCIA */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Transferencia
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-purple-500" title="Nequi / Bancolombia" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-slate-700 block">
+                                {formatMoney(totalTransferencia)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Nequi / Bancolombia
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 5. RAPPI */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Rappi
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-amber-500" title="Domicilios" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-slate-700 block">
+                                {formatMoney(totalRappi)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Domicilios Rappi
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 6. TARJETA REGALO */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Tarjeta Regalo
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-pink-500" title="Bonos Redimibles" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-slate-700 block">
+                                {formatMoney(totalTarjetaRegalo)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Bonos Canjeados
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* INPUTS DE REGISTRO */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                Efectivo Físico Contado
+                              </label>
+                              {hasContadoVal && (
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                                  Math.abs(diferenciaCalculada) < 0.01
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : diferenciaCalculada < 0
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                                }`}>
+                                  {Math.abs(diferenciaCalculada) < 0.01
+                                    ? '✓ Efectivo conciliado'
+                                    : diferenciaCalculada < 0
+                                    ? `Faltante: -${formatMoney(Math.abs(diferenciaCalculada))}`
+                                    : `Sobrante: +${formatMoney(diferenciaCalculada)}`}
+                                </span>
+                              )}
+                            </div>
+                            <input 
+                              name="efectivo_contado" 
+                              type="number" 
+                              step="0.01" 
+                              value={cuadrePosContadoInput}
+                              onChange={(e) => setCuadrePosContadoInput(e.target.value)}
+                              className="w-full text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white font-bold text-slate-800" 
+                              required 
+                              placeholder="Ingresa efectivo real en caja" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                              Notas u Observaciones
+                            </label>
+                            <input 
+                              name="observaciones" 
+                              type="text" 
+                              placeholder="Faltantes, gastos de caja chica..." 
+                              className="w-full text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white text-slate-800" 
+                            />
+                          </div>
+                        </div>
+                        
+                        <button 
+                          type="submit" 
+                          className="w-full bg-[#2C3E50] hover:bg-slate-800 text-white font-black text-xs py-2.5 rounded-lg transition-colors cursor-pointer shadow-xs uppercase tracking-wider"
+                        >
+                          Enviar Corte de Caja Diario
+                        </button>
+                      </form>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -2784,7 +3141,7 @@ export default function EmployeeWorkspace({
           <div className="bg-[#FFFDF6] border-2 border-[#4B9CD3] rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-5 text-[#2C3E50] relative">
             <button
               type="button"
-              onClick={() => setMandatoryPaymentModal(null)}
+              onClick={handleClosePaymentModal}
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-extrabold text-xs w-6 h-6 flex items-center justify-center rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer"
               title="Cancelar / Modificar Pedido"
             >
@@ -2825,53 +3182,281 @@ export default function EmployeeWorkspace({
               </div>
             )}
 
-            {/* Botones de Acción Completa - Opciones de Selección */}
-            <div className="space-y-2.5">
-              <span className="text-[10px] font-black text-[#2C3E50] uppercase tracking-wider block text-center">
-                Elige el Canal de Pago del Cliente
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleSelectMandatoryPayment('Efectivo')}
-                  className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
-                >
-                  Efectivo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectMandatoryPayment('Tarjeta (Datáfono)')}
-                  className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
-                >
-                  Tarjeta (Datáfono)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectMandatoryPayment('Transferencia (Nequi/Bancolombia)')}
-                  className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
-                >
-                  Transferencia (Nequi/Bancolombia)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectMandatoryPayment('Rappi')}
-                  className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
-                >
-                  Rappi
-                </button>
-              </div>
-            </div>
+            {/* Contenido según medio seleccionado: Flujo Especial Tarjeta Regalo Supabase o Selección Directa */}
+            {isGiftCardPaymentActive ? (
+              <div className="space-y-4">
+                {/* Cabecera del Flujo Tarjeta Regalo */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsGiftCardPaymentActive(false);
+                      setGiftCardError(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#4B9CD3] hover:text-[#3A82B4] transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Volver a medios de pago</span>
+                  </button>
+                  <div className="text-right">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Total a Facturar</span>
+                    <span className="text-xs font-black text-[#2C3E50]">{formatMoney(mandatoryPaymentModal.total)}</span>
+                  </div>
+                </div>
 
-            {/* Botón secundario para Cancelar / Modificar Pedido */}
-            <div className="pt-2 border-t border-[#E2E8F0]">
-              <button
-                type="button"
-                onClick={() => setMandatoryPaymentModal(null)}
-                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer text-center"
-              >
-                Cancelar / Modificar Pedido
-              </button>
-            </div>
+                <div className="text-center space-y-1">
+                  <div className="w-10 h-10 mx-auto rounded-full bg-pink-50 border border-pink-200 flex items-center justify-center text-pink-600">
+                    <Gift className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-sm font-black text-[#2C3E50]">Cobro con Tarjeta de Regalo</h4>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Consulta en vivo de saldo en Supabase y débito en línea.
+                  </p>
+                </div>
+
+                {/* Input de Búsqueda y Validación */}
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-black uppercase text-slate-600 tracking-wider">
+                    Código de la Tarjeta de Regalo
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      autoFocus
+                      disabled={isLoadingGiftCard || isDebitingGiftCard}
+                      value={giftCardCodeInput}
+                      onChange={(e) => {
+                        setGiftCardCodeInput(e.target.value);
+                        setGiftCardError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleConsultarSaldoGiftCard();
+                        }
+                      }}
+                      placeholder="Ingresa el código (ej. 84920153)"
+                      className="flex-1 text-xs px-3.5 py-2.5 border-2 border-slate-200 focus:border-[#4B9CD3] rounded-xl bg-white font-mono font-bold text-[#2C3E50] outline-hidden uppercase tracking-wider"
+                    />
+                    <button
+                      type="button"
+                      disabled={isLoadingGiftCard || isDebitingGiftCard || !giftCardCodeInput.trim()}
+                      onClick={handleConsultarSaldoGiftCard}
+                      className="px-4 py-2.5 bg-[#4B9CD3] hover:bg-[#3A82B4] disabled:bg-slate-300 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 shadow-xs active:scale-98"
+                    >
+                      {isLoadingGiftCard ? (
+                        <>
+                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                          <span>Consultando...</span>
+                        </>
+                      ) : (
+                        <span>Consultar Saldo</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Feedback de Carga */}
+                {isLoadingGiftCard && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold text-blue-700 animate-pulse">
+                    <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                    <span>Consultando saldo en Supabase...</span>
+                  </div>
+                )}
+
+                {/* Mensaje de Error */}
+                {giftCardError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl flex items-start gap-2.5 text-xs">
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <span className="font-bold block">No es posible aplicar la tarjeta</span>
+                      <span className="text-red-600 font-medium">{giftCardError}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Información de Tarjeta Válida y Desglose */}
+                {giftCardVerifiedData && (() => {
+                  const totalFactura = mandatoryPaymentModal.total;
+                  const saldoActual = Number(giftCardVerifiedData.current_balance || 0);
+                  const isFull = saldoActual >= totalFactura;
+                  const montoADescontar = isFull ? totalFactura : saldoActual;
+                  const saldoRestante = isFull ? (saldoActual - totalFactura) : 0;
+                  const diferenciaPendiente = isFull ? 0 : (totalFactura - saldoActual);
+
+                  return (
+                    <div className="space-y-3 pt-1 border-t border-slate-100">
+                      {/* Tarjeta y Saldo Actual Visible */}
+                      <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            <span className="text-xs font-extrabold text-emerald-900">Tarjeta Verificada</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold bg-white px-2 py-0.5 rounded border border-emerald-200 text-emerald-800">
+                            {giftCardVerifiedData.code}
+                          </span>
+                        </div>
+
+                        <div className="flex items-baseline justify-between pt-1">
+                          <span className="text-xs font-bold text-emerald-800">Saldo Disponible Actual:</span>
+                          <span className="text-base font-black text-emerald-700">{formatMoney(saldoActual)}</span>
+                        </div>
+                      </div>
+
+                      {/* Resumen del Cálculo: Pago Completo o Mixto */}
+                      <div className="bg-white border border-[#E2E8F0] rounded-xl p-3 space-y-2 text-xs">
+                        <div className="flex justify-between items-center text-slate-600 font-medium">
+                          <span>Total de la factura:</span>
+                          <span className="font-bold text-[#2C3E50]">{formatMoney(totalFactura)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-emerald-700 font-bold">
+                          <span>A debitar de Tarjeta Regalo:</span>
+                          <span>- {formatMoney(montoADescontar)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-slate-500 font-semibold pt-1 border-t border-slate-100">
+                          <span>Saldo restante proyectado en tarjeta:</span>
+                          <span className="font-black text-[#2C3E50]">{formatMoney(saldoRestante)}</span>
+                        </div>
+
+                        {isFull ? (
+                          <div className="p-2 bg-emerald-50 rounded-lg text-emerald-800 text-[11px] font-bold text-center border border-emerald-200">
+                            ¡Pago Completo! La tarjeta de regalo cubre la totalidad de la cuenta.
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                            <div className="flex justify-between items-center bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                              <span className="font-extrabold text-amber-900 text-xs">Diferencia pendiente a pagar:</span>
+                              <span className="font-black text-amber-700 text-sm">{formatMoney(diferenciaPendiente)}</span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider block">
+                                Método de pago para la diferencia ({formatMoney(diferenciaPendiente)}):
+                              </span>
+                              <div className="grid grid-cols-2 gap-2">
+                                {['Efectivo', 'Tarjeta (Datáfono)', 'Transferencia (Nequi/Bancolombia)', 'Rappi'].map((met) => {
+                                  const isSelected = secondaryPaymentMethod === met;
+                                  return (
+                                    <button
+                                      key={met}
+                                      type="button"
+                                      onClick={() => setSecondaryPaymentMethod(met)}
+                                      className={`py-2 px-2.5 text-xs font-extrabold rounded-lg border-2 transition-all cursor-pointer text-center ${
+                                        isSelected
+                                          ? 'bg-[#EBF5FB] border-[#4B9CD3] text-[#2C3E50] shadow-xs'
+                                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                      }`}
+                                    >
+                                      {met.split(' ')[0]}
+                                      {met.includes('(') && <span className="block text-[9px] font-normal text-slate-400">{met.match(/\((.*?)\)/)?.[1]}</span>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Botón de Confirmación y Cierre de Factura */}
+                      <button
+                        type="button"
+                        disabled={isDebitingGiftCard || isLoadingGiftCard}
+                        onClick={handleConfirmarCobroGiftCard}
+                        className="w-full py-3.5 px-4 bg-[#4B9CD3] hover:bg-[#3A82B4] disabled:bg-slate-300 text-white font-black text-xs rounded-xl transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        {isDebitingGiftCard ? (
+                          <>
+                            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                            <span>Debitando en Supabase y facturando...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4" />
+                            <span>
+                              {isFull 
+                                ? `Confirmar Cobro con Tarjeta Regalo (${formatMoney(totalFactura)})`
+                                : `Confirmar Cobro Mixto (${formatMoney(totalFactura)})`
+                              }
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                {/* Botón de Cancelación */}
+                <div className="pt-2 border-t border-[#E2E8F0]">
+                  <button
+                    type="button"
+                    disabled={isDebitingGiftCard}
+                    onClick={handleClosePaymentModal}
+                    className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer text-center"
+                  >
+                    Cancelar / Modificar Pedido
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Botones de Acción Completa - Opciones de Selección */}
+                <div className="space-y-2.5">
+                  <span className="text-[10px] font-black text-[#2C3E50] uppercase tracking-wider block text-center">
+                    Elige el Canal de Pago del Cliente
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectMandatoryPayment('Efectivo')}
+                      className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
+                    >
+                      Efectivo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectMandatoryPayment('Tarjeta (Datáfono)')}
+                      className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
+                    >
+                      Tarjeta (Datáfono)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectMandatoryPayment('Transferencia (Nequi/Bancolombia)')}
+                      className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
+                    >
+                      Transferencia (Nequi/Bancolombia)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectMandatoryPayment('Rappi')}
+                      className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
+                    >
+                      Rappi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectMandatoryPayment('Tarjeta Regalo')}
+                      className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center sm:col-span-2"
+                    >
+                      Tarjeta Regalo
+                    </button>
+                  </div>
+                </div>
+
+                {/* Botón secundario para Cancelar / Modificar Pedido */}
+                <div className="pt-2 border-t border-[#E2E8F0]">
+                  <button
+                    type="button"
+                    onClick={handleClosePaymentModal}
+                    className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer text-center"
+                  >
+                    Cancelar / Modificar Pedido
+                  </button>
+                </div>
+              </>
+            )}
 
           </div>
         </div>

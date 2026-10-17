@@ -268,6 +268,18 @@ export interface Venta {
   cliente_telefono?: string;
   estado?: 'Completada' | 'Anulada' | 'Pendiente';
   motivo_anulacion?: string;
+  monto_tarjeta_regalo?: number;
+  tarjeta_regalo_codigo?: string;
+  monto_complementario?: number;
+  metodo_pago_complementario?: string | null;
+  desglose_pago?: {
+    tarjeta_regalo?: number;
+    codigo_tarjeta?: string;
+    saldo_anterior?: number;
+    saldo_restante?: number;
+    complementario?: number;
+    metodo_complementario?: string | null;
+  };
 }
 
 // Payment method helpers to normalize casing and naming variations

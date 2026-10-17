@@ -475,6 +475,82 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.gastos;
   END IF;
 END $$;
+
+-- 11. Tabla: gift_cards (Tarjetas de Regalo para consulta y débito directo)
+CREATE TABLE IF NOT EXISTS public.gift_cards (
+  id UUID DEFAULT gen_random_uuid(),
+  code TEXT PRIMARY KEY,
+  current_balance NUMERIC NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.gift_cards ENABLE ROW LEVEL SECURITY;
+
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE tablename = 'gift_cards' AND policyname = 'Permitir acceso publico total a gift_cards'
+  ) THEN
+    CREATE POLICY "Permitir acceso publico total a gift_cards" 
+    ON public.gift_cards FOR ALL TO public USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+ALTER TABLE public.gift_cards REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'gift_cards') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.gift_cards;
+  END IF;
+END $$;
+
+-- Función RPC: debit_gift_card
+CREATE OR REPLACE FUNCTION public.debit_gift_card(p_code text, p_amount numeric)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_card record;
+  v_new_balance numeric;
+BEGIN
+  SELECT * INTO v_card
+  FROM public.gift_cards
+  WHERE LOWER(REPLACE(code, ' ', '')) = LOWER(REPLACE(p_code, ' ', ''))
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'El código de tarjeta de regalo no existe.');
+  END IF;
+
+  IF NOT v_card.is_active THEN
+    RETURN jsonb_build_object('success', false, 'error', 'La tarjeta de regalo no está activa.');
+  END IF;
+
+  IF v_card.current_balance < p_amount THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Saldo insuficiente en la tarjeta de regalo.');
+  END IF;
+
+  v_new_balance := v_card.current_balance - p_amount;
+
+  UPDATE public.gift_cards
+  SET current_balance = v_new_balance,
+      is_active = CASE WHEN v_new_balance <= 0 THEN false ELSE v_card.is_active END,
+      updated_at = NOW()
+  WHERE code = v_card.code;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'code', v_card.code,
+    'debited_amount', p_amount,
+    'new_balance', v_new_balance
+  );
+END;
+$$;
 `;
 
 // Helper: Probador de conexión
@@ -1125,7 +1201,7 @@ export async function insertSaleInSupabase(venta: Venta): Promise<boolean> {
   const pMethod = venta.metodo_pago || 'Efectivo';
   const prods = venta.productos_vendidos || [];
 
-  const { error } = await client.from('sales').insert({
+  const payload: any = {
     id: venta.id,
     staff_id: staffId,
     vendedor_id: staffId,
@@ -1143,8 +1219,26 @@ export async function insertSaleInSupabase(venta: Venta): Promise<boolean> {
     fecha: venta.fecha || getLocalDateString(),
     hora: venta.hora || new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
     estado: venta.estado || 'Completada'
-  });
-  if (error) {
+  };
+
+  if ((venta as any).monto_tarjeta_regalo !== undefined) {
+    payload.monto_tarjeta_regalo = (venta as any).monto_tarjeta_regalo;
+  }
+  if ((venta as any).tarjeta_regalo_codigo) {
+    payload.tarjeta_regalo_codigo = (venta as any).tarjeta_regalo_codigo;
+  }
+  if ((venta as any).monto_complementario !== undefined) {
+    payload.monto_complementario = (venta as any).monto_complementario;
+  }
+  if ((venta as any).metodo_pago_complementario) {
+    payload.metodo_pago_complementario = (venta as any).metodo_pago_complementario;
+  }
+  if ((venta as any).desglose_pago) {
+    payload.desglose_pago = (venta as any).desglose_pago;
+  }
+
+  const { success, error } = await insertWithResilientColumns(client, 'sales', payload);
+  if (!success && error) {
     console.error('Supabase insertSale error:', error.message);
     return false;
   }

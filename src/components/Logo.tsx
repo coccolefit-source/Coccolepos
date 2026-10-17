@@ -34,7 +34,6 @@ export const Logo: React.FC<LogoProps> = ({ className = '', size = 'md', variant
     );
   }
 
-  // Elegant Minimalist Vector Logo Fallback
   return (
     <div className={`relative rounded-full bg-gradient-to-br from-[#4B9CD3] via-[#3A82B4] to-[#2C3E50] p-1 shadow-2xs flex items-center justify-center text-white ${containerSize} ${className}`}>
       <div className="w-full h-full rounded-full border border-white/20 flex flex-col items-center justify-center p-1 bg-[#4B9CD3]/90 backdrop-blur-xs text-center select-none overflow-hidden">

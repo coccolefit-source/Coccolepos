@@ -2824,58 +2824,58 @@ export default function AdminDashboard({
               <button
                 type="button"
                 onClick={() => setVentasSubTab('tarjetas_regalo')}
-                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center whitespace-nowrap px-3 ${
+                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center ${
                   ventasSubTab === 'tarjetas_regalo'
-                    ? 'bg-purple-700 text-white shadow-2xs font-extrabold'
-                    : 'text-purple-800 hover:text-purple-900 hover:bg-purple-50'
+                    ? 'bg-[#4B9CD3] text-white shadow-2xs font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
                 }`}
               >
-                🎁 Tarjetas Regalo & Códigos
+                Tarjetas Regalo
               </button>
             </div>
 
-                        {ventasSubTab === 'tarjetas_regalo' ? (
+            {ventasSubTab === 'tarjetas_regalo' ? (
               /* VISTA DE TARJETAS REGALOS Y CÓDIGOS REDIMIBLES */
               <div className="space-y-6 w-full animate-in fade-in duration-200">
               {/* Header & KPI Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
-                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total Emitido</span>
-                  <p className="text-xl font-black text-purple-900">{formatMoney((tarjetasRegalo || []).reduce((sum, c) => sum + Number(c.monto_inicial || 0), 0))}</p>
+                <div className="bg-[#FFFDF6] p-4 rounded-xl border border-[#E2E8F0] shadow-2xs space-y-1">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Total Emitido</span>
+                  <p className="text-xl font-extrabold text-[#2C3E50]">{formatMoney((tarjetasRegalo || []).reduce((sum, c) => sum + Number(c.monto_inicial || 0), 0))}</p>
                   <span className="text-[10px] font-bold text-slate-500">{(tarjetasRegalo || []).length} tarjetas creadas</span>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-2xs space-y-1">
-                  <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">Saldo Disponible Activo</span>
-                  <p className="text-xl font-black text-emerald-700">{formatMoney((tarjetasRegalo || []).filter(c => c.estado === 'activa').reduce((sum, c) => sum + Number(c.saldo_actual || 0), 0))}</p>
+                <div className="bg-[#FFFDF6] p-4 rounded-xl border border-emerald-200 shadow-2xs space-y-1">
+                  <span className="text-[10px] font-bold uppercase text-emerald-600 tracking-wider">Saldo Disponible Activo</span>
+                  <p className="text-xl font-extrabold text-emerald-700">{formatMoney((tarjetasRegalo || []).filter(c => c.estado === 'activa').reduce((sum, c) => sum + Number(c.saldo_actual || 0), 0))}</p>
                   <span className="text-[10px] font-bold text-emerald-600">{(tarjetasRegalo || []).filter(c => c.estado === 'activa').length} tarjetas activas</span>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
-                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Monto Canjeado</span>
-                  <p className="text-xl font-black text-slate-700">{formatMoney((tarjetasRegalo || []).reduce((sum, c) => sum + (Number(c.monto_inicial || 0) - Number(c.saldo_actual || 0)), 0))}</p>
+                <div className="bg-[#FFFDF6] p-4 rounded-xl border border-[#E2E8F0] shadow-2xs space-y-1">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Monto Canjeado</span>
+                  <p className="text-xl font-extrabold text-slate-700">{formatMoney((tarjetasRegalo || []).reduce((sum, c) => sum + (Number(c.monto_inicial || 0) - Number(c.saldo_actual || 0)), 0))}</p>
                   <span className="text-[10px] font-bold text-slate-500">{(tarjetasRegalo || []).filter(c => c.estado === 'canjeada').length} tarjetas canjeadas totalmente</span>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-2xs space-y-1">
-                  <span className="text-[10px] font-black uppercase text-amber-700 tracking-wider">Inactivas / Agotadas</span>
-                  <p className="text-xl font-black text-amber-800">{(tarjetasRegalo || []).filter(c => c.estado !== 'activa').length}</p>
+                <div className="bg-[#FFFDF6] p-4 rounded-xl border border-amber-200 shadow-2xs space-y-1">
+                  <span className="text-[10px] font-bold uppercase text-amber-700 tracking-wider">Inactivas / Agotadas</span>
+                  <p className="text-xl font-extrabold text-amber-800">{(tarjetasRegalo || []).filter(c => c.estado !== 'activa').length}</p>
                   <span className="text-[10px] font-bold text-amber-600">Completadas o dadas de baja</span>
                 </div>
               </div>
 
               {/* Formulario para Crear Nueva Tarjeta Regalo */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+              <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div>
-                    <h3 className="text-sm font-black text-[#2C3E50] uppercase tracking-wider flex items-center gap-2">
-                      <span>🎁</span> Crear Nueva Tarjeta Regalo / Bono Redimible
+                    <h3 className="text-base font-extrabold text-[#2C3E50]">
+                      Crear Nueva Tarjeta Regalo / Bono Redimible
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">Genera un código único con saldo prepagado que el cliente puede canjear en la caja POS.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Genera un código numérico con saldo prepagado que el cliente puede canjear en la caja POS.</p>
                   </div>
                 </div>
 
                 <form onSubmit={(e) => {
                   e.preventDefault();
                   const formData = new FormData(e.currentTarget);
-                  const codigo = (formData.get('codigo') as string || '').trim().toUpperCase();
+                  const codigo = (formData.get('codigo') as string || '').trim();
                   const monto = parseFloat(formData.get('monto') as string) || 0;
                   const cliente = (formData.get('cliente') as string || '').trim();
                   const notas = (formData.get('notas') as string || '').trim();
@@ -2912,21 +2912,20 @@ export default function AdminDashboard({
                           type="text"
                           required
                           value={giftCardFormCode}
-                          onChange={(e) => setGiftCardFormCode(e.target.value.toUpperCase())}
-                          placeholder="GIFT-XXXX"
-                          className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-mono font-bold uppercase text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                          onChange={(e) => setGiftCardFormCode(e.target.value.replace(/\D/g, ''))}
+                          placeholder="Ej. 84920153"
+                          className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-bold text-[#2C3E50] h-9 focus:ring-1 focus:ring-[#4B9CD3]"
                         />
                         <button
                           type="button"
                           onClick={() => {
-                            const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
-                            const num = Math.floor(10 + Math.random() * 89);
-                            setGiftCardFormCode(`GIFT-${rand}-${num}`);
+                            const num = Math.floor(10000000 + Math.random() * 90000000).toString();
+                            setGiftCardFormCode(num);
                           }}
                           title="Generar código aleatorio único"
-                          className="px-2.5 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-black rounded-lg transition-colors cursor-pointer shrink-0"
+                          className="px-2.5 py-1 bg-[#EBF5FB] hover:bg-[#D4E6F1] text-[#4B9CD3] text-[10px] font-bold rounded-lg transition-colors cursor-pointer shrink-0"
                         >
-                          ⚡ Generar
+                          Generar
                         </button>
                       </div>
                     </div>
@@ -2940,7 +2939,7 @@ export default function AdminDashboard({
                         min="1000"
                         required
                         placeholder="Ej. 50000"
-                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-bold text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-bold text-[#2C3E50] h-9 focus:ring-1 focus:ring-[#4B9CD3]"
                       />
                     </div>
 
@@ -2950,7 +2949,7 @@ export default function AdminDashboard({
                         name="cliente"
                         type="text"
                         placeholder="Ej. Juan Pérez"
-                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-medium text-[#2C3E50] h-9 focus:ring-1 focus:ring-[#4B9CD3]"
                       />
                     </div>
 
@@ -2960,25 +2959,25 @@ export default function AdminDashboard({
                         name="notas"
                         type="text"
                         placeholder="Ej. Bono Promocional Cumpleaños"
-                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-medium text-[#2C3E50] h-9 focus:ring-1 focus:ring-[#4B9CD3]"
                       />
                     </div>
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full sm:w-auto bg-purple-700 hover:bg-purple-800 text-white font-black text-xs py-2.5 px-6 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                    className="w-full sm:w-auto bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs py-2.5 px-6 rounded-lg transition-colors cursor-pointer flex items-center justify-center shadow-xs"
                   >
-                    <span>🎁 Crear y Activar Tarjeta Regalo</span>
+                    Crear y Activar Tarjeta Regalo
                   </button>
                 </form>
               </div>
 
               {/* Tabla de Tarjetas Regalo Creadas */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+              <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                   <div>
-                    <h3 className="text-sm font-black text-[#2C3E50] uppercase tracking-wider">
+                    <h3 className="text-base font-extrabold text-[#2C3E50]">
                       Listado Oficial de Tarjetas Regalo
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">Control y estado de saldos en tiempo real de todos los códigos emitidos.</p>
@@ -2990,7 +2989,7 @@ export default function AdminDashboard({
                       value={giftCardSearchTerm}
                       onChange={(e) => setGiftCardSearchTerm(e.target.value)}
                       placeholder="Buscar por código o cliente..."
-                      className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 font-medium"
+                      className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] font-medium"
                     />
                   </div>
                 </div>
@@ -2998,7 +2997,7 @@ export default function AdminDashboard({
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse min-w-[700px]">
                     <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                      <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase text-slate-500 tracking-wider">
                         <th className="p-3">Código</th>
                         <th className="p-3">Cliente / Concepto</th>
                         <th className="p-3 text-right">Monto Inicial</th>
@@ -3017,7 +3016,7 @@ export default function AdminDashboard({
                         })
                         .map((card) => (
                           <tr key={card.id} className="hover:bg-slate-50/70 transition-colors">
-                            <td className="p-3 font-mono font-black text-purple-900">{card.codigo}</td>
+                            <td className="p-3 font-bold text-[#2C3E50]">{card.codigo}</td>
                             <td className="p-3">
                               <div>
                                 <span className="font-bold block">{card.cliente_nombre || 'Cliente General'}</span>
@@ -3025,9 +3024,9 @@ export default function AdminDashboard({
                               </div>
                             </td>
                             <td className="p-3 text-right font-bold text-slate-600">{formatMoney(card.monto_inicial)}</td>
-                            <td className="p-3 text-right font-black text-emerald-700">{formatMoney(card.saldo_actual)}</td>
+                            <td className="p-3 text-right font-bold text-emerald-700">{formatMoney(card.saldo_actual)}</td>
                             <td className="p-3 text-center">
-                              <span className={`px-2.5 py-0.5 text-[10px] font-black rounded-full uppercase tracking-wider ${
+                              <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full uppercase tracking-wider ${
                                 card.estado === 'activa'
                                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                   : card.estado === 'canjeada'
@@ -3049,7 +3048,7 @@ export default function AdminDashboard({
                                   className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded transition-colors cursor-pointer"
                                   title="Copiar código"
                                 >
-                                  📋 Copiar
+                                  Copiar
                                 </button>
                                 <button
                                   type="button"
@@ -3058,10 +3057,10 @@ export default function AdminDashboard({
                                       if (onDeleteTarjetaRegalo) onDeleteTarjetaRegalo(card.id);
                                     }
                                   }}
-                                  className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded transition-colors cursor-pointer"
+                                  className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded transition-colors cursor-pointer flex items-center justify-center"
                                   title="Eliminar tarjeta"
                                 >
-                                  🗑️
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             </td>
@@ -3698,21 +3697,21 @@ export default function AdminDashboard({
                       <div className="flex gap-1.5 font-mono">
                         <input
                           type="text"
-                          placeholder="Ej. JUIC-05"
+                          placeholder="Ej. 1045"
                           value={catProdCodigo}
-                          onChange={(e) => setCatProdCodigo(e.target.value)}
-                          className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 uppercase font-bold h-9"
+                          onChange={(e) => setCatProdCodigo(e.target.value.replace(/\D/g, ''))}
+                          className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-[#FFFDF6]/30 font-bold h-9"
                           required
                         />
                         {!editingCatProdId && (
                           <button
                             type="button"
                             onClick={() => {
-                              const rand = Math.floor(10 + Math.random() * 90);
-                              setCatProdCodigo(`PROD-${rand}`);
+                              const randNum = Math.floor(1000 + Math.random() * 9000).toString();
+                              setCatProdCodigo(randNum);
                             }}
                             className="bg-[#EBF5FB] hover:bg-[#cbe2ca] border border-[#AED6F1] text-[#4B9CD3] text-[10px] font-extrabold px-2.5 rounded-lg transition-colors whitespace-nowrap h-9 cursor-pointer"
-                            title="Generar código aleatorio"
+                            title="Generar código aleatorio (solo números)"
                           >
                             Auto
                           </button>
