@@ -12,10 +12,10 @@ export default function ModalQrFidelizacion({ isOpen, onClose }: ModalQrFideliza
 
   if (!isOpen) return null;
 
-  // URL a la que dirigirá el QR
+  // URL a la que dirigirá el QR (usa la raíz /?view=registro-cliente#/registro-cliente para evitar 404 en servidores estáticos, además de /registro-cliente con vercel.json)
   const registrationUrl = typeof window !== 'undefined' 
-    ? `${window.location.origin}/registro-cliente`
-    : 'https://coccolefit.app/registro-cliente';
+    ? `${window.location.origin}/?view=registro-cliente#/registro-cliente`
+    : 'https://coccolefit.app/?view=registro-cliente#/registro-cliente';
 
   const handleCopyLink = () => {
     try {

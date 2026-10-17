@@ -25,9 +25,18 @@ export function getSupabaseCredentials(): { url: string; key: string } {
   let localKey = '';
 
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localUrl = localStorage.getItem('coccole_supabase_url') || localStorage.getItem('supabase_url') || '';
-      localKey = localStorage.getItem('coccole_supabase_key') || localStorage.getItem('supabase_key') || localStorage.getItem('supabase_anon_key') || '';
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const paramUrl = searchParams.get('sb_url');
+      const paramKey = searchParams.get('sb_key');
+      if (paramUrl && paramKey && window.localStorage) {
+        localStorage.setItem('coccole_supabase_url', paramUrl.trim());
+        localStorage.setItem('coccole_supabase_key', paramKey.trim());
+      }
+      if (window.localStorage) {
+        localUrl = localStorage.getItem('coccole_supabase_url') || localStorage.getItem('supabase_url') || '';
+        localKey = localStorage.getItem('coccole_supabase_key') || localStorage.getItem('supabase_key') || localStorage.getItem('supabase_anon_key') || '';
+      }
     }
   } catch (e) {}
 
