@@ -36,12 +36,189 @@ interface TarjetaFidelizacionDigitalProps {
   onCambiarCuenta?: () => void;
 }
 
+interface StampConfig {
+  slot: number;
+  id: 'fresas' | 'batido_vainilla' | 'sandwich' | 'ensalada' | 'premio_final';
+  label: string;
+  shortTag: string;
+  activeBgClass: string;
+  activeBorderClass: string;
+  activeRingClass: string;
+  activeTextClass: string;
+}
+
+// Matriz temática de las 10 casillas con los 4 productos insignia de Coccole + Recompensa Final
+const STAMP_MATRIX: StampConfig[] = [
+  {
+    slot: 1,
+    id: 'fresas',
+    label: 'Fresas con crema',
+    shortTag: '#1',
+    activeBgClass: 'bg-pink-50',
+    activeBorderClass: 'border-pink-200',
+    activeRingClass: 'ring-2 ring-pink-200/80 shadow-md',
+    activeTextClass: 'text-pink-700'
+  },
+  {
+    slot: 2,
+    id: 'batido_vainilla',
+    label: 'Batido de proteína de vainilla',
+    shortTag: '#2',
+    activeBgClass: 'bg-[#fef3c7]',
+    activeBorderClass: 'border-[#fcd34d]',
+    activeRingClass: 'ring-2 ring-[#fcd34d]/80 shadow-md',
+    activeTextClass: 'text-amber-800'
+  },
+  {
+    slot: 3,
+    id: 'sandwich',
+    label: 'Sándwich gourmet',
+    shortTag: '#3',
+    activeBgClass: 'bg-orange-50',
+    activeBorderClass: 'border-amber-200',
+    activeRingClass: 'ring-2 ring-amber-200/80 shadow-md',
+    activeTextClass: 'text-amber-800'
+  },
+  {
+    slot: 4,
+    id: 'ensalada',
+    label: 'Ensalada de frutas fresca',
+    shortTag: '#4',
+    activeBgClass: 'bg-emerald-50',
+    activeBorderClass: 'border-emerald-200',
+    activeRingClass: 'ring-2 ring-emerald-200/80 shadow-md',
+    activeTextClass: 'text-emerald-800'
+  },
+  {
+    slot: 5,
+    id: 'fresas',
+    label: 'Fresas con crema',
+    shortTag: '#5',
+    activeBgClass: 'bg-pink-50',
+    activeBorderClass: 'border-pink-200',
+    activeRingClass: 'ring-2 ring-pink-200/80 shadow-md',
+    activeTextClass: 'text-pink-700'
+  },
+  {
+    slot: 6,
+    id: 'batido_vainilla',
+    label: 'Batido de proteína de vainilla',
+    shortTag: '#6',
+    activeBgClass: 'bg-[#fef3c7]',
+    activeBorderClass: 'border-[#fcd34d]',
+    activeRingClass: 'ring-2 ring-[#fcd34d]/80 shadow-md',
+    activeTextClass: 'text-amber-800'
+  },
+  {
+    slot: 7,
+    id: 'sandwich',
+    label: 'Sándwich gourmet',
+    shortTag: '#7',
+    activeBgClass: 'bg-orange-50',
+    activeBorderClass: 'border-amber-200',
+    activeRingClass: 'ring-2 ring-amber-200/80 shadow-md',
+    activeTextClass: 'text-amber-800'
+  },
+  {
+    slot: 8,
+    id: 'ensalada',
+    label: 'Ensalada de frutas fresca',
+    shortTag: '#8',
+    activeBgClass: 'bg-emerald-50',
+    activeBorderClass: 'border-emerald-200',
+    activeRingClass: 'ring-2 ring-emerald-200/80 shadow-md',
+    activeTextClass: 'text-emerald-800'
+  },
+  {
+    slot: 9,
+    id: 'fresas',
+    label: 'Fresas con crema',
+    shortTag: '#9',
+    activeBgClass: 'bg-pink-50',
+    activeBorderClass: 'border-pink-200',
+    activeRingClass: 'ring-2 ring-pink-200/80 shadow-md',
+    activeTextClass: 'text-pink-700'
+  },
+  {
+    slot: 10,
+    id: 'premio_final',
+    label: 'Recompensa Final Coccole',
+    shortTag: 'PREMIO',
+    activeBgClass: 'bg-linear-to-br from-[#fef3c7] via-[#fde68a] to-[#fcd34d]',
+    activeBorderClass: 'border-amber-300',
+    activeRingClass: 'ring-4 ring-amber-300/70 shadow-[0_0_20px_rgba(252,211,77,0.85)]',
+    activeTextClass: 'text-amber-950'
+  }
+];
+
+/**
+ * Ícono vectorial de Batido de Proteína de Vainilla en tonos crema/vainilla dorado (#fef3c7 / #fcd34d),
+ * diseñado específicamente sin elementos rojos.
+ */
+function VanillaProteinShakeIcon({ className = 'w-6 h-6 sm:w-7 sm:h-7' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 36 36"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-label="Batido de proteína de vainilla"
+    >
+      {/* Pitillo dorado vainilla (sin tonos rojos) */}
+      <path
+        d="M21 3L18.5 11"
+        stroke="#D97706"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+      />
+      {/* Crema batida de vainilla superior */}
+      <path
+        d="M10 13C10 9.8 13.5 7.5 18 7.5C22.5 7.5 26 9.8 26 13H10Z"
+        fill="#FFFBEB"
+        stroke="#F59E0B"
+        strokeWidth="1.6"
+      />
+      {/* Vaso de batido tono vainilla dorado (#fcd34d / #fef3c7) */}
+      <path
+        d="M9.5 13H26.5L24.2 30.2C24.05 31.3 23.1 32 22 32H14C12.9 32 11.95 31.3 11.8 30.2L9.5 13Z"
+        fill="#FCD34D"
+        stroke="#D97706"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      {/* Franja cremosa interior */}
+      <path
+        d="M11.3 18.5H24.7L23.9 24.5H12.1L11.3 18.5Z"
+        fill="#FEF3C7"
+      />
+      {/* Destello de vainilla */}
+      <circle cx="15" cy="16" r="1.2" fill="#FFFBEB" />
+      <circle cx="18" cy="21.5" r="1.4" fill="#F59E0B" />
+    </svg>
+  );
+}
+
+function renderStampGraphic(stamp: StampConfig) {
+  switch (stamp.id) {
+    case 'fresas':
+      return <span className="text-xl sm:text-2xl leading-none select-none drop-shadow-2xs">🍓</span>;
+    case 'batido_vainilla':
+      return <VanillaProteinShakeIcon className="w-6 h-6 sm:w-7 sm:h-7 drop-shadow-2xs" />;
+    case 'sandwich':
+      return <span className="text-xl sm:text-2xl leading-none select-none drop-shadow-2xs">🥪</span>;
+    case 'ensalada':
+      return <span className="text-xl sm:text-2xl leading-none select-none drop-shadow-2xs">🥗</span>;
+    case 'premio_final':
+      return <span className="text-xl sm:text-2xl leading-none select-none drop-shadow-sm">🏆</span>;
+  }
+}
+
 const CONFETTI_PIECES = Array.from({ length: 28 }, (_, i) => ({
   id: i,
   left: `${(i * 37) % 96 + 2}%`,
   delay: `${(i % 7) * 0.22}s`,
   duration: `${2.4 + (i % 5) * 0.45}s`,
-  emoji: i % 4 === 0 ? '🍓' : i % 4 === 1 ? '🥤' : i % 4 === 2 ? '🎉' : '✨'
+  emoji: i % 5 === 0 ? '🍓' : i % 5 === 1 ? '🥪' : i % 5 === 2 ? '🥗' : i % 5 === 3 ? '🏆' : '✨'
 }));
 
 export default function TarjetaFidelizacionDigital({
@@ -181,7 +358,7 @@ export default function TarjetaFidelizacionDigital({
   const displayPhone = cliente?.phone || cliente?.telefono || '';
   const rewardsRedeemed = Number(cliente?.rewards_redeemed ?? 0);
 
-  // Priorizar stickers_count para respetar el reinicio a 1 tras redimir premio
+  // Priorizar stickers_count para respetar el sello de bienvenida (1) y el reinicio a 1 tras redimir premio
   const hasExplicitStickers =
     cliente?.stickers_count !== undefined &&
     cliente?.stickers_count !== null &&
@@ -324,12 +501,12 @@ export default function TarjetaFidelizacionDigital({
             )}
           </div>
 
-          {/* 2. ÁREA DE SELLOS INTERCALADOS (FRESAS 🍓 Y BATIDOS 🥤) */}
+          {/* 2. ÁREA DE LOS 10 SELLOS TEMÁTICOS COCCOLE */}
           <div className="my-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-black uppercase tracking-wider text-[#FFFDF6] flex items-center gap-1.5">
                 <Award className="w-4 h-4 text-amber-200" />
-                Tus Sellos (🍓 Fresa / 🥤 Batido)
+                Ruta de Sabores Coccole
               </span>
               <button
                 type="button"
@@ -342,12 +519,28 @@ export default function TarjetaFidelizacionDigital({
               </button>
             </div>
 
+            {/* Leyenda rápida de los 4 productos insignia */}
+            <div className="mb-2.5 flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-bold text-[#FFFDF6]/95">
+              <span className="px-2 py-0.5 rounded-full bg-pink-50 text-pink-800 border border-pink-200">
+                🍓 Fresas
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-[#fef3c7] text-amber-900 border border-[#fcd34d]">
+                Batido Vainilla
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-orange-50 text-amber-900 border border-amber-200">
+                🥪 Sándwich
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-900 border border-emerald-200">
+                🥗 Ensalada
+              </span>
+            </div>
+
             {/* Banner de Meta Completada (10/10) o Sello de Bienvenida */}
             {isGoalCompleted ? (
               <div className="mb-3 px-3.5 py-2.5 rounded-2xl bg-[#FFFDF6] border-2 border-amber-300 text-[#0c4a6e] flex items-center justify-center gap-2 text-center shadow-md animate-bounce">
                 <Gift className="w-5 h-5 text-amber-500 shrink-0" />
                 <span className="text-xs sm:text-[13px] font-black text-[#0c4a6e]">
-                  🎉 ¡Completaste tus 10 sellos! Reclama tu premio en caja
+                  ¡Completaste tus 10 sellos! Reclama tu premio en caja
                 </span>
               </div>
             ) : (
@@ -361,45 +554,37 @@ export default function TarjetaFidelizacionDigital({
             {/* Cuadrícula de 10 casillas (2 filas de 5) */}
             <div className="bg-[#0369a1]/45 border-2 border-white/35 rounded-2xl p-3.5 sm:p-4 shadow-inner backdrop-blur-2xs">
               <div className="grid grid-cols-5 gap-2.5 sm:gap-3">
-                {Array.from({ length: 10 }, (_, idx) => {
-                  const numeroCasilla = idx + 1;
-                  const isCompleted = numeroCasilla <= sellosActivos;
-                  // Casillas 1, 3, 5, 7, 9 -> Fresa (🍓) | Casillas 2, 4, 6, 8, 10 -> Batido de Proteína (🥤)
-                  const isStrawberrySlot = numeroCasilla % 2 !== 0;
-                  const stampEmoji = isStrawberrySlot ? '🍓' : '🥤';
+                {STAMP_MATRIX.map((stamp) => {
+                  const isCompleted = stamp.slot <= sellosActivos;
+                  const isLatestActive = stamp.slot === sellosActivos;
 
                   return (
                     <div
-                      key={numeroCasilla}
+                      key={stamp.slot}
+                      title={`${CasillaTitle(stamp)}`}
                       className="aspect-square flex flex-col items-center justify-center relative"
                     >
                       {isCompleted ? (
-                        /* Sello Activo (Obtenido): Círculo blanco brillante, borde destacado, animación sutil y emoji grande */
+                        /* Sello Activo / Desbloqueado: Color temático por producto, ícono generoso y animación pop/bounce */
                         <div
-                          className={`w-full h-full rounded-full bg-linear-to-b from-white to-[#FFFDF6] border-2 border-white ring-2 ${
-                            numeroCasilla === 10
-                              ? 'ring-amber-300 shadow-lg shadow-amber-300/40 animate-bounce'
-                              : 'ring-sky-200/90 shadow-md'
-                          } flex flex-col items-center justify-center transition-all duration-300 scale-100 hover:scale-105`}
+                          className={`w-full h-full rounded-full ${stamp.activeBgClass} border-2 ${stamp.activeBorderClass} ${stamp.activeRingClass} flex flex-col items-center justify-center transition-all duration-300 scale-100 hover:scale-105 ${
+                            isLatestActive || stamp.slot === 10 ? 'animate-bounce' : ''
+                          }`}
+                          style={{
+                            animationDuration: stamp.slot === 10 ? '1.6s' : '2.2s',
+                            animationIterationCount: isLatestActive || stamp.slot === 10 ? 'infinite' : 1
+                          }}
                         >
-                          <span
-                            className="text-xl sm:text-2xl leading-none select-none drop-shadow-2xs animate-[bounce_1.8s_infinite]"
-                            style={{ animationIterationCount: numeroCasilla === sellosActivos ? 'infinite' : 1 }}
-                          >
-                            {stampEmoji}
-                          </span>
-                          <span className="text-[8px] font-black text-[#0284c7] uppercase tracking-tighter mt-0.5">
-                            {numeroCasilla === 10 ? 'PREMIO' : `#${numeroCasilla}`}
+                          {renderStampGraphic(stamp)}
+                          <span className={`text-[8px] font-black uppercase tracking-tighter mt-0.5 ${stamp.activeTextClass}`}>
+                            {stamp.shortTag}
                           </span>
                         </div>
                       ) : (
-                        /* Sello Pendiente: Círculo translúcido con borde punteado suave y número tenue */
+                        /* Sello Pendiente / Bloqueado: Fondo translúcido con borde punteado suave y número de casilla (1 al 10) */
                         <div className="w-full h-full rounded-full border-2 border-dashed border-white/45 bg-white/10 flex flex-col items-center justify-center transition-all">
-                          <span className="text-xs sm:text-sm font-black text-white/75">
-                            {numeroCasilla}
-                          </span>
-                          <span className="text-[9px] opacity-40 leading-none mt-0.5">
-                            {stampEmoji}
+                          <span className="text-xs sm:text-sm font-black text-white/80">
+                            {stamp.slot}
                           </span>
                         </div>
                       )}
@@ -518,7 +703,7 @@ export default function TarjetaFidelizacionDigital({
       </div>
 
       {/* =========================================================
-           MODAL GUÍA RÁPIDA: "GUARDAR EN MI TELÉFONO" (PWA / HOME SCREEN)
+          MODAL GUÍA RÁPIDA: "GUARDAR EN MI TELÉFONO" (PWA / HOME SCREEN)
       ========================================================= */}
       {showSaveGuideModal && (
         <div
@@ -589,4 +774,8 @@ export default function TarjetaFidelizacionDigital({
       )}
     </div>
   );
+}
+
+function CasillaTitle(stamp: StampConfig): string {
+  return `Casilla ${stamp.slot}: ${stamp.label}`;
 }
