@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import { execSync } from 'child_process';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -611,44 +610,8 @@ Responde de forma concisa, precisa y analítica en español.`;
     }
   });
 
-  // Endpoint directo para descargar el código fuente actualizado (.zip) desde el servidor en vivo
-  app.get('/api/download-source-zip', (req, res) => {
-    try {
-      const pyScript = [
-        "import os, io, zipfile, base64",
-        "buf = io.BytesIO()",
-        "root_dir = os.getcwd()",
-        "with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:",
-        "    for r, dirs, files in os.walk(root_dir):",
-        "        dirs[:] = [x for x in dirs if x not in ('node_modules', '.git', 'tmp')]",
-        "        for f in files:",
-        "            if f.endswith('.zip') or f.startswith('.dev'): continue",
-        "            full = os.path.join(r, f)",
-        "            zf.write(full, os.path.relpath(full, root_dir))",
-        "print(base64.b64encode(buf.getvalue()).decode('ascii'))"
-      ].join("\n");
-      const base64Zip = execSync("python3 -", {
-        input: pyScript,
-        cwd: process.cwd(),
-        maxBuffer: 50 * 1024 * 1024
-      }).toString().trim();
-
-      res.json({
-        filename: `coccole-fit-codigo-actualizado.zip`,
-        base64: base64Zip
-      });
-    } catch (err: any) {
-      console.error('Error generating source zip:', err);
-      res.status(500).json({ error: err.message || 'Error generando ZIP' });
-    }
-  });
-
   // Serve static files / Vite middleware
-  const isProd =
-    process.env.NODE_ENV === "production" ||
-    Boolean(process.env.K_SERVICE) ||
-    Boolean(process.env.RENDER) ||
-    Boolean(process.argv[1] && process.argv[1].includes("server.cjs"));
+  const isProd = process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
