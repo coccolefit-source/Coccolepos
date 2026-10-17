@@ -9,54 +9,11 @@
     <meta property="og:description" content="Plataforma integral para la gestión de tareas diarias, control de asistencia, registro de incidencias, impulso de ventas sugeridas, cuadre de caja y tableros operativos de Coccole Fit." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <script>
       // Ignore Vite HMR WebSocket errors in iframe environment per environment guidelines
-      if (typeof window !== 'undefined' && window.WebSocket) {
-        const _NativeWebSocket = window.WebSocket;
-        function PatchedWebSocket(url, protocols) {
-          const isViteHmr =
-            (typeof protocols === 'string' && (protocols === 'vite-hmr' || protocols === 'vite-ping')) ||
-            (Array.isArray(protocols) && protocols.some(p => p.includes('vite'))) ||
-            (typeof url === 'string' && url.includes('vite-hmr'));
-
-          if (isViteHmr) {
-            const fakeSocket = {
-              readyState: 1, // OPEN
-              OPEN: 1,
-              CLOSED: 3,
-              CLOSING: 2,
-              CONNECTING: 0,
-              url: String(url),
-              protocol: 'vite-hmr',
-              bufferedAmount: 0,
-              extensions: '',
-              binaryType: 'blob',
-              send: function () {},
-              close: function () {},
-              addEventListener: function (type, listener) {
-                if (type === 'open') {
-                  setTimeout(() => {
-                    try {
-                      listener({ type: 'open', target: fakeSocket });
-                    } catch (e) {}
-                  }, 0);
-                }
-              },
-              removeEventListener: function () {},
-              dispatchEvent: function () { return true; }
-            };
-            return fakeSocket;
-          }
-          return new _NativeWebSocket(url, protocols);
-        }
-        PatchedWebSocket.prototype = _NativeWebSocket.prototype;
-        PatchedWebSocket.CONNECTING = 0;
-        PatchedWebSocket.OPEN = 1;
-        PatchedWebSocket.CLOSING = 2;
-        PatchedWebSocket.CLOSED = 3;
-        window.WebSocket = PatchedWebSocket;
-      }
-
       const _origConsoleError = console.error;
       console.error = function (...args) {
         if (
@@ -72,33 +29,16 @@
         }
         _origConsoleError.apply(console, args);
       };
-
-      window.addEventListener('error', function (event) {
-        const msg = String(event.message || event.filename || event.error?.stack || event.error || '');
-        if (
-          msg.includes('@vite/client') ||
-          msg.includes('WebSocket') ||
-          msg.includes('failed to connect to websocket') ||
-          msg.includes('closed without opened') ||
-          (event.filename && event.filename.includes('@vite/client'))
-        ) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          return true;
-        }
-      }, true);
-
       window.addEventListener('unhandledrejection', function (event) {
-        const reason = String(event.reason?.message || event.reason?.stack || event.reason || '');
         if (
-          reason.includes('WebSocket') ||
-          reason.includes('closed without opened') ||
-          reason.includes('@vite/client')
+          event.reason &&
+          (event.reason.message?.includes('WebSocket') ||
+            event.reason.message?.includes('closed without opened') ||
+            String(event.reason?.stack || '').includes('@vite/client'))
         ) {
           event.preventDefault();
-          event.stopImmediatePropagation();
         }
-      }, true);
+      });
     </script>
   </head>
   <body>
