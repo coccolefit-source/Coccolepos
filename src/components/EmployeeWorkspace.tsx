@@ -720,6 +720,9 @@ export default function EmployeeWorkspace({
   const [cuadreEfectivo, setCuadreEfectivo] = useState('');
   const [cuadreTarjeta, setCuadreTarjeta] = useState('');
   const [cuadreObs, setCuadreObs] = useState('');
+  const [cuadrePosContadoInput, setCuadrePosContadoInput] = useState('');
+  const [cuadrePosSuccess, setCuadrePosSuccess] = useState(false);
+  const [filtroHistorialVentas, setFiltroHistorialVentas] = useState<'todas' | 'mias'>('todas');
 
   const yaCuadrado = (cuadresCaja || []).some(
     c => c.usuario_id === empleado.id && c.fecha === getLocalDateString()
@@ -2046,20 +2049,46 @@ export default function EmployeeWorkspace({
                 <div className="w-full rounded-xl border border-[#E2E8F0] bg-white p-5 mb-6 shadow-xs">
                   {(() => {
                     const todayStr = getLocalDateString();
-                    const shiftSales = (ventasRegistradas || []).filter(v => {
+                    
+                    const normalizeDate = (v: any) => {
+                      let saleFecha = v?.fecha;
+                      if (saleFecha && saleFecha.includes('T')) {
+                        saleFecha = saleFecha.split('T')[0];
+                      } else if (saleFecha && saleFecha.includes(' ')) {
+                        saleFecha = saleFecha.split(' ')[0];
+                      }
+                      if (!saleFecha && v?.created_at) {
+                        try {
+                          saleFecha = getLocalDateString(v.created_at);
+                        } catch (e) {
+                          saleFecha = String(v.created_at).split('T')[0];
+                        }
+                      }
+                      return saleFecha;
+                    };
+
+                    // Ventas del día registradas por todos los colaboradores
+                    const allTodaySales = (ventasRegistradas || []).filter(v => {
                       if (!v) return false;
-                      const matchesEmp = 
+                      return normalizeDate(v) === todayStr;
+                    });
+
+                    // Ventas del día del empleado actual
+                    const myTodaySales = allTodaySales.filter(v => {
+                      return (
                         !v.usuario_id || 
                         v.usuario_id === empleado.id || 
                         v.vendedor_id === empleado.id || 
                         (v as any).cajero_id === empleado.id || 
-                        v.vendedor_nombre === empleado.nombre;
-                      const isToday = !v.fecha || v.fecha === todayStr;
-                      return matchesEmp && isToday;
+                        v.vendedor_nombre === empleado.nombre
+                      );
                     });
-                    const totalVentasTurno = shiftSales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
 
-                    const sortedSales = [...shiftSales].sort((a, b) => {
+                    const activeList = filtroHistorialVentas === 'todas' ? allTodaySales : myTodaySales;
+                    const totalVentasDiaTodos = allTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalVentasMias = myTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+
+                    const sortedSales = [...activeList].sort((a, b) => {
                       const timeA = `${a.fecha || ''} ${a.hora || ''}`;
                       const timeB = `${b.fecha || ''} ${b.hora || ''}`;
                       return timeB.localeCompare(timeA);
@@ -2067,25 +2096,57 @@ export default function EmployeeWorkspace({
 
                     return (
                       <div className="space-y-4">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-2">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-3">
                           <div>
                             <h4 className="text-xs font-black text-[#2C3E50] uppercase tracking-wider">
-                              Historial Transaccional del Turno
+                              Historial Transaccional del Día ({todayStr})
                             </h4>
                             <p className="text-[11px] text-slate-500 font-medium mt-0.5">
                               Registro en tiempo real de ventas procesadas durante la jornada activa.
                             </p>
                           </div>
-                          <div className="text-left sm:text-right bg-[#EBF5FB]/80 border border-[#AED6F1] px-3.5 py-1.5 rounded-lg shadow-2xs">
-                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Total Ventas del Día</span>
-                            <span className="text-sm font-black text-[#4B9CD3]">{formatMoney(totalVentasTurno)}</span>
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            {/* Filtro: Todas vs Mías */}
+                            <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
+                              <button
+                                type="button"
+                                onClick={() => setFiltroHistorialVentas('todas')}
+                                className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                                  filtroHistorialVentas === 'todas'
+                                    ? 'bg-white text-[#2C3E50] shadow-2xs font-black'
+                                    : 'text-slate-500 hover:text-slate-800'
+                                }`}
+                              >
+                                Todas del Día ({allTodaySales.length})
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setFiltroHistorialVentas('mias')}
+                                className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                                  filtroHistorialVentas === 'mias'
+                                    ? 'bg-white text-[#2C3E50] shadow-2xs font-black'
+                                    : 'text-slate-500 hover:text-slate-800'
+                                }`}
+                              >
+                                Mis Ventas ({myTodaySales.length})
+                              </button>
+                            </div>
+
+                            <div className="text-left sm:text-right bg-[#EBF5FB]/80 border border-[#AED6F1] px-3.5 py-1.5 rounded-lg shadow-2xs">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                                {filtroHistorialVentas === 'todas' ? 'Total Ventas del Día' : 'Mis Ventas de Hoy'}
+                              </span>
+                              <span className="text-sm font-black text-[#4B9CD3]">
+                                {formatMoney(filtroHistorialVentas === 'todas' ? totalVentasDiaTodos : totalVentasMias)}
+                              </span>
+                            </div>
                           </div>
                         </div>
 
                         {sortedSales.length === 0 ? (
                           <div className="py-8 text-center bg-[#F8FAFC] rounded-lg border border-dashed border-[#CBD5E1]">
                             <p className="text-xs font-medium text-slate-400 italic">
-                              No hay ventas registradas en este turno aún.
+                              No hay ventas registradas en esta vista para el día de hoy ({todayStr}).
                             </p>
                           </div>
                         ) : (
@@ -2095,6 +2156,9 @@ export default function EmployeeWorkspace({
                                 <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
                                   <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
                                     Hora
+                                  </th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                    Colaborador
                                   </th>
                                   <th className="py-2.5 px-3 text-[10px] font-black uppercase tracking-wider text-slate-500">
                                     Cliente
@@ -2135,10 +2199,17 @@ export default function EmployeeWorkspace({
                                     payLabel = v.metodo_pago;
                                   }
 
+                                  const colaboradorNombre = v.vendedor_nombre || (v as any).cajero_nombre || 'Colaborador';
+
                                   return (
                                     <tr key={v.id} className="hover:bg-[#F8FAFC]/60 transition-colors">
                                       <td className="py-3 px-3 text-xs font-bold text-[#2C3E50] whitespace-nowrap">
                                         {v.hora || '12:00'}
+                                      </td>
+                                      <td className="py-3 px-3 text-xs whitespace-nowrap">
+                                        <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                                          {colaboradorNombre}
+                                        </span>
                                       </td>
                                       <td className="py-3 px-3 text-xs">
                                         <div className="font-bold text-[#2C3E50]">
@@ -2195,89 +2266,264 @@ export default function EmployeeWorkspace({
                 </div>
               </div>
 
-              {/* FORMULARIO DE CUADRE DE CAJA */}
+              {/* FORMULARIO DE CUADRE DE CAJA DIARIO (VENTAS DEL DÍA DE TODOS LOS EMPLEADOS) */}
               <div className="mt-8 pt-6 border-t border-dashed border-[#E2E8F0]">
-                
-                <h5 className="font-extrabold text-[#2C3E50] text-xs mb-3 flex items-center gap-1.5">
-                  <DollarSign className="w-4 h-4 text-[#4B9CD3]" />
-                  Cuadre de Caja Diario / Cierre de Turno
-                </h5>
                 {(() => {
-                  const userSales = (ventasRegistradas || []).filter(v => {
+                  const todayStr = getLocalDateString();
+                  
+                  const normalizeDate = (v: any) => {
+                    let saleFecha = v?.fecha;
+                    if (saleFecha && saleFecha.includes('T')) {
+                      saleFecha = saleFecha.split('T')[0];
+                    } else if (saleFecha && saleFecha.includes(' ')) {
+                      saleFecha = saleFecha.split(' ')[0];
+                    }
+                    if (!saleFecha && v?.created_at) {
+                      try {
+                        saleFecha = getLocalDateString(v.created_at);
+                      } catch (e) {
+                        saleFecha = String(v.created_at).split('T')[0];
+                      }
+                    }
+                    return saleFecha;
+                  };
+
+                  // Filtrar únicamente las ventas del DÍA DE HOY registradas por TODOS LOS EMPLEADOS (excluyendo únicamente ventas anuladas)
+                  const ventasDelDia = (ventasRegistradas || []).filter(v => {
                     if (!v || v.estado === 'Anulada') return false;
-                    const matchesEmp = 
-                      !v.usuario_id || 
-                      v.usuario_id === empleado.id || 
-                      v.vendedor_id === empleado.id || 
-                      (v as any).cajero_id === empleado.id || 
-                      v.vendedor_nombre === empleado.nombre;
-                    return matchesEmp;
+                    return normalizeDate(v) === todayStr;
                   });
-                  const totalEfectivo = userSales.filter(v => isEfectivo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
-                  const totalTarjeta = userSales.filter(v => isTarjeta(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
-                  const totalTransferencia = userSales.filter(v => isTransferencia(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
-                  const totalRappi = userSales.filter(v => isRappi(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+
+                  // Desglose por medio de pago de todos los colaboradores
+                  const totalEfectivo = ventasDelDia.filter(v => isEfectivo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  const totalTarjeta = ventasDelDia.filter(v => isTarjeta(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  const totalTransferencia = ventasDelDia.filter(v => isTransferencia(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  const totalRappi = ventasDelDia.filter(v => isRappi(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  
+                  // Total ventas del día registrado por todos los empleados
+                  const totalVentasDia = totalEfectivo + totalTarjeta + totalTransferencia + totalRappi;
+
+                  const contadoParsed = parseFloat(cuadrePosContadoInput);
+                  const hasContadoVal = cuadrePosContadoInput.trim() !== '' && !isNaN(contadoParsed);
+                  const diferenciaCalculada = hasContadoVal ? (contadoParsed - totalEfectivo) : 0;
 
                   return (
-                    <form 
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const formData = new FormData(e.currentTarget);
-                        
-                        const newCuadre = {
-                          fecha: getLocalDateString(),
-                          hora_cierre: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-                          empleado_id: empleado.id,
-                          empleado_nombre: empleado.nombre,
-                          efectivo_esperado: totalEfectivo,
-                          efectivo_contado: parseFloat(formData.get('efectivo_contado') as string) || 0,
-                          tarjeta_esperado: totalTarjeta,
-                          transferencia_esperado: totalTransferencia,
-                          rappi_esperado: totalRappi,
-                          diferencia_total: (parseFloat(formData.get('efectivo_contado') as string) || 0) - totalEfectivo,
-                          observaciones: formData.get('observaciones') as string,
-                          estado: 'pendiente_revision'
-                        };
-                        
-                        onRegistrarCuadreCaja(newCuadre as any);
-                        e.currentTarget.reset();
-                      }}
-                      className="bg-[#FFFDF6] p-4 rounded-xl border border-[#E2E8F0] space-y-3"
-                    >
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-white p-3 rounded border border-slate-100 mb-3">
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                         <div>
-                          <p className="text-[9px] font-bold text-slate-500 uppercase">Efectivo Sistema</p>
-                          <p className="font-black text-[#4B9CD3] text-sm">{formatMoney(totalEfectivo)}</p>
+                          <h5 className="font-extrabold text-[#2C3E50] text-xs flex items-center gap-1.5">
+                            <DollarSign className="w-4 h-4 text-[#4B9CD3]" />
+                            Cuadre de Caja Diario / Cierre de Turno
+                          </h5>
+                          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                            Total consolidado de ventas del día ({todayStr}) registrado por todos los colaboradores.
+                          </p>
                         </div>
-                        <div>
-                          <p className="text-[9px] font-bold text-slate-500 uppercase">Tarjeta (Datáfono)</p>
-                          <p className="font-black text-slate-700 text-sm">{formatMoney(totalTarjeta)}</p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] font-bold text-slate-500 uppercase">Transferencia</p>
-                          <p className="font-black text-slate-700 text-sm">{formatMoney(totalTransferencia)}</p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] font-bold text-slate-500 uppercase">Rappi</p>
-                          <p className="font-black text-slate-700 text-sm">{formatMoney(totalRappi)}</p>
+                        <div className="text-left sm:text-right bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-lg shadow-2xs">
+                          <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider block">
+                            Total Ventas del Día
+                          </span>
+                          <span className="text-sm font-black text-emerald-800">
+                            {formatMoney(totalVentasDia)}
+                          </span>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Efectivo Físico Contado</label>
-                          <input name="efectivo_contado" type="number" step="0.01" className="w-full text-xs px-2 py-1.5 border border-[#E2E8F0] rounded focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]" required placeholder="Ingresa efectivo real en caja" />
+                      {cuadrePosSuccess && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 text-xs font-bold flex items-center justify-between shadow-2xs animate-in fade-in duration-200">
+                          <div className="flex items-center gap-2">
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>¡Corte de caja diario enviado correctamente para revisión del administrador!</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setCuadrePosSuccess(false)}
+                            className="text-emerald-700 hover:text-emerald-900 text-xs font-black cursor-pointer ml-3 px-1.5 py-0.5 rounded hover:bg-emerald-100"
+                          >
+                            ×
+                          </button>
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Notas u Observaciones</label>
-                          <input name="observaciones" type="text" placeholder="Faltantes, gastos de caja chica..." className="w-full text-xs px-2 py-1.5 border border-[#E2E8F0] rounded focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]" />
+                      )}
+
+                      <form 
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const formData = new FormData(e.currentTarget);
+                          const contadoVal = parseFloat(formData.get('efectivo_contado') as string) || 0;
+                          
+                          const newCuadre = {
+                            fecha: todayStr,
+                            hora_cierre: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+                            empleado_id: empleado.id,
+                            empleado_nombre: empleado.nombre,
+                            total_ventas_dia: totalVentasDia,
+                            efectivo_esperado: totalEfectivo,
+                            efectivo_contado: contadoVal,
+                            tarjeta_esperado: totalTarjeta,
+                            transferencia_esperado: totalTransferencia,
+                            rappi_esperado: totalRappi,
+                            diferencia_total: contadoVal - totalEfectivo,
+                            observaciones: (formData.get('observaciones') as string) || '',
+                            estado: 'pendiente_revision'
+                          };
+                          
+                          onRegistrarCuadreCaja(newCuadre as any);
+                          e.currentTarget.reset();
+                          setCuadrePosContadoInput('');
+                          setCuadrePosSuccess(true);
+                        }}
+                        className="bg-[#FFFDF6] p-4 rounded-xl border border-[#E2E8F0] space-y-3.5"
+                      >
+                        {/* TARJETAS RESUMEN: TOTAL DEL DÍA + MEDIOS DE PAGO */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 bg-white p-3.5 rounded-xl border border-slate-100 shadow-2xs">
+                          {/* 1. TOTAL GENERAL DE VENTAS DEL DÍA */}
+                          <div className="bg-[#EBF5FB] border-2 border-[#4B9CD3]/50 p-3 rounded-xl flex flex-col justify-between col-span-2 sm:col-span-1 lg:col-span-1 shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black uppercase text-[#2C3E50] tracking-wider">
+                                Total Ventas (Día)
+                              </span>
+                              <span className="text-[8px] font-black bg-[#4B9CD3] text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                                Todos
+                              </span>
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-[#2C3E50] block">
+                                {formatMoney(totalVentasDia)}
+                              </span>
+                              <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">
+                                {ventasDelDia.length} {ventasDelDia.length === 1 ? 'venta hoy' : 'ventas hoy'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 2. EFECTIVO SISTEMA */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Efectivo Sistema
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" title="Efectivo en caja" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-[#4B9CD3] block">
+                                {formatMoney(totalEfectivo)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Base a conciliar
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 3. TARJETA (DATÁFONO) */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Tarjeta (Datáfono)
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-blue-500" title="Datáfono POS" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-slate-700 block">
+                                {formatMoney(totalTarjeta)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Comprobantes POS
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 4. TRANSFERENCIA */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Transferencia
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-purple-500" title="Nequi / Bancolombia" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-slate-700 block">
+                                {formatMoney(totalTransferencia)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Nequi / Bancolombia
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 5. RAPPI */}
+                          <div className="bg-[#FFFDF6]/60 border border-[#E2E8F0] p-3 rounded-xl flex flex-col justify-between shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Rappi
+                              </span>
+                              <span className="w-2 h-2 rounded-full bg-amber-500" title="Domicilios" />
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-base font-black text-slate-700 block">
+                                {formatMoney(totalRappi)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
+                                Domicilios Rappi
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      
-                      <button type="submit" className="w-full bg-[#2C3E50] hover:bg-slate-800 text-white font-bold text-xs py-2 rounded transition-colors mt-2 cursor-pointer">
-                        Enviar Corte de Caja Diario
-                      </button>
-                    </form>
+
+                        {/* INPUTS DE REGISTRO */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                Efectivo Físico Contado
+                              </label>
+                              {hasContadoVal && (
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                                  Math.abs(diferenciaCalculada) < 0.01
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : diferenciaCalculada < 0
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                                }`}>
+                                  {Math.abs(diferenciaCalculada) < 0.01
+                                    ? '✓ Efectivo conciliado'
+                                    : diferenciaCalculada < 0
+                                    ? `Faltante: -${formatMoney(Math.abs(diferenciaCalculada))}`
+                                    : `Sobrante: +${formatMoney(diferenciaCalculada)}`}
+                                </span>
+                              )}
+                            </div>
+                            <input 
+                              name="efectivo_contado" 
+                              type="number" 
+                              step="0.01" 
+                              value={cuadrePosContadoInput}
+                              onChange={(e) => setCuadrePosContadoInput(e.target.value)}
+                              className="w-full text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white font-bold text-slate-800" 
+                              required 
+                              placeholder="Ingresa efectivo real en caja" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                              Notas u Observaciones
+                            </label>
+                            <input 
+                              name="observaciones" 
+                              type="text" 
+                              placeholder="Faltantes, gastos de caja chica..." 
+                              className="w-full text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white text-slate-800" 
+                            />
+                          </div>
+                        </div>
+                        
+                        <button 
+                          type="submit" 
+                          className="w-full bg-[#2C3E50] hover:bg-slate-800 text-white font-black text-xs py-2.5 rounded-lg transition-colors cursor-pointer shadow-xs uppercase tracking-wider"
+                        >
+                          Enviar Corte de Caja Diario
+                        </button>
+                      </form>
+                    </div>
                   );
                 })()}
               </div>

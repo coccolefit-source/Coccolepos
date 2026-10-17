@@ -29,7 +29,9 @@ import {
   RankingWeights,
   DEFAULT_RANKING_WEIGHTS,
   UpsellRule,
-  Gasto
+  Gasto,
+  TarjetaRegalo,
+  isTarjetaRegalo
 } from '../types';
 import GastosModule from './GastosModule';
 import FichajesAsistenciaModule from './FichajesAsistenciaModule';
@@ -82,6 +84,8 @@ import {
   fetchWorkerCompleteMetricsFromSupabase,
   getSupabaseClient,
   getLocalDateString,
+  getBogotaDateDaysAgo,
+  getBogotaFirstDayOfMonth,
   fetchDailyTasksFromSupabase,
   deleteAllDailyTasksFromSupabase,
   formatFechaLegible,
@@ -157,6 +161,10 @@ export interface AdminDashboardProps {
   gastos: Gasto[];
   onSaveGasto: (gasto: Omit<Gasto, 'id'> & { id?: string }) => void;
   onDeleteGasto: (id: string) => void;
+  tarjetasRegalo?: TarjetaRegalo[];
+  onAddTarjetaRegalo?: (card: TarjetaRegalo) => void;
+  onRedeemTarjetaRegalo?: (codigo: string, monto: number) => Promise<{ success: boolean; saldoRestante: number; error?: string }>;
+  onDeleteTarjetaRegalo?: (id: string) => void;
 }
 
 export default function AdminDashboard({
@@ -176,6 +184,10 @@ export default function AdminDashboard({
   gastos,
   onSaveGasto,
   onDeleteGasto,
+  tarjetasRegalo = [],
+  onAddTarjetaRegalo,
+  onRedeemTarjetaRegalo,
+  onDeleteTarjetaRegalo,
   productosCatalogo,
   ventasRegistradas,
   cuadresCaja,
@@ -799,7 +811,9 @@ export default function AdminDashboard({
   });
 
   // Sub-pestaña de Ventas y Fidelización
-  const [ventasSubTab, setVentasSubTab] = useState<'reportes' | 'fidelizacion'>('reportes');
+  const [ventasSubTab, setVentasSubTab] = useState<'reportes' | 'fidelizacion' | 'tarjetas_regalo'>('reportes');
+  const [giftCardFormCode, setGiftCardFormCode] = useState('');
+  const [giftCardSearchTerm, setGiftCardSearchTerm] = useState('');
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
@@ -2718,6 +2732,7 @@ export default function AdminDashboard({
         const totalTarjetaFiltered = activeFilteredSales.filter(v => isTarjeta(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
         const totalTransferenciaFiltered = activeFilteredSales.filter(v => isTransferencia(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
         const totalRappiFiltered = activeFilteredSales.filter(v => isRappi(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
+        const totalTarjetaRegaloFiltered = activeFilteredSales.filter(v => isTarjetaRegalo(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
 
         const totalFilteredAmount = activeFilteredSales.reduce((acc, curr) => acc + curr.total, 0);
         const ticketPromedio = activeFilteredSales.length > 0 ? totalFilteredAmount / activeFilteredSales.length : 0;
@@ -2742,9 +2757,7 @@ export default function AdminDashboard({
         if (chartView === '7days') {
           const days = [];
           for (let i = 6; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            days.push(getLocalDateString(d));
+            days.push(getBogotaDateDaysAgo(i));
           }
           chartData = days.map(d => {
             const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
@@ -2756,9 +2769,7 @@ export default function AdminDashboard({
         } else if (chartView === '15days') {
           const days = [];
           for (let i = 14; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            days.push(getLocalDateString(d));
+            days.push(getBogotaDateDaysAgo(i));
           }
           chartData = days.map(d => {
             const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
@@ -2809,9 +2820,259 @@ export default function AdminDashboard({
               >
                 Programa de Fidelización
               </button>
+              <button
+                type="button"
+                onClick={() => setVentasSubTab('tarjetas_regalo')}
+                className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer text-center whitespace-nowrap px-3 ${
+                  ventasSubTab === 'tarjetas_regalo'
+                    ? 'bg-purple-700 text-white shadow-2xs font-extrabold'
+                    : 'text-purple-800 hover:text-purple-900 hover:bg-purple-50'
+                }`}
+              >
+                🎁 Tarjetas Regalo & Códigos
+              </button>
             </div>
 
-            {ventasSubTab === 'fidelizacion' ? (
+                        {ventasSubTab === 'tarjetas_regalo' ? (
+              /* VISTA DE TARJETAS REGALOS Y CÓDIGOS REDIMIBLES */
+              <div className="space-y-6 w-full animate-in fade-in duration-200">
+              {/* Header & KPI Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total Emitido</span>
+                  <p className="text-xl font-black text-purple-900">{formatMoney((tarjetasRegalo || []).reduce((sum, c) => sum + Number(c.monto_inicial || 0), 0))}</p>
+                  <span className="text-[10px] font-bold text-slate-500">{(tarjetasRegalo || []).length} tarjetas creadas</span>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-2xs space-y-1">
+                  <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">Saldo Disponible Activo</span>
+                  <p className="text-xl font-black text-emerald-700">{formatMoney((tarjetasRegalo || []).filter(c => c.estado === 'activa').reduce((sum, c) => sum + Number(c.saldo_actual || 0), 0))}</p>
+                  <span className="text-[10px] font-bold text-emerald-600">{(tarjetasRegalo || []).filter(c => c.estado === 'activa').length} tarjetas activas</span>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Monto Canjeado</span>
+                  <p className="text-xl font-black text-slate-700">{formatMoney((tarjetasRegalo || []).reduce((sum, c) => sum + (Number(c.monto_inicial || 0) - Number(c.saldo_actual || 0)), 0))}</p>
+                  <span className="text-[10px] font-bold text-slate-500">{(tarjetasRegalo || []).filter(c => c.estado === 'canjeada').length} tarjetas canjeadas totalmente</span>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-2xs space-y-1">
+                  <span className="text-[10px] font-black uppercase text-amber-700 tracking-wider">Inactivas / Agotadas</span>
+                  <p className="text-xl font-black text-amber-800">{(tarjetasRegalo || []).filter(c => c.estado !== 'activa').length}</p>
+                  <span className="text-[10px] font-bold text-amber-600">Completadas o dadas de baja</span>
+                </div>
+              </div>
+
+              {/* Formulario para Crear Nueva Tarjeta Regalo */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-black text-[#2C3E50] uppercase tracking-wider flex items-center gap-2">
+                      <span>🎁</span> Crear Nueva Tarjeta Regalo / Bono Redimible
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Genera un código único con saldo prepagado que el cliente puede canjear en la caja POS.</p>
+                  </div>
+                </div>
+
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  const codigo = (formData.get('codigo') as string || '').trim().toUpperCase();
+                  const monto = parseFloat(formData.get('monto') as string) || 0;
+                  const cliente = (formData.get('cliente') as string || '').trim();
+                  const notas = (formData.get('notas') as string || '').trim();
+
+                  if (!codigo || monto <= 0) {
+                    alert('Por favor ingresa un código válido y un monto mayor a 0.');
+                    return;
+                  }
+
+                  const newCard: TarjetaRegalo = {
+                    id: 'gift-' + Date.now(),
+                    codigo,
+                    monto_inicial: monto,
+                    saldo_actual: monto,
+                    estado: 'activa',
+                    fecha_creacion: getLocalDateString(),
+                    cliente_nombre: cliente,
+                    notas,
+                    creado_por_nombre: 'Administrador'
+                  };
+
+                  if (onAddTarjetaRegalo) {
+                    onAddTarjetaRegalo(newCard);
+                  }
+                  e.currentTarget.reset();
+                  setGiftCardFormCode('');
+                }} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Código de Tarjeta</label>
+                      <div className="flex gap-1.5">
+                        <input
+                          name="codigo"
+                          type="text"
+                          required
+                          value={giftCardFormCode}
+                          onChange={(e) => setGiftCardFormCode(e.target.value.toUpperCase())}
+                          placeholder="GIFT-XXXX"
+                          className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-mono font-bold uppercase text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+                            const num = Math.floor(10 + Math.random() * 89);
+                            setGiftCardFormCode(`GIFT-${rand}-${num}`);
+                          }}
+                          title="Generar código aleatorio único"
+                          className="px-2.5 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-black rounded-lg transition-colors cursor-pointer shrink-0"
+                        >
+                          ⚡ Generar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Monto Inicial / Saldo ($)</label>
+                      <input
+                        name="monto"
+                        type="number"
+                        step="1000"
+                        min="1000"
+                        required
+                        placeholder="Ej. 50000"
+                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white font-bold text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Cliente Asignado (Opcional)</label>
+                      <input
+                        name="cliente"
+                        type="text"
+                        placeholder="Ej. Juan Pérez"
+                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Concepto / Notas (Opcional)</label>
+                      <input
+                        name="notas"
+                        type="text"
+                        placeholder="Ej. Bono Promocional Cumpleaños"
+                        className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-white text-[#2C3E50] h-9 focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full sm:w-auto bg-purple-700 hover:bg-purple-800 text-white font-black text-xs py-2.5 px-6 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                  >
+                    <span>🎁 Crear y Activar Tarjeta Regalo</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Tabla de Tarjetas Regalo Creadas */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-black text-[#2C3E50] uppercase tracking-wider">
+                      Listado Oficial de Tarjetas Regalo
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Control y estado de saldos en tiempo real de todos los códigos emitidos.</p>
+                  </div>
+
+                  <div className="w-full sm:w-64">
+                    <input
+                      type="text"
+                      value={giftCardSearchTerm}
+                      onChange={(e) => setGiftCardSearchTerm(e.target.value)}
+                      placeholder="Buscar por código o cliente..."
+                      className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[700px]">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                        <th className="p-3">Código</th>
+                        <th className="p-3">Cliente / Concepto</th>
+                        <th className="p-3 text-right">Monto Inicial</th>
+                        <th className="p-3 text-right">Saldo Actual</th>
+                        <th className="p-3 text-center">Estado</th>
+                        <th className="p-3 text-center">Fecha Creación</th>
+                        <th className="p-3 text-center">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-semibold text-[#2C3E50]">
+                      {(tarjetasRegalo || [])
+                        .filter(c => {
+                          if (!giftCardSearchTerm.trim()) return true;
+                          const term = giftCardSearchTerm.toLowerCase().trim();
+                          return c.codigo.toLowerCase().includes(term) || (c.cliente_nombre && c.cliente_nombre.toLowerCase().includes(term)) || (c.notas && c.notas.toLowerCase().includes(term));
+                        })
+                        .map((card) => (
+                          <tr key={card.id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="p-3 font-mono font-black text-purple-900">{card.codigo}</td>
+                            <td className="p-3">
+                              <div>
+                                <span className="font-bold block">{card.cliente_nombre || 'Cliente General'}</span>
+                                {card.notas && <span className="text-[10px] text-slate-400 block">{card.notas}</span>}
+                              </div>
+                            </td>
+                            <td className="p-3 text-right font-bold text-slate-600">{formatMoney(card.monto_inicial)}</td>
+                            <td className="p-3 text-right font-black text-emerald-700">{formatMoney(card.saldo_actual)}</td>
+                            <td className="p-3 text-center">
+                              <span className={`px-2.5 py-0.5 text-[10px] font-black rounded-full uppercase tracking-wider ${
+                                card.estado === 'activa'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : card.estado === 'canjeada'
+                                  ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+                              }`}>
+                                {card.estado === 'activa' ? 'Activa' : card.estado === 'canjeada' ? 'Usada / Canjeada' : 'Inactiva'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center text-[11px] text-slate-500">{card.fecha_creacion}</td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(card.codigo);
+                                    alert(`Código ${card.codigo} copiado al portapapeles.`);
+                                  }}
+                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded transition-colors cursor-pointer"
+                                  title="Copiar código"
+                                >
+                                  📋 Copiar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`¿Estás seguro de eliminar la tarjeta regalo ${card.codigo}?`)) {
+                                      if (onDeleteTarjetaRegalo) onDeleteTarjetaRegalo(card.id);
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded transition-colors cursor-pointer"
+                                  title="Eliminar tarjeta"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : ventasSubTab === 'fidelizacion' ? (
+
               /* VISTA DE PROGRAMA DE FIDELIZACIÓN DE CLIENTES */
               <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-6">
                 
@@ -2980,11 +3241,8 @@ export default function AdminDashboard({
                       <button
                         type="button"
                         onClick={() => {
-                          const d = new Date();
-                          const endStr = getLocalDateString(d);
-                          d.setDate(d.getDate() - 7);
-                          setSalesStartDate(getLocalDateString(d));
-                          setSalesEndDate(endStr);
+                          setSalesStartDate(getBogotaDateDaysAgo(7));
+                          setSalesEndDate(getLocalDateString());
                         }}
                         className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all cursor-pointer"
                       >
@@ -2993,11 +3251,8 @@ export default function AdminDashboard({
                       <button
                         type="button"
                         onClick={() => {
-                          const d = new Date();
-                          const endStr = getLocalDateString(d);
-                          d.setDate(1);
-                          setSalesStartDate(getLocalDateString(d));
-                          setSalesEndDate(endStr);
+                          setSalesStartDate(getBogotaFirstDayOfMonth());
+                          setSalesEndDate(getLocalDateString());
                         }}
                         className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all cursor-pointer"
                       >
@@ -3053,6 +3308,7 @@ export default function AdminDashboard({
                         <option value="tarjeta">Tarjeta (Datáfono)</option>
                         <option value="transferencia">Transferencia</option>
                         <option value="rappi">Rappi</option>
+                        <option value="tarjeta_regalo">Tarjeta Regalo (Bono)</option>
                       </select>
                     </div>
                   </div>
@@ -3792,7 +4048,7 @@ export default function AdminDashboard({
                           const encodedUri = encodeURI(csvContent);
                           const link = document.createElement('a');
                           link.setAttribute('href', encodedUri);
-                          link.setAttribute('download', `catalogo_productos_${new Date().toISOString().split('T')[0]}.csv`);
+                          link.setAttribute('download', `catalogo_productos_${getLocalDateString()}.csv`);
                           document.body.appendChild(link);
                           link.click();
                           document.body.removeChild(link);
@@ -6286,11 +6542,8 @@ export default function AdminDashboard({
                 <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
                   <button
                     onClick={() => {
-                      const today = new Date();
-                      const todayStr = getLocalDateString(today);
-                      const sevenDaysAgo = new Date(today);
-                      sevenDaysAgo.setDate(today.getDate() - 7);
-                      const sevenDaysAgoStr = getLocalDateString(sevenDaysAgo);
+                      const todayStr = getLocalDateString();
+                      const sevenDaysAgoStr = getBogotaDateDaysAgo(7);
                       
                       setPerformanceDateFilter(sevenDaysAgoStr);
                       setPerformanceDateEndFilter(todayStr);
@@ -6304,11 +6557,8 @@ export default function AdminDashboard({
                   </button>
                   <button
                     onClick={() => {
-                      const today = new Date();
-                      const todayStr = getLocalDateString(today);
-                      const fifteenDaysAgo = new Date(today);
-                      fifteenDaysAgo.setDate(today.getDate() - 15);
-                      const fifteenDaysAgoStr = getLocalDateString(fifteenDaysAgo);
+                      const todayStr = getLocalDateString();
+                      const fifteenDaysAgoStr = getBogotaDateDaysAgo(15);
                       
                       setPerformanceDateFilter(fifteenDaysAgoStr);
                       setPerformanceDateEndFilter(todayStr);
@@ -6322,11 +6572,8 @@ export default function AdminDashboard({
                   </button>
                   <button
                     onClick={() => {
-                      const today = new Date();
-                      const todayStr = getLocalDateString(today);
-                      const oneMonthAgo = new Date(today);
-                      oneMonthAgo.setMonth(today.getMonth() - 1);
-                      const oneMonthAgoStr = getLocalDateString(oneMonthAgo);
+                      const todayStr = getLocalDateString();
+                      const oneMonthAgoStr = getBogotaFirstDayOfMonth();
                       
                       setPerformanceDateFilter(oneMonthAgoStr);
                       setPerformanceDateEndFilter(todayStr);

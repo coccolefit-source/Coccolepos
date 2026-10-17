@@ -314,6 +314,7 @@ export interface CuadreCaja {
   fecha: string;
   hora?: string;
   hora_cierre?: string;
+  total_ventas_dia?: number;
   efectivo_esperado?: number;
   efectivo_contado: number;
   tarjeta_esperado?: number;
