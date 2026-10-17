@@ -250,6 +250,7 @@ export interface Cliente {
   ultima_fecha_compra: string; // YYYY-MM-DD
   visitas_acumuladas?: number;
   stickers_count?: number;
+  rewards_redeemed?: number;
   total_gastado?: number;
   fecha_ultima_compra?: string;
 }
@@ -268,6 +269,8 @@ export interface Venta {
   cliente_nombre?: string;
   cliente_telefono?: string;
   cliente_stickers_count?: number;
+  cliente_rewards_redeemed?: number;
+  cliente_reward_redeemed_now?: boolean;
   estado?: 'Completada' | 'Anulada' | 'Pendiente';
   motivo_anulacion?: string;
   monto_tarjeta_regalo?: number;

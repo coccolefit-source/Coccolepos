@@ -2200,6 +2200,7 @@ export default function App() {
 
     let updatedClientes = [...(state.clientes || [])];
     let finalStickersAfterSale = 2;
+    let rewardWasRedeemedNow = Boolean(nuevaVenta.cliente_reward_redeemed_now);
 
     if (nuevaVenta.cliente_telefono) {
       const cleanPhone = nuevaVenta.cliente_telefono.trim();
@@ -2210,14 +2211,29 @@ export default function App() {
 
       if (existingIdx >= 0) {
         const existing = updatedClientes[existingIdx];
-        // Reconocer que todo cliente registrado inicia con al menos 1 sello (Sello de Bienvenida)
-        const prevStickers = Math.max(
-          Number(existing.stickers_count ?? 0),
-          Number(existing.visitas_acumuladas ?? 0),
-          Number(existing.total_compras_count ?? 0),
-          1
-        );
-        const nextStickers = Number(nuevaVenta.cliente_stickers_count) || (prevStickers + 1);
+        const prevStickers =
+          existing.stickers_count !== undefined && existing.stickers_count !== null && Number(existing.stickers_count) > 0
+            ? Number(existing.stickers_count)
+            : Math.max(
+                Number(existing.visitas_acumuladas ?? 0),
+                Number(existing.total_compras_count ?? 0),
+                1
+              );
+
+        const prevRewards = Number(existing.rewards_redeemed ?? 0);
+        const shouldResetCycle = Boolean(nuevaVenta.cliente_reward_redeemed_now) || prevStickers >= 10;
+
+        const nextStickers = shouldResetCycle
+          ? 1
+          : Number(nuevaVenta.cliente_stickers_count) || (prevStickers + 1);
+
+        const nextRewards = shouldResetCycle
+          ? Math.max(Number(nuevaVenta.cliente_rewards_redeemed || 0), prevRewards + 1)
+          : Number(nuevaVenta.cliente_rewards_redeemed ?? prevRewards);
+
+        if (shouldResetCycle) {
+          rewardWasRedeemedNow = true;
+        }
         finalStickersAfterSale = nextStickers;
 
         const updatedCli: Cliente = {
@@ -2227,13 +2243,14 @@ export default function App() {
           total_compras_count: Number(existing.total_compras_count || 0) + 1,
           visitas_acumuladas: nextStickers,
           stickers_count: nextStickers,
+          rewards_redeemed: nextRewards,
           ultima_fecha_compra: today
         };
         updatedClientes[existingIdx] = updatedCli;
         upsertCustomerInSupabase(updatedCli);
       } else if (nuevaVenta.cliente_nombre) {
-        // Primera compra de cliente nuevo: 1 sello de bienvenida + 1 sello por la compra actual = 2 sellos
         const nextStickers = Number(nuevaVenta.cliente_stickers_count) || 2;
+        const nextRewards = Number(nuevaVenta.cliente_rewards_redeemed ?? 0);
         finalStickersAfterSale = nextStickers;
 
         const newCli: Cliente = {
@@ -2245,6 +2262,7 @@ export default function App() {
           total_compras_count: 1,
           visitas_acumuladas: nextStickers,
           stickers_count: nextStickers,
+          rewards_redeemed: nextRewards,
           ultima_fecha_compra: today
         };
         updatedClientes.push(newCli);
@@ -2266,10 +2284,17 @@ export default function App() {
     insertSaleInSupabase(venta);
 
     const sellosCiclo = finalStickersAfterSale % 10 === 0 ? 10 : finalStickersAfterSale % 10;
-    pushNotification(
-      `¡Venta registrada! El cliente sumó 1 sello por su compra y ahora tiene ${sellosCiclo}/10 sellos acumulados.`,
-      'success'
-    );
+    if (rewardWasRedeemedNow) {
+      pushNotification(
+        '¡Premio redimido! El nuevo ciclo del cliente inicia con 1 sello activo',
+        'success'
+      );
+    } else {
+      pushNotification(
+        `¡Venta registrada! El cliente sumó 1 sello por su compra y ahora tiene ${sellosCiclo}/10 sellos acumulados.`,
+        'success'
+      );
+    }
   };
 
   const handleUpdateVenta = (ventaActualizada: Venta) => {

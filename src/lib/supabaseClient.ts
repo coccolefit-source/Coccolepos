@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
   full_name TEXT,
   nombre TEXT,
   stickers_count INT DEFAULT 1,
+  rewards_redeemed INT DEFAULT 0,
   total_visits INT DEFAULT 1,
   visitas_acumuladas INT DEFAULT 1,
   total_gastado NUMERIC DEFAULT 0,
@@ -131,6 +132,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS stickers_count INT DEFAULT 1;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS rewards_redeemed INT DEFAULT 0;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS total_visits INT DEFAULT 1;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS habeas_data_accepted BOOLEAN DEFAULT true;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ DEFAULT NOW();
@@ -1324,19 +1326,22 @@ export async function fetchCustomersFromSupabase(): Promise<Cliente[] | null> {
   }
   if (!data) return [];
   return data.map((c: any) => {
-    const effectiveStickers = Math.max(
-      Number(c.stickers_count ?? 0),
-      Number(c.visitas_acumuladas ?? 0),
-      Number(c.total_visits ?? 0),
-      Number(c.total_compras_count ?? 0),
-      1
-    );
+    const hasExplicitStickers = c.stickers_count !== undefined && c.stickers_count !== null && Number(c.stickers_count) > 0;
+    const effectiveStickers = hasExplicitStickers
+      ? Number(c.stickers_count)
+      : Math.max(
+          Number(c.visitas_acumuladas ?? 0),
+          Number(c.total_visits ?? 0),
+          Number(c.total_compras_count ?? 0),
+          1
+        );
     return {
       id: c.id,
       telefono: c.phone || c.telefono || '',
       nombre: c.full_name || c.nombre || 'Cliente',
       stickers_count: effectiveStickers,
       visitas_acumuladas: effectiveStickers,
+      rewards_redeemed: Number(c.rewards_redeemed ?? 0),
       total_compras_count: Number(c.total_visits ?? c.visitas_acumuladas ?? c.total_compras_count ?? 0),
       total_compras_monto: Number(c.total_amount ?? c.total_gastado ?? c.total_compras_monto ?? 0),
       ultima_fecha_compra: c.fecha_ultima_compra ? c.fecha_ultima_compra.split('T')[0] : getLocalDateString(),
@@ -1369,23 +1374,23 @@ export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolea
       } catch (e) {}
     }
 
-    const dbExistingStickers = existingRecord
-      ? Math.max(
-          Number(existingRecord.stickers_count ?? 0),
-          Number(existingRecord.visitas_acumuladas ?? 0),
-          Number(existingRecord.total_visits ?? 0),
+    const hasExplicitStickers = cliente.stickers_count !== undefined && cliente.stickers_count !== null && Number(cliente.stickers_count) > 0;
+    const finalStickers = hasExplicitStickers
+      ? Number(cliente.stickers_count)
+      : Math.max(
+          Number(cliente.visitas_acumuladas ?? cliente.total_compras_count ?? 2),
           1
-        )
-      : 0;
+        );
 
-    const requestedStickers = Number(
-      cliente.stickers_count ?? cliente.visitas_acumuladas ?? cliente.total_compras_count ?? 2
+    const finalRewardsRedeemed =
+      cliente.rewards_redeemed !== undefined && cliente.rewards_redeemed !== null
+        ? Number(cliente.rewards_redeemed)
+        : Number(existingRecord?.rewards_redeemed ?? 0);
+
+    const totalVisitsCount = Math.max(
+      Number(cliente.total_compras_count ?? existingRecord?.total_visits ?? finalStickers),
+      1
     );
-
-    // Garantizar que si ya existía en BD con sello de bienvenida (1), al facturar suba al menos a dbExistingStickers + 1 o requestedStickers
-    const finalStickers = existingRecord
-      ? Math.max(requestedStickers, dbExistingStickers)
-      : Math.max(requestedStickers, 2);
 
     const payload: any = {
       id: finalId,
@@ -1394,7 +1399,8 @@ export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolea
       full_name: cliente.nombre,
       nombre: cliente.nombre,
       stickers_count: finalStickers,
-      total_visits: finalStickers,
+      rewards_redeemed: finalRewardsRedeemed,
+      total_visits: totalVisitsCount,
       visitas_acumuladas: finalStickers,
       total_gastado: Number(cliente.total_compras_monto || 0),
       fecha_ultima_compra: cliente.fecha_ultima_compra || new Date().toISOString()
@@ -1402,12 +1408,16 @@ export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolea
 
     const { error } = await client.from('customers').upsert(payload);
     if (error) {
-      // Fallback resiliente si la tabla remota aún no tiene la columna stickers_count
-      if (error.message?.includes('stickers_count') || error.message?.includes('column') || error.code === '42703') {
-        const { stickers_count, ...fallbackPayload } = payload;
-        const { error: fallbackError } = await client.from('customers').upsert(fallbackPayload);
-        if (fallbackError) {
-          console.error('Supabase upsertCustomer fallback error:', fallbackError.message);
+      // Fallback resiliente si la tabla remota aún no tiene rewards_redeemed o stickers_count
+      if (error.message?.includes('rewards_redeemed') || error.message?.includes('stickers_count') || error.message?.includes('column') || error.code === '42703') {
+        const { rewards_redeemed, ...withoutRewards } = payload;
+        const { error: err1 } = await client.from('customers').upsert(withoutRewards);
+        if (!err1) return true;
+
+        const { stickers_count, ...withoutBoth } = withoutRewards;
+        const { error: err2 } = await client.from('customers').upsert(withoutBoth);
+        if (err2) {
+          console.error('Supabase upsertCustomer fallback error:', err2.message);
           return false;
         }
         return true;
@@ -1419,6 +1429,80 @@ export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolea
   } catch (err: any) {
     console.error('Exception in upsertCustomerInSupabase:', err);
     return false;
+  }
+}
+
+export async function redeemCustomerRewardInSupabase(
+  clienteId?: string,
+  telefono?: string,
+  currentRewardsRedeemed?: number
+): Promise<{ success: boolean; rewards_redeemed: number }> {
+  const supabase = getSupabaseClient();
+  const fallbackNextRewards = (Number(currentRewardsRedeemed) || 0) + 1;
+  if (!supabase) return { success: false, rewards_redeemed: fallbackNextRewards };
+
+  try {
+    let targetId = clienteId;
+    let dbRewards = Number(currentRewardsRedeemed || 0);
+    const cleanPhone = (telefono || '').trim().replace(/\D/g, '');
+
+    if (!targetId && cleanPhone) {
+      const { data: found } = await supabase
+        .from('customers')
+        .select('id, rewards_redeemed')
+        .or(`phone.eq.${cleanPhone},telefono.eq.${cleanPhone}`)
+        .limit(1)
+        .maybeSingle();
+      if (found) {
+        targetId = found.id;
+        dbRewards = Math.max(dbRewards, Number(found.rewards_redeemed || 0));
+      }
+    } else if (targetId) {
+      const { data: foundById } = await supabase
+        .from('customers')
+        .select('id, rewards_redeemed')
+        .eq('id', targetId)
+        .maybeSingle();
+      if (foundById) {
+        dbRewards = Math.max(dbRewards, Number(foundById.rewards_redeemed || 0));
+      }
+    }
+
+    const nextRewards = dbRewards + 1;
+
+    if (targetId) {
+      // Actualización exacta requerida por especificación
+      const { error } = await supabase
+        .from('customers')
+        .update({
+          stickers_count: 1,
+          rewards_redeemed: nextRewards,
+          visitas_acumuladas: 1
+        })
+        .eq('id', targetId);
+
+      if (error) {
+        // Fallback si rewards_redeemed aún no existe en la tabla remota
+        if (error.message?.includes('rewards_redeemed') || error.message?.includes('column') || error.code === '42703') {
+          await supabase
+            .from('customers')
+            .update({
+              stickers_count: 1,
+              visitas_acumuladas: 1
+            })
+            .eq('id', targetId);
+        } else {
+          console.error('Error redimiendo premio en Supabase:', error.message);
+          return { success: false, rewards_redeemed: nextRewards };
+        }
+      }
+      return { success: true, rewards_redeemed: nextRewards };
+    }
+
+    return { success: false, rewards_redeemed: nextRewards };
+  } catch (err) {
+    console.error('Exception in redeemCustomerRewardInSupabase:', err);
+    return { success: false, rewards_redeemed: fallbackNextRewards };
   }
 }
 

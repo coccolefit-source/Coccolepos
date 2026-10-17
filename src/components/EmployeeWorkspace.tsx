@@ -570,6 +570,7 @@ export default function EmployeeWorkspace({
     nombre: string;
     telefono: string;
     stickers_count?: number;
+    rewards_redeemed?: number;
   } | null>(null);
   const [phoneError, setPhoneError] = useState(false);
   const [newClientModal, setNewClientModal] = useState<{ open: boolean; phone: string; name: string }>({
@@ -578,6 +579,8 @@ export default function EmployeeWorkspace({
     name: ''
   });
   const [showQrModal, setShowQrModal] = useState(false);
+  const [isRedeemingLoyaltyReward, setIsRedeemingLoyaltyReward] = useState(false);
+  const [loyaltyRedeemConfirmation, setLoyaltyRedeemConfirmation] = useState<string | null>(null);
   const [posSaleSuccessModal, setPosSaleSuccessModal] = useState<{
     open: boolean;
     clienteNombre: string;
@@ -587,11 +590,14 @@ export default function EmployeeWorkspace({
     newStickersCycle: number;
     totalVenta: number;
     metodoPago: string;
+    rewardRedeemedNow?: boolean;
   } | null>(null);
 
   const resolveClientStickers = (c: any): number => {
+    if (c?.stickers_count !== undefined && c?.stickers_count !== null && Number(c.stickers_count) > 0) {
+      return Number(c.stickers_count);
+    }
     return Math.max(
-      Number(c?.stickers_count ?? 0),
       Number(c?.visitas_acumuladas ?? 0),
       Number(c?.total_visits ?? 0),
       Number(c?.total_compras_count ?? 0),
@@ -599,8 +605,71 @@ export default function EmployeeWorkspace({
     );
   };
 
+  const handleRedimirPremioFidelizacion = async () => {
+    if (!selectedClient) return;
+    setIsRedeemingLoyaltyReward(true);
+    setLoyaltyRedeemConfirmation(null);
+
+    const nextRewards = (Number(selectedClient.rewards_redeemed) || 0) + 1;
+
+    try {
+      const supabase = (window as any).supabase || getSupabaseClient();
+      if (supabase) {
+        let targetId = selectedClient.id;
+        const cleanDigits = (selectedClient.telefono || '').replace(/\D/g, '');
+
+        if (!targetId && cleanDigits) {
+          const { data: found } = await supabase
+            .from('customers')
+            .select('id, rewards_redeemed')
+            .or(`phone.eq.${cleanDigits},telefono.eq.${cleanDigits}`)
+            .limit(1)
+            .maybeSingle();
+          if (found?.id) targetId = found.id;
+        }
+
+        if (targetId) {
+          const { error } = await supabase
+            .from('customers')
+            .update({
+              stickers_count: 1,
+              rewards_redeemed: nextRewards,
+              visitas_acumuladas: 1
+            })
+            .eq('id', targetId);
+
+          if (error && (error.message?.includes('rewards_redeemed') || error.message?.includes('column') || error.code === '42703')) {
+            await supabase
+              .from('customers')
+              .update({
+                stickers_count: 1,
+                visitas_acumuladas: 1
+              })
+              .eq('id', targetId);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error al redimir premio en Supabase:', err);
+    } finally {
+      setIsRedeemingLoyaltyReward(false);
+    }
+
+    setSelectedClient(prev =>
+      prev
+        ? {
+            ...prev,
+            stickers_count: 1,
+            rewards_redeemed: nextRewards
+          }
+        : null
+    );
+    setLoyaltyRedeemConfirmation('¡Premio redimido! El nuevo ciclo del cliente inicia con 1 sello activo');
+  };
+
   const handleSearchClient = async () => {
     const cleanPhone = clienteTelefonoInput.trim();
+    setLoyaltyRedeemConfirmation(null);
     if (!cleanPhone) {
       setPhoneError(true);
       setSelectedClient(null);
@@ -614,18 +683,7 @@ export default function EmployeeWorkspace({
       return (cDigits && cDigits === cleanDigits) || c.telefono === cleanPhone || c.id === cleanPhone;
     });
 
-    if (existingClient) {
-      const currentStickers = resolveClientStickers(existingClient);
-      setSelectedClient({
-        id: existingClient.id,
-        nombre: existingClient.nombre,
-        telefono: existingClient.telefono,
-        stickers_count: currentStickers
-      });
-      return;
-    }
-
-    // Consultar también en vivo en Supabase por si el cliente se acaba de registrar vía QR en su celular
+    // Consultar en vivo en Supabase para obtener el conteo exacto de sellos y premios
     try {
       const supa = (window as any).supabase || getSupabaseClient();
       if (supa) {
@@ -640,14 +698,27 @@ export default function EmployeeWorkspace({
           const currentStickers = resolveClientStickers(remoteFound);
           setSelectedClient({
             id: remoteFound.id,
-            nombre: remoteFound.full_name || remoteFound.nombre || 'Cliente',
-            telefono: remoteFound.phone || remoteFound.telefono || cleanPhone,
-            stickers_count: currentStickers
+            nombre: remoteFound.full_name || remoteFound.nombre || existingClient?.nombre || 'Cliente',
+            telefono: remoteFound.phone || remoteFound.telefono || existingClient?.telefono || cleanPhone,
+            stickers_count: currentStickers,
+            rewards_redeemed: Number(remoteFound.rewards_redeemed ?? existingClient?.rewards_redeemed ?? 0)
           });
           return;
         }
       }
     } catch (e) {}
+
+    if (existingClient) {
+      const currentStickers = resolveClientStickers(existingClient);
+      setSelectedClient({
+        id: existingClient.id,
+        nombre: existingClient.nombre,
+        telefono: existingClient.telefono,
+        stickers_count: currentStickers,
+        rewards_redeemed: Number(existingClient.rewards_redeemed ?? 0)
+      });
+      return;
+    }
 
     setSelectedClient(null);
     setNewClientModal({
@@ -849,8 +920,24 @@ export default function EmployeeWorkspace({
       };
 
       const prevStickers = Math.max(Number(selectedClient?.stickers_count ?? 1), 1);
-      const newStickers = prevStickers + 1;
+      const prevRewards = Number(selectedClient?.rewards_redeemed ?? 0);
+      const shouldResetCycle = prevStickers >= 10;
+      const newStickers = shouldResetCycle ? 1 : prevStickers + 1;
+      const nextRewards = shouldResetCycle ? prevRewards + 1 : prevRewards;
       const newStickersCycle = newStickers % 10 === 0 ? 10 : newStickers % 10;
+
+      if (shouldResetCycle && selectedClient?.id) {
+        try {
+          await client
+            .from('customers')
+            .update({
+              stickers_count: 1,
+              rewards_redeemed: nextRewards,
+              visitas_acumuladas: 1
+            })
+            .eq('id', selectedClient.id);
+        } catch (e) {}
+      }
 
       const ventaPayload: any = {
         id: ventaId,
@@ -868,6 +955,8 @@ export default function EmployeeWorkspace({
         cliente_nombre: clienteNombreFinal,
         cliente_telefono: cleanPhoneFinal,
         cliente_stickers_count: newStickers,
+        cliente_rewards_redeemed: nextRewards,
+        cliente_reward_redeemed_now: shouldResetCycle,
         estado: 'completada',
         monto_tarjeta_regalo: montoADescontar,
         tarjeta_regalo_codigo: giftCardVerifiedData.code,
@@ -924,7 +1013,8 @@ export default function EmployeeWorkspace({
           newStickers,
           newStickersCycle,
           totalVenta: totalFactura,
-          metodoPago: metodoPagoFinal
+          metodoPago: metodoPagoFinal,
+          rewardRedeemedNow: shouldResetCycle
         });
       }
 
@@ -932,6 +1022,7 @@ export default function EmployeeWorkspace({
       setCartItems([]);
       setClienteTelefonoInput('');
       setSelectedClient(null);
+      setLoyaltyRedeemConfirmation(null);
       setPhoneError(false);
       handleClosePaymentModal();
     } catch (err: any) {
@@ -942,7 +1033,7 @@ export default function EmployeeWorkspace({
     }
   };
 
-  const handleSelectMandatoryPayment = (metodo: string) => {
+  const handleSelectMandatoryPayment = async (metodo: string) => {
     if (!mandatoryPaymentModal) return;
 
     if (metodo === 'Tarjeta Regalo') {
@@ -957,8 +1048,27 @@ export default function EmployeeWorkspace({
       onAddVentaSugerida(mandatoryPaymentModal.sugeridaProdId, empleado.id, metodo);
     } else if (mandatoryPaymentModal.kind === 'pos') {
       const prevStickers = Math.max(Number(selectedClient?.stickers_count ?? 1), 1);
-      const newStickers = prevStickers + 1;
+      const prevRewards = Number(selectedClient?.rewards_redeemed ?? 0);
+      const shouldResetCycle = prevStickers >= 10;
+      const newStickers = shouldResetCycle ? 1 : prevStickers + 1;
+      const nextRewards = shouldResetCycle ? prevRewards + 1 : prevRewards;
       const newStickersCycle = newStickers % 10 === 0 ? 10 : newStickers % 10;
+
+      if (shouldResetCycle && selectedClient?.id) {
+        try {
+          const supabase = (window as any).supabase || getSupabaseClient();
+          if (supabase) {
+            await supabase
+              .from('customers')
+              .update({
+                stickers_count: 1,
+                rewards_redeemed: nextRewards,
+                visitas_acumuladas: 1
+              })
+              .eq('id', selectedClient.id);
+          }
+        } catch (e) {}
+      }
 
       const newVenta = {
         fecha: getLocalDateString(),
@@ -979,6 +1089,8 @@ export default function EmployeeWorkspace({
         cliente_nombre: selectedClient?.nombre,
         cliente_telefono: selectedClient?.telefono,
         cliente_stickers_count: newStickers,
+        cliente_rewards_redeemed: nextRewards,
+        cliente_reward_redeemed_now: shouldResetCycle,
         estado: 'completada'
       };
 
@@ -991,11 +1103,13 @@ export default function EmployeeWorkspace({
         newStickers,
         newStickersCycle,
         totalVenta: mandatoryPaymentModal.total,
-        metodoPago: metodo
+        metodoPago: metodo,
+        rewardRedeemedNow: shouldResetCycle
       });
       setCartItems([]);
       setClienteTelefonoInput('');
       setSelectedClient(null);
+      setLoyaltyRedeemConfirmation(null);
       setPhoneError(false);
     }
 
@@ -2425,9 +2539,9 @@ export default function EmployeeWorkspace({
                       {selectedClient && (() => {
                         const sellosActuales = Math.max(Number(selectedClient.stickers_count ?? 1), 1);
                         const sellosActualesCiclo = sellosActuales % 10 === 0 ? 10 : sellosActuales % 10;
-                        const sellosProyectados = (sellosActuales + 1) % 10 === 0 ? 10 : (sellosActuales + 1) % 10;
+                        const sellosProyectados = sellosActuales >= 10 ? 1 : (sellosActuales + 1) % 10 === 0 ? 10 : (sellosActuales + 1) % 10;
                         return (
-                          <div className="mt-2 p-2.5 bg-[#EBF5FB] border border-[#AED6F1] rounded-lg space-y-1.5 text-xs">
+                          <div className="mt-2 p-2.5 bg-[#EBF5FB] border border-[#AED6F1] rounded-lg space-y-2 text-xs">
                             <div className="flex items-center justify-between">
                               <div>
                                 <span className="text-[9px] font-black uppercase text-slate-400 block">Cliente Fidelizado</span>
@@ -2439,14 +2553,44 @@ export default function EmployeeWorkspace({
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => setSelectedClient(null)}
+                                  onClick={() => {
+                                    setSelectedClient(null);
+                                    setLoyaltyRedeemConfirmation(null);
+                                  }}
                                   className="text-[10px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer underline"
                                 >
                                   Quitar
                                 </button>
                               </div>
                             </div>
-                            {sellosActuales === 1 ? (
+
+                            {loyaltyRedeemConfirmation && (
+                              <div className="p-2 bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                                <span>{loyaltyRedeemConfirmation}</span>
+                              </div>
+                            )}
+
+                            {sellosActuales >= 10 ? (
+                              <div className="space-y-1.5 pt-0.5">
+                                <div className="text-[10px] font-extrabold text-amber-900 bg-amber-100 border border-amber-300 rounded-md px-2 py-1 flex items-center gap-1">
+                                  <span>🎉 ¡Meta alcanzada (10/10 sellos)! El cliente tiene un premio disponible.</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={isRedeemingLoyaltyReward}
+                                  onClick={handleRedimirPremioFidelizacion}
+                                  className="w-full py-2 px-3 bg-linear-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 text-white font-black text-xs rounded-lg shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                                >
+                                  <Gift className="w-4 h-4" />
+                                  <span>
+                                    {isRedeemingLoyaltyReward
+                                      ? 'Redimiendo Premio...'
+                                      : 'Redimir Premio de Fidelización'}
+                                  </span>
+                                </button>
+                              </div>
+                            ) : sellosActuales === 1 ? (
                               <div className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1 flex items-center gap-1">
                                 <span>🎁 Ya cuenta con 1 sello de bienvenida · Con esta 1ra compra subirá a <strong>2/10 sellos</strong>.</span>
                               </div>
@@ -3324,11 +3468,17 @@ export default function EmployeeWorkspace({
 
             {/* Resumen claro requerido de sellos acumulados */}
             <div className="p-4 bg-linear-to-br from-[#EBF5FB] to-emerald-50 border border-[#AED6F1] rounded-2xl space-y-2">
-              <p className="text-xs sm:text-sm font-extrabold text-[#2C3E50] leading-relaxed">
-                ¡Venta registrada! El cliente sumó 1 sello por su compra y ahora tiene {posSaleSuccessModal.newStickersCycle}/10 sellos acumulados.
-              </p>
+              {posSaleSuccessModal.rewardRedeemedNow ? (
+                <p className="text-xs sm:text-sm font-extrabold text-emerald-800 leading-relaxed">
+                  ¡Premio redimido! El nuevo ciclo del cliente inicia con 1 sello activo
+                </p>
+              ) : (
+                <p className="text-xs sm:text-sm font-extrabold text-[#2C3E50] leading-relaxed">
+                  ¡Venta registrada! El cliente sumó 1 sello por su compra y ahora tiene {posSaleSuccessModal.newStickersCycle}/10 sellos acumulados.
+                </p>
+              )}
 
-              {posSaleSuccessModal.prevStickers === 1 && (
+              {posSaleSuccessModal.prevStickers === 1 && !posSaleSuccessModal.rewardRedeemedNow && (
                 <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100/90 border border-amber-300 text-amber-900 text-[11px] font-bold">
                   <span>🎁 1 sello de bienvenida + 1 por la compra actual = 2/10 sellos</span>
                 </div>
