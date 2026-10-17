@@ -23,6 +23,7 @@ import {
   isTarjeta,
   isTransferencia,
   isRappi,
+  isTarjetaRegalo,
   RankingWeights,
   UpsellRule,
   DEFAULT_UPSELL_RULES,
@@ -2088,8 +2089,75 @@ export default function EmployeeWorkspace({
                     });
 
                     const activeList = filtroHistorialVentas === 'todas' ? allTodaySales : myTodaySales;
+                    const validActiveSales = activeList.filter(v => v.estado !== 'Anulada');
                     const totalVentasDiaTodos = allTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
                     const totalVentasMias = myTodaySales.filter(v => v.estado !== 'Anulada').reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalMostrado = filtroHistorialVentas === 'todas' ? totalVentasDiaTodos : totalVentasMias;
+
+                    // Desglose por método de pago sobre las ventas activas de la vista actual
+                    const ventasEfectivo = validActiveSales.filter(v => isEfectivo(v.metodo_pago));
+                    const ventasTarjeta = validActiveSales.filter(v => isTarjeta(v.metodo_pago) && !isTarjetaRegalo(v.metodo_pago));
+                    const ventasTransferencia = validActiveSales.filter(v => isTransferencia(v.metodo_pago));
+                    const ventasRappi = validActiveSales.filter(v => isRappi(v.metodo_pago));
+                    const ventasRegalo = validActiveSales.filter(v => isTarjetaRegalo(v.metodo_pago));
+
+                    const totalEfectivo = ventasEfectivo.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalTarjeta = ventasTarjeta.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalTransferencia = ventasTransferencia.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalRappi = ventasRappi.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+                    const totalRegalo = ventasRegalo.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+
+                    const metodosPagoList = [
+                      {
+                        key: 'efectivo',
+                        label: 'Efectivo',
+                        total: totalEfectivo,
+                        count: ventasEfectivo.length,
+                        dotClass: 'bg-emerald-500',
+                        activeClass: 'bg-emerald-50/90 border-emerald-200 text-emerald-900',
+                        amountClass: 'text-emerald-700'
+                      },
+                      {
+                        key: 'tarjeta',
+                        label: 'Tarjeta (Datáfono)',
+                        total: totalTarjeta,
+                        count: ventasTarjeta.length,
+                        dotClass: 'bg-blue-500',
+                        activeClass: 'bg-blue-50/90 border-blue-200 text-blue-900',
+                        amountClass: 'text-blue-700'
+                      },
+                      {
+                        key: 'transferencia',
+                        label: 'Transferencia',
+                        total: totalTransferencia,
+                        count: ventasTransferencia.length,
+                        dotClass: 'bg-purple-500',
+                        activeClass: 'bg-purple-50/90 border-purple-200 text-purple-900',
+                        amountClass: 'text-purple-700'
+                      },
+                      {
+                        key: 'rappi',
+                        label: 'Rappi',
+                        total: totalRappi,
+                        count: ventasRappi.length,
+                        dotClass: 'bg-amber-500',
+                        activeClass: 'bg-amber-50/90 border-amber-200 text-amber-900',
+                        amountClass: 'text-amber-700'
+                      },
+                      ...(ventasRegalo.length > 0 || totalRegalo > 0
+                        ? [{
+                            key: 'regalo',
+                            label: 'Tarjeta Regalo',
+                            total: totalRegalo,
+                            count: ventasRegalo.length,
+                            dotClass: 'bg-pink-500',
+                            activeClass: 'bg-pink-50/90 border-pink-200 text-pink-900',
+                            amountClass: 'text-pink-700'
+                          }]
+                        : [])
+                    ];
+
+                    const metodosUsados = metodosPagoList.filter(m => m.count > 0 || m.total > 0);
 
                     const sortedSales = [...activeList].sort((a, b) => {
                       const timeA = `${a.fecha || ''} ${a.hora || ''}`;
@@ -2099,7 +2167,7 @@ export default function EmployeeWorkspace({
 
                     return (
                       <div className="space-y-4">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-3">
+                        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between pb-3 border-b border-[#F1F5F9] gap-3">
                           <div>
                             <h4 className="text-xs font-black text-[#2C3E50] uppercase tracking-wider">
                               Historial Transaccional {isToday ? `del Día (${todayStr})` : `(${selectedDate})`}
@@ -2108,7 +2176,8 @@ export default function EmployeeWorkspace({
                               Registro de ventas procesadas durante la jornada seleccionada.
                             </p>
                           </div>
-                          <div className="flex flex-wrap items-center gap-2.5">
+
+                          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
                             {/* Filtro: Todas vs Mías */}
                             <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
                               <button
@@ -2134,14 +2203,66 @@ export default function EmployeeWorkspace({
                                 Mis Ventas ({myTodaySales.length})
                               </button>
                             </div>
+                          </div>
+                        </div>
 
-                            <div className="text-left sm:text-right bg-[#EBF5FB]/80 border border-[#AED6F1] px-3.5 py-1.5 rounded-lg shadow-2xs">
-                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
-                                {filtroHistorialVentas === 'todas' ? (isToday ? 'Total Ventas del Día' : `Total (${selectedDate})`) : 'Mis Ventas'}
-                              </span>
-                              <span className="text-sm font-black text-[#4B9CD3]">
-                                {formatMoney(filtroHistorialVentas === 'todas' ? totalVentasDiaTodos : totalVentasMias)}
-                              </span>
+                        {/* BLOQUE TOTAL VENTAS DEL DÍA + DESGLOSE POR MÉTODO DE PAGO */}
+                        <div className="bg-[#EBF5FB]/70 border border-[#AED6F1] p-3.5 rounded-xl shadow-2xs">
+                          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                            {/* Total General */}
+                            <div className="flex items-center gap-3 pr-4 md:border-r md:border-[#AED6F1]/80">
+                              <div className="w-9 h-9 rounded-lg bg-[#4B9CD3] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                                <DollarSign className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
+                                  {filtroHistorialVentas === 'todas' ? (isToday ? 'Total Ventas del Día' : `Total Ventas (${selectedDate})`) : 'Total Mis Ventas'}
+                                </span>
+                                <span className="text-lg font-black text-[#2C3E50] leading-tight block">
+                                  {formatMoney(totalMostrado)}
+                                </span>
+                                <span className="text-[10px] font-semibold text-slate-500">
+                                  {validActiveSales.length} {validActiveSales.length === 1 ? 'venta efectiva' : 'ventas efectivas'}
+                                  {metodosUsados.length > 0 ? ` · ${metodosUsados.length} ${metodosUsados.length === 1 ? 'método usado' : 'métodos usados'}` : ''}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Desglose por Método de Pago */}
+                            <div className="flex-1 w-full">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">
+                                  Métodos de pago utilizados y total por método
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                {metodosPagoList.map((m) => {
+                                  const isUsed = m.count > 0 || m.total > 0;
+                                  return (
+                                    <div
+                                      key={m.key}
+                                      className={`px-3 py-2 rounded-lg border transition-all ${
+                                        isUsed
+                                          ? `${m.activeClass} shadow-2xs`
+                                          : 'bg-white/70 border-slate-200/80 text-slate-400'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className="text-[9px] font-black uppercase tracking-wider truncate flex items-center gap-1">
+                                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isUsed ? m.dotClass : 'bg-slate-300'}`} />
+                                          {m.label}
+                                        </span>
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full ${isUsed ? 'bg-white/80 text-slate-700' : 'text-slate-400'}`}>
+                                          {m.count}
+                                        </span>
+                                      </div>
+                                      <div className={`text-xs font-black mt-1 ${isUsed ? m.amountClass : 'text-slate-400'}`}>
+                                        {formatMoney(m.total)}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           </div>
                         </div>
