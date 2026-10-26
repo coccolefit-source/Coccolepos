@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Gasto, Usuario, Venta, isEfectivo, isTarjeta, isTransferencia, isRappi, isTarjetaRegalo } from '../types';
+import { Gasto, Usuario, Venta, getResumenPagosVentas } from '../types';
 import { DollarSign, Plus, Trash2, Calendar, Filter, X, ShoppingCart, Wallet } from 'lucide-react';
 import { formatMoney } from '../utils/metrics';
 import { getLocalDateString } from '../lib/supabaseClient';
@@ -116,12 +116,13 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
   const ventasHoy = ventasActivas.filter(v => !v.fecha || v.fecha === hoyStr);
   const totalVentasHoy = ventasHoy.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
 
-  // Desglose por método de pago de las ventas del día
-  const ventasHoyEfectivo = ventasHoy.filter(v => isEfectivo(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
-  const ventasHoyTarjeta = ventasHoy.filter(v => isTarjeta(v.metodo_pago) && !isTarjetaRegalo(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
-  const ventasHoyTransf = ventasHoy.filter(v => isTransferencia(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
-  const ventasHoyRappi = ventasHoy.filter(v => isRappi(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
-  const ventasHoyRegalo = ventasHoy.filter(v => isTarjetaRegalo(v.metodo_pago)).reduce((acc, v) => acc + (Number(v.total) || 0), 0);
+  // Desglose exacto por método de pago de las ventas del día (incluyendo pagos divididos y tarjetas regalo)
+  const resumenHoy = getResumenPagosVentas(ventasHoy);
+  const ventasHoyEfectivo = resumenHoy.efectivo;
+  const ventasHoyTarjeta = resumenHoy.tarjeta;
+  const ventasHoyTransf = resumenHoy.transferencia;
+  const ventasHoyRappi = resumenHoy.rappi;
+  const ventasHoyRegalo = resumenHoy.tarjeta_regalo;
 
   const metodosVentasHoy = [
     { label: 'Efectivo', total: ventasHoyEfectivo, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },

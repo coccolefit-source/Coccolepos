@@ -255,6 +255,12 @@ export interface Cliente {
   fecha_ultima_compra?: string;
 }
 
+export interface PagoFraccionado {
+  metodo: string;
+  monto: number;
+  codigo_tarjeta?: string;
+}
+
 export interface Venta {
   id: string;
   fecha: string; // YYYY-MM-DD
@@ -277,6 +283,7 @@ export interface Venta {
   tarjeta_regalo_codigo?: string;
   monto_complementario?: number;
   metodo_pago_complementario?: string | null;
+  pagos_divididos?: PagoFraccionado[];
   desglose_pago?: {
     tarjeta_regalo?: number;
     codigo_tarjeta?: string;
@@ -284,6 +291,7 @@ export interface Venta {
     saldo_restante?: number;
     complementario?: number;
     metodo_complementario?: string | null;
+    pagos?: PagoFraccionado[];
   };
 }
 
@@ -334,6 +342,229 @@ export function isRappi(method?: string): boolean {
   return m === 'rappi' || m.includes('rappi') || m.includes('pedidos') || m.includes('domicilio');
 }
 
+export type CategoriaMetodoPago = 'efectivo' | 'tarjeta' | 'transferencia' | 'rappi' | 'tarjeta_regalo';
+
+export interface PartePagoDesglose {
+  categoria: CategoriaMetodoPago;
+  label: string;
+  monto: number;
+  codigo_tarjeta?: string;
+}
+
+export interface DesgloseMontosMetodo {
+  efectivo: number;
+  tarjeta: number;
+  transferencia: number;
+  rappi: number;
+  tarjeta_regalo: number;
+  partes: PartePagoDesglose[];
+  esMixto: boolean;
+}
+
+export function classifySinglePaymentMethod(method?: string): { categoria: CategoriaMetodoPago; label: string } {
+  if (!method) return { categoria: 'efectivo', label: 'Efectivo' };
+  const m = method.toLowerCase().trim();
+  if (m.includes('regalo') || m.includes('bono') || m.includes('gift')) {
+    return { categoria: 'tarjeta_regalo', label: 'Tarjeta Regalo' };
+  }
+  if (
+    m === 'tarjeta' ||
+    m.includes('tarjeta') ||
+    m.includes('datafono') ||
+    m.includes('datáfono') ||
+    m.includes('debito') ||
+    m.includes('débito') ||
+    m.includes('credito') ||
+    m.includes('crédito') ||
+    m.includes('pos')
+  ) {
+    return { categoria: 'tarjeta', label: 'Tarjeta (Datáfono)' };
+  }
+  if (
+    m === 'transferencia' ||
+    m.includes('transf') ||
+    m.includes('nequi') ||
+    m.includes('daviplata') ||
+    m.includes('bancolombia') ||
+    m.includes('banco')
+  ) {
+    return { categoria: 'transferencia', label: 'Transferencia' };
+  }
+  if (m === 'rappi' || m.includes('rappi') || m.includes('pedidos') || m.includes('domicilio')) {
+    return { categoria: 'rappi', label: 'Rappi' };
+  }
+  return { categoria: 'efectivo', label: 'Efectivo' };
+}
+
+/**
+ * Extrae el desglose exacto de pagos por medio de pago de una venta (sea pago único,
+ * pago con Tarjeta Regalo + excedente en otro medio, o pago dividido en múltiples métodos).
+ */
+export function getDesglosePagosVenta(v?: Partial<Venta> | null): DesgloseMontosMetodo {
+  const result: DesgloseMontosMetodo = {
+    efectivo: 0,
+    tarjeta: 0,
+    transferencia: 0,
+    rappi: 0,
+    tarjeta_regalo: 0,
+    partes: [],
+    esMixto: false
+  };
+
+  if (!v) return result;
+
+  const totalVenta = Math.max(0, Number(v.total || 0));
+
+  const addPart = (rawMetodo: string, rawMonto: number, codigoTarjeta?: string) => {
+    const monto = Number(rawMonto || 0);
+    if (monto <= 0) return;
+    const { categoria, label } = classifySinglePaymentMethod(rawMetodo);
+    result[categoria] += monto;
+    result.partes.push({
+      categoria,
+      label,
+      monto,
+      ...(codigoTarjeta ? { codigo_tarjeta: codigoTarjeta } : {})
+    });
+  };
+
+  // 1. Si cuenta con arreglo explícito de pagos divididos (pagos_divididos o desglose_pago.pagos)
+  const explicitPagos =
+    (Array.isArray(v.pagos_divididos) && v.pagos_divididos.length > 0 ? v.pagos_divididos : null) ||
+    (v.desglose_pago && Array.isArray(v.desglose_pago.pagos) && v.desglose_pago.pagos.length > 0
+      ? v.desglose_pago.pagos
+      : null);
+
+  if (explicitPagos) {
+    explicitPagos.forEach(p => {
+      addPart(p.metodo, Number(p.monto || 0), p.codigo_tarjeta);
+    });
+    if (result.partes.length > 0) {
+      result.esMixto = result.partes.length > 1;
+      return result;
+    }
+  }
+
+  // 2. Si cuenta con campos estructurados de Tarjeta Regalo + Complementario
+  const montoGiftStructured = Number(
+    v.monto_tarjeta_regalo ?? v.desglose_pago?.tarjeta_regalo ?? 0
+  );
+  if (montoGiftStructured > 0) {
+    const codigoGift = v.tarjeta_regalo_codigo || v.desglose_pago?.codigo_tarjeta;
+    const montoAplicadoGift = Math.min(montoGiftStructured, totalVenta > 0 ? totalVenta : montoGiftStructured);
+    addPart('Tarjeta Regalo', montoAplicadoGift, codigoGift);
+
+    const rawCompAmount =
+      v.monto_complementario !== undefined
+        ? Number(v.monto_complementario)
+        : v.desglose_pago?.complementario !== undefined
+        ? Number(v.desglose_pago.complementario)
+        : Math.max(0, totalVenta - montoAplicadoGift);
+
+    const metodoComp =
+      v.metodo_pago_complementario ||
+      v.desglose_pago?.metodo_complementario ||
+      null;
+
+    if (rawCompAmount > 0) {
+      if (metodoComp) {
+        addPart(metodoComp, rawCompAmount);
+      } else if (v.metodo_pago && v.metodo_pago.includes('+')) {
+        const secondSegment = v.metodo_pago.split('+')[1] || 'Efectivo';
+        addPart(secondSegment, rawCompAmount);
+      } else {
+        addPart('Efectivo', rawCompAmount);
+      }
+    }
+
+    result.esMixto = result.partes.length > 1;
+    return result;
+  }
+
+  // 3. Si metodo_pago contiene un desglose en texto con "+" (ej: "Tarjeta Regalo ($20,000.00) + Efectivo ($10,000.00)" o "Tarjeta ($15,000.00) + Efectivo ($10,000.00)")
+  const rawMethodStr = (v.metodo_pago || '').trim();
+  if (rawMethodStr.includes('+')) {
+    const cleanedStr = rawMethodStr.replace(/^(Pago\s+Mixto|Mixto|Dividido)\s*:\s*/i, '');
+    const segments = cleanedStr.split('+').map(s => s.trim()).filter(Boolean);
+    const parsedSegments: Array<{ methodPart: string; amount: number }> = [];
+
+    for (const seg of segments) {
+      // Buscar monto entre paréntesis al final ej: "($53,900.00)" o "($$20,000.00)" o después de "$"
+      const parenMatch = seg.match(/\(\s*\$+\s*([\d,]+(?:\.\d+)?)\s*\)\s*$/);
+      const dollarMatch = !parenMatch ? seg.match(/[:\-]?\s*\$+\s*([\d,]+(?:\.\d+)?)\s*$/) : null;
+      const match = parenMatch || dollarMatch;
+
+      if (match) {
+        const parsedAmount = parseFloat(match[1].replace(/,/g, '')) || 0;
+        const methodName = seg.slice(0, match.index).replace(/[:\-]+$/, '').trim() || seg;
+        if (parsedAmount > 0) {
+          parsedSegments.push({ methodPart: methodName, amount: parsedAmount });
+        }
+      }
+    }
+
+    if (parsedSegments.length > 0) {
+      parsedSegments.forEach(ps => addPart(ps.methodPart, ps.amount));
+      const sumParsed = parsedSegments.reduce((acc, item) => acc + item.amount, 0);
+      // Si hay una diferencia residual con el total de la venta y hay un segmento sin monto explícito
+      if (totalVenta > sumParsed + 0.05 && segments.length > parsedSegments.length) {
+        const remaining = totalVenta - sumParsed;
+        const unmatchedSeg = segments[segments.length - 1];
+        addPart(unmatchedSeg, remaining);
+      }
+      result.esMixto = result.partes.length > 1;
+      return result;
+    }
+  }
+
+  // 4. Caso estándar: un único medio de pago por el total de la venta
+  addPart(rawMethodStr || 'Efectivo', totalVenta);
+  result.esMixto = false;
+  return result;
+}
+
+export function getResumenPagosVentas(ventas: Array<Partial<Venta> | null | undefined>) {
+  let efectivo = 0;
+  let tarjeta = 0;
+  let transferencia = 0;
+  let rappi = 0;
+  let tarjeta_regalo = 0;
+
+  for (const v of ventas || []) {
+    if (!v || v.estado === 'Anulada') continue;
+    const d = getDesglosePagosVenta(v);
+    efectivo += d.efectivo;
+    tarjeta += d.tarjeta;
+    transferencia += d.transferencia;
+    rappi += d.rappi;
+    tarjeta_regalo += d.tarjeta_regalo;
+  }
+
+  const total = efectivo + tarjeta + transferencia + rappi + tarjeta_regalo;
+  return {
+    efectivo,
+    tarjeta,
+    transferencia,
+    rappi,
+    tarjeta_regalo,
+    total
+  };
+}
+
+export function ventaMatchesPaymentFilter(v: Partial<Venta> | null | undefined, filterMethod?: string): boolean {
+  if (!filterMethod) return true;
+  if (!v) return false;
+  const d = getDesglosePagosVenta(v);
+  const f = filterMethod.toLowerCase().trim();
+  if (f === 'efectivo') return d.efectivo > 0;
+  if (f === 'tarjeta') return d.tarjeta > 0;
+  if (f === 'transferencia') return d.transferencia > 0;
+  if (f === 'rappi') return d.rappi > 0;
+  if (f === 'tarjeta_regalo' || f === 'tarjeta regalo') return d.tarjeta_regalo > 0;
+  if (f === 'mixto' || f === 'pago_mixto') return d.esMixto;
+  return (v.metodo_pago || '').toLowerCase() === f;
+}
+
 export interface AlertaPanico {
   id: string;
   insumo_id: string;
@@ -359,6 +590,7 @@ export interface CuadreCaja {
   tarjeta_esperado?: number;
   transferencia_esperado?: number;
   rappi_esperado?: number;
+  tarjeta_regalo_esperado?: number;
   diferencia_total?: number;
   observaciones: string;
   estado?: string;
@@ -380,6 +612,7 @@ export interface ToastNotification {
     tarjeta: number;
     transferencia: number;
     rappi: number;
+    tarjeta_regalo?: number;
   };
   estadoValidacion?: string;
   horaStr?: string;

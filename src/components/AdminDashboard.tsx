@@ -31,7 +31,10 @@ import {
   UpsellRule,
   Gasto,
   TarjetaRegalo,
-  isTarjetaRegalo
+  isTarjetaRegalo,
+  getDesglosePagosVenta,
+  getResumenPagosVentas,
+  ventaMatchesPaymentFilter
 } from '../types';
 import GastosModule from './GastosModule';
 import FichajesAsistenciaModule from './FichajesAsistenciaModule';
@@ -261,39 +264,109 @@ export default function AdminDashboard({
 
   // Estado y sincronización de auditoría de productividad
   const [adminFechaProd, setAdminFechaProd] = useState<string>(getLocalDateString());
+  const [adminModoRango, setAdminModoRango] = useState<'hoy' | '7dias' | 'custom'>('hoy');
   const [adminProductividadData, setAdminProductividadData] = useState<Array<{ id: string; employee_name: string; completadas: number; totales: number; porcentaje: number; updated_at: string }>>([]);
   const [loadingAdminProd, setLoadingAdminProd] = useState<boolean>(false);
 
-  const cargarProductividadAdmin = async (fechaConsulta: string) => {
+  const cargarProductividadAdmin = async (fechaConsulta: string, fechaFin?: string) => {
     setLoadingAdminProd(true);
     try {
-      const client = getSupabaseClient();
-      if (!client) {
-        setLoadingAdminProd(false);
-        return;
-      }
-      const { data, error } = await client.from('task_progress').select('*').eq('fecha', fechaConsulta);
-      if (error) {
-        console.warn('Advertencia al consultar task_progress en admin:', error.message);
-      }
-      if (data && data.length > 0) {
-        setAdminProductividadData(data.map((d: any) => {
-          let rawTot = Number(d.totales) || 0;
-          let rawComp = Number(d.completadas) || 0;
-          if (rawTot > 24 && (rawTot % 24 === 0 || rawTot === 48)) {
-            rawTot = 24;
-            rawComp = Math.min(rawComp, 24);
+      let localFallback: any[] = [];
+      if (typeof localStorage !== 'undefined') {
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('coccole_task_progress_')) {
+              const item = JSON.parse(localStorage.getItem(key) || '{}');
+              if (item) {
+                if (fechaFin) {
+                  if (item.fecha && item.fecha >= fechaConsulta && item.fecha <= fechaFin) {
+                    localFallback.push(item);
+                  }
+                } else if (item.fecha === fechaConsulta) {
+                  localFallback.push(item);
+                }
+              }
+            }
           }
-          const pct = rawTot > 0 ? Math.round((rawComp / rawTot) * 100) : (Number(d.porcentaje) || 0);
-          return {
-            id: String(d.id || d.employee_name),
-            employee_name: d.employee_name || 'Colaborador',
-            completadas: rawComp,
-            totales: rawTot,
-            porcentaje: pct,
-            updated_at: d.updated_at || new Date().toISOString()
-          };
-        }));
+        } catch (e) {}
+      }
+
+      let cloudData: any[] = [];
+      const client = getSupabaseClient();
+      if (client) {
+        let query = client.from('task_progress').select('*');
+        if (fechaFin) {
+          query = query.gte('fecha', fechaConsulta).lte('fecha', fechaFin);
+        } else {
+          query = query.eq('fecha', fechaConsulta);
+        }
+        const { data, error } = await query;
+        if (!error && data) {
+          cloudData = data;
+        } else if (error) {
+          console.warn('Advertencia al consultar task_progress en admin:', error.message);
+        }
+      }
+
+      const mergedMap = new Map<string, any>();
+      cloudData.forEach((d: any) => mergedMap.set(`${d.employee_name || d.id}_${d.fecha || ''}`, d));
+      localFallback.forEach((d: any) => {
+        const key = `${d.employee_name || d.id}_${d.fecha || ''}`;
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, d);
+        }
+      });
+
+      const effectiveList = Array.from(mergedMap.values());
+      if (effectiveList.length > 0) {
+        if (fechaFin) {
+          // Consolidar métricas de los 7 días por colaborador
+          const empMap = new Map<string, { employee_name: string; sumComp: number; sumTot: number; count: number }>();
+          effectiveList.forEach((d: any) => {
+            const name = d.employee_name || 'Colaborador';
+            let rawTot = Number(d.totales) || 0;
+            let rawComp = Number(d.completadas) || 0;
+            if (rawTot > 24 && (rawTot % 24 === 0 || rawTot === 48)) {
+              rawTot = 24;
+              rawComp = Math.min(rawComp, 24);
+            }
+            if (!empMap.has(name)) {
+              empMap.set(name, { employee_name: name, sumComp: 0, sumTot: 0, count: 0 });
+            }
+            const curr = empMap.get(name)!;
+            curr.sumComp += rawComp;
+            curr.sumTot += rawTot;
+            curr.count += 1;
+          });
+
+          setAdminProductividadData(Array.from(empMap.values()).map(e => ({
+            id: e.employee_name,
+            employee_name: e.employee_name,
+            completadas: e.sumComp,
+            totales: e.sumTot,
+            porcentaje: e.sumTot > 0 ? Math.round((e.sumComp / e.sumTot) * 100) : 0,
+            updated_at: new Date().toISOString()
+          })));
+        } else {
+          setAdminProductividadData(effectiveList.map((d: any) => {
+            let rawTot = Number(d.totales) || 0;
+            let rawComp = Number(d.completadas) || 0;
+            if (rawTot > 24 && (rawTot % 24 === 0 || rawTot === 48)) {
+              rawTot = 24;
+              rawComp = Math.min(rawComp, 24);
+            }
+            const pct = rawTot > 0 ? Math.round((rawComp / rawTot) * 100) : (Number(d.porcentaje) || 0);
+            return {
+              id: String(d.id || d.employee_name),
+              employee_name: d.employee_name || 'Colaborador',
+              completadas: rawComp,
+              totales: rawTot,
+              porcentaje: pct,
+              updated_at: d.updated_at || new Date().toISOString()
+            };
+          }));
+        }
       } else {
         setAdminProductividadData([]);
       }
@@ -2719,25 +2792,20 @@ export default function AdminDashboard({
             (v.cliente_telefono && v.cliente_telefono.includes(q)) ||
             v.productos_vendidos.some(p => p.nombre.toLowerCase().includes(q) || p.codigo.toLowerCase().includes(q));
           
-          const matchesPaymentMethod = !salesPaymentMethod || 
-            (salesPaymentMethod === 'efectivo' ? isEfectivo(v.metodo_pago) :
-             salesPaymentMethod === 'tarjeta' ? isTarjeta(v.metodo_pago) :
-             salesPaymentMethod === 'transferencia' ? isTransferencia(v.metodo_pago) :
-             salesPaymentMethod === 'rappi' ? isRappi(v.metodo_pago) :
-             salesPaymentMethod === 'tarjeta_regalo' ? isTarjetaRegalo(v.metodo_pago) :
-             v.metodo_pago === salesPaymentMethod);
+          const matchesPaymentMethod = ventaMatchesPaymentFilter(v, salesPaymentMethod);
             
           return matchesStartDate && matchesEndDate && matchesSeller && matchesSearch && matchesPaymentMethod;
         });
 
         // Ventas activas (excluye las anuladas para los totales financieros de caja)
         const activeFilteredSales = filteredSales.filter(v => v.estado !== 'Anulada');
+        const resumenPagosFiltrados = getResumenPagosVentas(activeFilteredSales);
         
-        const totalEfectivoFiltered = activeFilteredSales.filter(v => isEfectivo(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-        const totalTarjetaFiltered = activeFilteredSales.filter(v => isTarjeta(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-        const totalTransferenciaFiltered = activeFilteredSales.filter(v => isTransferencia(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-        const totalRappiFiltered = activeFilteredSales.filter(v => isRappi(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
-        const totalTarjetaRegaloFiltered = activeFilteredSales.filter(v => isTarjetaRegalo(v.metodo_pago)).reduce((acc, curr) => acc + curr.total, 0);
+        const totalEfectivoFiltered = resumenPagosFiltrados.efectivo;
+        const totalTarjetaFiltered = resumenPagosFiltrados.tarjeta;
+        const totalTransferenciaFiltered = resumenPagosFiltrados.transferencia;
+        const totalRappiFiltered = resumenPagosFiltrados.rappi;
+        const totalTarjetaRegaloFiltered = resumenPagosFiltrados.tarjeta_regalo;
 
         const totalFilteredAmount = activeFilteredSales.reduce((acc, curr) => acc + curr.total, 0);
         const ticketPromedio = activeFilteredSales.length > 0 ? totalFilteredAmount / activeFilteredSales.length : 0;
@@ -3373,6 +3441,7 @@ export default function AdminDashboard({
                         <option value="transferencia">Transferencia</option>
                         <option value="rappi">Rappi</option>
                         <option value="tarjeta_regalo">Tarjeta Regalo (Bono)</option>
+                        <option value="mixto">Pago Mixto / Dividido</option>
                       </select>
                     </div>
                   </div>
@@ -3405,13 +3474,13 @@ export default function AdminDashboard({
                 </div>
 
                 {/* KPI DESGLOSE MEDIOS DE PAGO */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5 mb-4">
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Efectivo</span>
                     <span className="text-sm font-black text-[#4B9CD3] mt-0.5 block">{formatMoney(totalEfectivoFiltered)}</span>
                   </div>
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
-                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Tarjeta</span>
+                    <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Tarjeta (Datáfono)</span>
                     <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalTarjetaFiltered)}</span>
                   </div>
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
@@ -3421,6 +3490,10 @@ export default function AdminDashboard({
                   <div className="bg-white border border-[#E2E8F0] p-3 rounded-lg text-center shadow-xs">
                     <span className="block text-[9px] font-extrabold text-slate-500 uppercase tracking-widest">Rappi</span>
                     <span className="text-sm font-black text-[#2C3E50] mt-0.5 block">{formatMoney(totalRappiFiltered)}</span>
+                  </div>
+                  <div className="bg-pink-50/40 border border-pink-200 p-3 rounded-lg text-center shadow-xs col-span-2 sm:col-span-1">
+                    <span className="block text-[9px] font-extrabold text-pink-700 uppercase tracking-widest">Tarjeta Regalo</span>
+                    <span className="text-sm font-black text-pink-700 mt-0.5 block">{formatMoney(totalTarjetaRegaloFiltered)}</span>
                   </div>
                 </div>
 
@@ -3586,10 +3659,42 @@ export default function AdminDashboard({
                                     ))}
                                   </div>
                                 </td>
-                                <td className="px-4 py-3 text-center whitespace-nowrap">
-                                  <span className="inline-block px-2.5 py-1 text-[10px] font-extrabold rounded-md uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 capitalize">
-                                    {v.metodo_pago || 'Efectivo'}
-                                  </span>
+                                <td className="px-4 py-3 text-center">
+                                  {(() => {
+                                    const desgloseVenta = getDesglosePagosVenta(v);
+                                    const getCatColor = (cat: string) => {
+                                      if (cat === 'tarjeta_regalo') return 'bg-pink-50 text-pink-700 border-pink-200';
+                                      if (cat === 'tarjeta') return 'bg-blue-50 text-blue-700 border-blue-200';
+                                      if (cat === 'transferencia') return 'bg-purple-50 text-purple-700 border-purple-200';
+                                      if (cat === 'rappi') return 'bg-amber-50 text-amber-700 border-amber-200';
+                                      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                    };
+                                    if (desgloseVenta.esMixto) {
+                                      return (
+                                        <div className="flex flex-col gap-1 items-center min-w-[145px]">
+                                          <span className="inline-block px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-slate-800 text-white">
+                                            Pago Dividido / Mixto
+                                          </span>
+                                          {desgloseVenta.partes.map((p, idxP) => (
+                                            <span
+                                              key={idxP}
+                                              className={`inline-flex items-center justify-between gap-1.5 w-full px-2 py-0.5 text-[10px] font-extrabold rounded-md border ${getCatColor(p.categoria)}`}
+                                            >
+                                              <span>{p.label}:</span>
+                                              <span className="font-black">{formatMoney(p.monto)}</span>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      );
+                                    }
+                                    const singleCat = desgloseVenta.partes[0]?.categoria || 'efectivo';
+                                    const singleLabel = desgloseVenta.partes[0]?.label || v.metodo_pago || 'Efectivo';
+                                    return (
+                                      <span className={`inline-block px-2.5 py-1 text-[10px] font-extrabold rounded-md uppercase tracking-wider border whitespace-nowrap ${getCatColor(singleCat)}`}>
+                                        {singleLabel}
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="px-4 py-3 text-right whitespace-nowrap font-extrabold">
                                   {isAnulada ? (
@@ -3692,7 +3797,7 @@ export default function AdminDashboard({
                 <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm space-y-4">
                   <div className="border-b border-[#FFFDF6] pb-2">
                     <h4 className="font-extrabold text-xs uppercase tracking-wider text-[#4B9CD3]">Cortes de Caja de la Jornada (Cuadre Diario)</h4>
-                    <p className="text-xs text-slate-500">Historial de rendición de caja y observaciones de entrega de turno reportados por el staff.</p>
+                    <p className="text-xs text-slate-500">Historial de rendición de caja, desglose por medio de pago (incluyendo pagos mixtos y tarjetas regalo) y observaciones reportadas por el staff.</p>
                   </div>
 
                   {cuadresCaja.length === 0 ? (
@@ -3702,26 +3807,80 @@ export default function AdminDashboard({
                       <table className="w-full text-xs text-left text-slate-600">
                         <thead className="bg-[#FFFDF6] text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-200">
                           <tr>
-                            <th className="px-4 py-3">Fecha y Hora</th>
-                            <th className="px-4 py-3">Colaborador</th>
-                            <th className="px-4 py-3 text-right">Efectivo Contado</th>
-                            <th className="px-4 py-3 text-right">Datáfono / Transf.</th>
-                            <th className="px-4 py-3">Observaciones de Entrega</th>
+                            <th className="px-3 py-3">Fecha y Hora</th>
+                            <th className="px-3 py-3">Colaborador</th>
+                            <th className="px-3 py-3 text-right">Total Día</th>
+                            <th className="px-3 py-3 text-right">Efectivo (Sistema / Contado)</th>
+                            <th className="px-3 py-3 text-right">Tarjeta (Datáfono)</th>
+                            <th className="px-3 py-3 text-right">Transferencia</th>
+                            <th className="px-3 py-3 text-right">Rappi</th>
+                            <th className="px-3 py-3 text-right">Tarjeta Regalo</th>
+                            <th className="px-3 py-3">Observaciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {cuadresCaja.map(c => (
-                            <tr key={c.id} className="hover:bg-slate-50 bg-white transition-colors">
-                              <td className="px-4 py-3 whitespace-nowrap">
-                                <span className="font-bold text-slate-800">{c.fecha}</span>
-                                <span className="block text-[10px] text-slate-400">{c.hora}</span>
-                              </td>
-                              <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-700">{c.usuario_nombre}</td>
-                              <td className="px-4 py-3 text-right font-mono font-bold text-sky-700">{formatMoney(c.efectivo_contado)}</td>
-                              <td className="px-4 py-3 text-right font-mono font-bold text-slate-700">{formatMoney(c.tarjeta_esperado)}</td>
-                              <td className="px-4 py-3 text-slate-600 font-medium max-w-[250px] truncate" title={c.observaciones}>{c.observaciones}</td>
-                            </tr>
-                          ))}
+                          {cuadresCaja.map(c => {
+                            const efEsp = Number(c.efectivo_esperado || 0);
+                            const efCont = Number(c.efectivo_contado || 0);
+                            const dif = c.diferencia_total !== undefined ? Number(c.diferencia_total) : (efCont - efEsp);
+                            const tarEsp = Number(c.tarjeta_esperado || 0);
+                            const trEsp = Number(c.transferencia_esperado || 0);
+                            const rapEsp = Number(c.rappi_esperado || 0);
+                            const regEsp = Number(c.tarjeta_regalo_esperado || 0);
+                            const totDia = Number(c.total_ventas_dia || (efEsp + tarEsp + trEsp + rapEsp + regEsp));
+                            return (
+                              <tr key={c.id} className="hover:bg-slate-50 bg-white transition-colors">
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  <span className="font-bold text-slate-800">{c.fecha}</span>
+                                  <span className="block text-[10px] text-slate-400">{c.hora_cierre || c.hora || '--:--'}</span>
+                                </td>
+                                <td className="px-3 py-3 whitespace-nowrap font-bold text-slate-700">
+                                  {c.empleado_nombre || c.usuario_nombre || 'Colaborador'}
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-black text-[#2C3E50] whitespace-nowrap">
+                                  {formatMoney(totDia)}
+                                </td>
+                                <td className="px-3 py-3 text-right whitespace-nowrap">
+                                  <div className="text-[10px] text-slate-500">
+                                    Sistema: <strong className="text-slate-700 font-mono">{formatMoney(efEsp)}</strong>
+                                  </div>
+                                  <div className="text-xs font-mono font-black text-sky-700">
+                                    Contado: {formatMoney(efCont)}
+                                  </div>
+                                  <span
+                                    className={`inline-block mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-black border ${
+                                      Math.abs(dif) < 0.01
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : dif < 0
+                                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                        : 'bg-blue-50 text-blue-700 border-blue-200'
+                                    }`}
+                                  >
+                                    {Math.abs(dif) < 0.01
+                                      ? '✓ Conciliado'
+                                      : dif < 0
+                                      ? `Faltante: -${formatMoney(Math.abs(dif))}`
+                                      : `Sobrante: +${formatMoney(dif)}`}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-blue-700 whitespace-nowrap">
+                                  {formatMoney(tarEsp)}
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-purple-700 whitespace-nowrap">
+                                  {formatMoney(trEsp)}
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-amber-700 whitespace-nowrap">
+                                  {formatMoney(rapEsp)}
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-pink-700 whitespace-nowrap">
+                                  {formatMoney(regEsp)}
+                                </td>
+                                <td className="px-3 py-3 text-slate-600 font-medium max-w-[220px] truncate" title={c.observaciones}>
+                                  {c.observaciones || 'Sin observaciones'}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -6052,11 +6211,47 @@ export default function AdminDashboard({
                 </h3>
                 <p className="text-[10px] text-slate-500 mt-0.5">Control de avance diario de tareas de colaboradores registrado en Supabase.</p>
               </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const todayStr = getLocalDateString();
+                    setAdminModoRango('hoy');
+                    setAdminFechaProd(todayStr);
+                    cargarProductividadAdmin(todayStr);
+                  }}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                    adminModoRango === 'hoy' && adminFechaProd === getLocalDateString()
+                      ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                  title="Ver productividad de la jornada de hoy"
+                >
+                  Hoy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sevenDaysAgoStr = getBogotaDateDaysAgo(7);
+                    const todayStr = getLocalDateString();
+                    setAdminModoRango('7dias');
+                    setAdminFechaProd(sevenDaysAgoStr);
+                    cargarProductividadAdmin(sevenDaysAgoStr, todayStr);
+                  }}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                    adminModoRango === '7dias'
+                      ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                  title="Ver productividad consolidada de los últimos 7 días"
+                >
+                  Últimos 7 días
+                </button>
                 <input
                   type="date"
                   value={adminFechaProd}
                   onChange={(e) => {
+                    setAdminModoRango('custom');
                     setAdminFechaProd(e.target.value);
                     cargarProductividadAdmin(e.target.value);
                   }}
@@ -6064,7 +6259,13 @@ export default function AdminDashboard({
                 />
                 <button
                   type="button"
-                  onClick={() => cargarProductividadAdmin(adminFechaProd)}
+                  onClick={() => {
+                    if (adminModoRango === '7dias') {
+                      cargarProductividadAdmin(adminFechaProd, getLocalDateString());
+                    } else {
+                      cargarProductividadAdmin(adminFechaProd);
+                    }
+                  }}
                   className="bg-[#4B9CD3] hover:bg-[#3A88BE] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
                 >
                   Consultar
@@ -6076,7 +6277,11 @@ export default function AdminDashboard({
               <p className="text-xs text-slate-400 text-center py-4">Consultando datos de productividad...</p>
             ) : adminProductividadData.length === 0 ? (
               <div className="text-center py-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
-                <p className="text-xs font-bold text-slate-600">Sin registros de productividad para la fecha seleccionada ({adminFechaProd})</p>
+                <p className="text-xs font-bold text-slate-600">
+                  {adminModoRango === '7dias'
+                    ? `Sin registros de productividad para los últimos 7 días (${adminFechaProd} al ${getLocalDateString()})`
+                    : `Sin registros de productividad para la fecha seleccionada (${adminFechaProd})`}
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -7204,7 +7409,7 @@ export default function AdminDashboard({
                       Asistente Gemini AI — {geminiModalWorker.nombre}
                     </h3>
                     <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 border border-blue-400/30 px-2 py-0.5 rounded-full">
-                      gemini-2.5-flash
+                      gemini-3.8-flash
                     </span>
                   </div>
                   <p className="text-[11px] text-blue-200/80 mt-0.5">
@@ -7443,7 +7648,7 @@ export default function AdminDashboard({
               </form>
 
               <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-                <span>Presiona Enter para enviar. Gemini utiliza el modelo oficial gemini-2.5-flash del servidor.</span>
+                <span>Presiona Enter para enviar. Gemini utiliza el modelo oficial gemini-3.8-flash del servidor.</span>
                 <span className="font-semibold text-slate-500">
                   {geminiChatMessages.length} {geminiChatMessages.length === 1 ? 'mensaje' : 'mensajes'} en sesión
                 </span>
@@ -7762,10 +7967,19 @@ export default function AdminDashboard({
                   onChange={(e) => setEditingVentaModal(prev => ({ ...prev, metodo_pago: e.target.value }))}
                   className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4B9CD3] font-medium text-[#2C3E50] bg-white capitalize"
                 >
+                  {editingVentaModal.venta?.metodo_pago &&
+                    !['efectivo', 'tarjeta', 'transferencia', 'rappi', 'tarjeta_regalo'].includes(
+                      editingVentaModal.venta.metodo_pago.toLowerCase()
+                    ) && (
+                      <option value={editingVentaModal.venta.metodo_pago}>
+                        {editingVentaModal.venta.metodo_pago}
+                      </option>
+                    )}
                   <option value="efectivo">Efectivo</option>
                   <option value="tarjeta">Tarjeta (Datáfono)</option>
                   <option value="transferencia">Transferencia Nequi / Bancolombia</option>
                   <option value="rappi">Rappi</option>
+                  <option value="tarjeta_regalo">Tarjeta Regalo</option>
                 </select>
               </div>
 
@@ -7894,13 +8108,23 @@ export default function AdminDashboard({
                   onClick={() => {
                     if (!editingVentaModal.venta) return;
                     const recalculatedTotal = editingVentaModal.items.reduce((sum, item) => sum + (item.precio * item.cantidad), 0);
+                    const changedMethod = editingVentaModal.metodo_pago !== editingVentaModal.venta.metodo_pago;
                     const updatedVenta: Venta = {
                       ...editingVentaModal.venta,
                       cliente_nombre: editingVentaModal.cliente_nombre.trim(),
                       cliente_telefono: editingVentaModal.cliente_telefono.trim(),
                       metodo_pago: editingVentaModal.metodo_pago,
                       productos_vendidos: editingVentaModal.items,
-                      total: recalculatedTotal
+                      total: recalculatedTotal,
+                      ...(changedMethod
+                        ? {
+                            pagos_divididos: undefined,
+                            desglose_pago: undefined,
+                            monto_tarjeta_regalo: undefined,
+                            monto_complementario: undefined,
+                            metodo_pago_complementario: null
+                          }
+                        : {})
                     };
                     if (onUpdateVenta) {
                       onUpdateVenta(updatedVenta);

@@ -28,7 +28,10 @@ import {
   RankingWeights,
   UpsellRule,
   DEFAULT_UPSELL_RULES,
-  Gasto
+  Gasto,
+  PagoFraccionado,
+  getDesglosePagosVenta,
+  getResumenPagosVentas
 } from '../types';
 
 import { calculateLeaderboard, getGlobalMetrics, formatMoney } from '../utils/metrics';
@@ -38,6 +41,7 @@ import {
   getSupabaseClient,
   fetchSchedulesForEmployeeFromSupabase,
   guardarProgresoEnSupabase,
+  obtenerProgresoLocal,
   mostrarProgresoEmpleadoActual,
   actualizarVistaProductividadEmpleado,
   renderizarSeccionProductividadEmpleado,
@@ -46,6 +50,7 @@ import {
   fetchDailyTasksFromSupabase,
   fetchCampaignProductsFromSupabase,
   getLocalDateString,
+  getBogotaDateDaysAgo,
   calcularHorasTurno,
   fetchActiveAnnouncementsFromSupabase,
   subscribeToAnnouncementsRealtime,
@@ -526,28 +531,35 @@ export default function EmployeeWorkspace({
   const cargarProgresoHistorial = async (fechaConsulta: string) => {
     setIsLoadingProgresoHistorial(true);
     try {
+      let resolvedData: any = null;
       const client = getSupabaseClient();
-      if (!client) {
-        setIsLoadingProgresoHistorial(false);
-        return;
-      }
-      const { data, error } = await client
-        .from('task_progress')
-        .select('*')
-        .eq('employee_name', empleado.nombre)
-        .eq('fecha', fechaConsulta)
-        .maybeSingle();
+      if (client) {
+        const { data, error } = await client
+          .from('task_progress')
+          .select('*')
+          .eq('employee_name', empleado.nombre)
+          .eq('fecha', fechaConsulta)
+          .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') {
-        console.warn('Error al consultar task_progress:', error.message);
+        if (error && error.code !== 'PGRST116') {
+          console.warn('Error al consultar task_progress:', error.message);
+        }
+
+        if (data) {
+          resolvedData = data;
+        }
       }
 
-      if (data) {
+      if (!resolvedData) {
+        resolvedData = obtenerProgresoLocal(empleado.nombre, fechaConsulta);
+      }
+
+      if (resolvedData) {
         setHistorialProgresoData({
-          completadas: Number(data.completadas) || 0,
-          totales: Number(data.totales) || 0,
-          porcentaje: Number(data.porcentaje) || 0,
-          updated_at: data.updated_at || new Date().toISOString()
+          completadas: Number(resolvedData.completadas) || 0,
+          totales: Number(resolvedData.totales) || 0,
+          porcentaje: Number(resolvedData.porcentaje) || 0,
+          updated_at: resolvedData.updated_at || new Date().toISOString()
         });
       } else {
         setHistorialProgresoData(null);
@@ -747,7 +759,16 @@ export default function EmployeeWorkspace({
     is_active: boolean;
   } | null>(null);
   const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState<string>('Efectivo');
+  const [giftCardCustomAmountInput, setGiftCardCustomAmountInput] = useState<string>('');
   const [isDebitingGiftCard, setIsDebitingGiftCard] = useState<boolean>(false);
+
+  // Estados para Pago Mixto / Dividido (Varios Medios de Pago)
+  const [isSplitPaymentActive, setIsSplitPaymentActive] = useState<boolean>(false);
+  const [splitPaymentRows, setSplitPaymentRows] = useState<Array<{ id: string; metodo: string; monto: string }>>([
+    { id: 'sp-1', metodo: 'Tarjeta (Datáfono)', monto: '' },
+    { id: 'sp-2', metodo: 'Efectivo', monto: '' }
+  ]);
+  const [splitPaymentError, setSplitPaymentError] = useState<string | null>(null);
 
   const handleClosePaymentModal = () => {
     setMandatoryPaymentModal(null);
@@ -757,7 +778,14 @@ export default function EmployeeWorkspace({
     setGiftCardError(null);
     setGiftCardVerifiedData(null);
     setSecondaryPaymentMethod('Efectivo');
+    setGiftCardCustomAmountInput('');
     setIsDebitingGiftCard(false);
+    setIsSplitPaymentActive(false);
+    setSplitPaymentError(null);
+    setSplitPaymentRows([
+      { id: 'sp-1', metodo: 'Tarjeta (Datáfono)', monto: '' },
+      { id: 'sp-2', metodo: 'Efectivo', monto: '' }
+    ]);
   };
 
   const handleConsultarSaldoGiftCard = async () => {
@@ -832,7 +860,11 @@ export default function EmployeeWorkspace({
         return;
       }
 
-      // Si es válida, mostrar el saldo actual de forma visible
+      // Si es válida, mostrar el saldo actual de forma visible y pre-llenar el monto a descontar
+      const maxInitialDebit = mandatoryPaymentModal
+        ? Math.min(currentBalance, mandatoryPaymentModal.total)
+        : currentBalance;
+      setGiftCardCustomAmountInput(String(maxInitialDebit));
       setGiftCardVerifiedData({
         code: matchedCard.code,
         current_balance: currentBalance,
@@ -851,10 +883,21 @@ export default function EmployeeWorkspace({
 
     const totalFactura = mandatoryPaymentModal.total;
     const saldoActual = Number(giftCardVerifiedData.current_balance || 0);
-    const isFullPayment = saldoActual >= totalFactura;
-    const montoADescontar = isFullPayment ? totalFactura : saldoActual;
-    const saldoRestanteProyectado = isFullPayment ? (saldoActual - totalFactura) : 0;
-    const montoComplementario = isFullPayment ? 0 : (totalFactura - saldoActual);
+    const maxAplicable = Math.min(saldoActual, totalFactura);
+    const parsedCustom = parseFloat(giftCardCustomAmountInput);
+    const montoADescontar =
+      !isNaN(parsedCustom) && parsedCustom > 0
+        ? Math.min(parsedCustom, maxAplicable)
+        : maxAplicable;
+
+    if (montoADescontar <= 0) {
+      setGiftCardError('El monto a descontar de la tarjeta regalo debe ser mayor a $0.');
+      return;
+    }
+
+    const isFullPayment = Math.abs(totalFactura - montoADescontar) < 0.01;
+    const saldoRestanteProyectado = Math.max(0, saldoActual - montoADescontar);
+    const montoComplementario = isFullPayment ? 0 : Math.max(0, Number((totalFactura - montoADescontar).toFixed(2)));
     const metodoComplementario = isFullPayment ? undefined : secondaryPaymentMethod;
 
     setIsDebitingGiftCard(true);
@@ -892,14 +935,28 @@ export default function EmployeeWorkspace({
         return;
       }
 
-      // 2. Si el RPC responde success: true, guardar la venta registrando el desglose de pago
+      // 2. Si el RPC responde success: true, guardar la venta registrando el desglose exacto de pago
       const ventaId = `vreg-${Date.now()}`;
       const cleanPhone = clienteTelefonoInput.trim();
       const cleanPhoneFinal = cleanPhone || selectedClient?.telefono || '';
       const clienteNombreFinal = selectedClient?.nombre || (cleanPhone ? `Cliente ${cleanPhone}` : 'Cliente General');
 
+      const pagosDivididos: PagoFraccionado[] = [
+        {
+          metodo: 'Tarjeta Regalo',
+          monto: montoADescontar,
+          codigo_tarjeta: giftCardVerifiedData.code
+        }
+      ];
+      if (montoComplementario > 0 && metodoComplementario) {
+        pagosDivididos.push({
+          metodo: metodoComplementario,
+          monto: montoComplementario
+        });
+      }
+
       const metodoPagoFinal = montoComplementario > 0
-        ? `Tarjeta Regalo ($${formatMoney(montoADescontar)}) + ${metodoComplementario} ($${formatMoney(montoComplementario)})`
+        ? `Tarjeta Regalo (${formatMoney(montoADescontar)}) + ${metodoComplementario} (${formatMoney(montoComplementario)})`
         : 'Tarjeta Regalo';
 
       const itemsVendidos = mandatoryPaymentModal.articulos.map(art => ({
@@ -916,7 +973,8 @@ export default function EmployeeWorkspace({
         saldo_anterior: saldoActual,
         saldo_restante: saldoRestanteProyectado,
         complementario: montoComplementario,
-        metodo_complementario: metodoComplementario || null
+        metodo_complementario: metodoComplementario || null,
+        pagos: pagosDivididos
       };
 
       const prevStickers = Math.max(Number(selectedClient?.stickers_count ?? 1), 1);
@@ -962,6 +1020,7 @@ export default function EmployeeWorkspace({
         tarjeta_regalo_codigo: giftCardVerifiedData.code,
         monto_complementario: montoComplementario,
         metodo_pago_complementario: metodoComplementario || null,
+        pagos_divididos: pagosDivididos,
         desglose_pago: desglosePago
       };
 
@@ -1038,9 +1097,24 @@ export default function EmployeeWorkspace({
 
     if (metodo === 'Tarjeta Regalo') {
       setIsGiftCardPaymentActive(true);
+      setIsSplitPaymentActive(false);
       setGiftCardError(null);
       setGiftCardVerifiedData(null);
       setGiftCardCodeInput('');
+      setGiftCardCustomAmountInput('');
+      return;
+    }
+
+    if (metodo === 'Pago Mixto') {
+      setIsSplitPaymentActive(true);
+      setIsGiftCardPaymentActive(false);
+      setSplitPaymentError(null);
+      const half = Math.floor(mandatoryPaymentModal.total / 2);
+      const rest = Number((mandatoryPaymentModal.total - half).toFixed(2));
+      setSplitPaymentRows([
+        { id: `sp-${Date.now()}-1`, metodo: 'Tarjeta (Datáfono)', monto: String(half) },
+        { id: `sp-${Date.now()}-2`, metodo: 'Efectivo', monto: String(rest) }
+      ]);
       return;
     }
 
@@ -1104,6 +1178,125 @@ export default function EmployeeWorkspace({
         newStickersCycle,
         totalVenta: mandatoryPaymentModal.total,
         metodoPago: metodo,
+        rewardRedeemedNow: shouldResetCycle
+      });
+      setCartItems([]);
+      setClienteTelefonoInput('');
+      setSelectedClient(null);
+      setLoyaltyRedeemConfirmation(null);
+      setPhoneError(false);
+    }
+
+    handleClosePaymentModal();
+  };
+
+  const handleConfirmarPagoMixto = async () => {
+    if (!mandatoryPaymentModal) return;
+
+    const totalFactura = Number(mandatoryPaymentModal.total || 0);
+    const validRows = splitPaymentRows
+      .map(r => ({
+        metodo: r.metodo,
+        monto: Number(parseFloat(r.monto || '0').toFixed(2))
+      }))
+      .filter(r => !isNaN(r.monto) && r.monto > 0);
+
+    if (validRows.length === 0) {
+      setSplitPaymentError('Ingresa los montos a cobrar en cada medio de pago.');
+      return;
+    }
+
+    const sumaPagos = Number(validRows.reduce((acc, r) => acc + r.monto, 0).toFixed(2));
+    const diff = Number((totalFactura - sumaPagos).toFixed(2));
+
+    if (Math.abs(diff) >= 0.01) {
+      if (diff > 0) {
+        setSplitPaymentError(`Faltan ${formatMoney(diff)} por asignar para cubrir el total de ${formatMoney(totalFactura)}.`);
+      } else {
+        setSplitPaymentError(`La suma ingresada (${formatMoney(sumaPagos)}) supera el total por ${formatMoney(Math.abs(diff))}.`);
+      }
+      return;
+    }
+
+    // Consolidar pagos del mismo método si el cajero seleccionó dos filas iguales
+    const groupedMap = new Map<string, number>();
+    validRows.forEach(r => {
+      groupedMap.set(r.metodo, Number(((groupedMap.get(r.metodo) || 0) + r.monto).toFixed(2)));
+    });
+    const pagosDivididos: PagoFraccionado[] = Array.from(groupedMap.entries()).map(([metodo, monto]) => ({
+      metodo,
+      monto
+    }));
+
+    const metodoPagoFinal =
+      pagosDivididos.length === 1
+        ? pagosDivididos[0].metodo
+        : pagosDivididos.map(p => `${p.metodo} (${formatMoney(p.monto)})`).join(' + ');
+
+    if (mandatoryPaymentModal.kind === 'sugerida' && mandatoryPaymentModal.sugeridaProdId) {
+      onAddVentaSugerida(mandatoryPaymentModal.sugeridaProdId, empleado.id, metodoPagoFinal);
+    } else if (mandatoryPaymentModal.kind === 'pos') {
+      const prevStickers = Math.max(Number(selectedClient?.stickers_count ?? 1), 1);
+      const prevRewards = Number(selectedClient?.rewards_redeemed ?? 0);
+      const shouldResetCycle = prevStickers >= 10;
+      const newStickers = shouldResetCycle ? 1 : prevStickers + 1;
+      const nextRewards = shouldResetCycle ? prevRewards + 1 : prevRewards;
+      const newStickersCycle = newStickers % 10 === 0 ? 10 : newStickers % 10;
+
+      if (shouldResetCycle && selectedClient?.id) {
+        try {
+          const supabase = (window as any).supabase || getSupabaseClient();
+          if (supabase) {
+            await supabase
+              .from('customers')
+              .update({
+                stickers_count: 1,
+                rewards_redeemed: nextRewards,
+                visitas_acumuladas: 1
+              })
+              .eq('id', selectedClient.id);
+          }
+        } catch (e) {}
+      }
+
+      const newVenta = {
+        fecha: getLocalDateString(),
+        hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+        cajero_id: empleado.id,
+        cajero_nombre: empleado.nombre,
+        usuario_id: empleado.id,
+        productos_vendidos: mandatoryPaymentModal.articulos.map(art => ({
+          producto_id: 'prod-' + art.nombre,
+          nombre: art.nombre,
+          codigo: 'COD-' + art.nombre.substring(0, 3).toUpperCase(),
+          precio: art.cantidad > 0 ? art.subtotal / art.cantidad : art.subtotal,
+          cantidad: art.cantidad
+        })),
+        total: totalFactura,
+        metodo_pago: metodoPagoFinal,
+        pagos_divididos: pagosDivididos,
+        desglose_pago: {
+          pagos: pagosDivididos
+        },
+        cliente_id: selectedClient?.id,
+        cliente_nombre: selectedClient?.nombre,
+        cliente_telefono: selectedClient?.telefono,
+        cliente_stickers_count: newStickers,
+        cliente_rewards_redeemed: nextRewards,
+        cliente_reward_redeemed_now: shouldResetCycle,
+        estado: 'completada'
+      };
+
+      onRegistrarVenta(newVenta as any);
+      setPosSaleSuccessModal({
+        open: true,
+        clienteNombre: selectedClient?.nombre || 'Cliente',
+        clienteTelefono: selectedClient?.telefono || '',
+        prevStickers,
+        newStickers,
+        newStickersCycle,
+        totalVenta: totalFactura,
+        metodoPago: metodoPagoFinal,
         rewardRedeemedNow: shouldResetCycle
       });
       setCartItems([]);
@@ -2759,26 +2952,14 @@ export default function EmployeeWorkspace({
                                 {sortedSales.map((v) => {
                                   const isAnulada = v.estado === 'Anulada';
                                   
-                                  let payLabel = 'Efectivo';
-                                  let payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                                  if (isTarjetaRegalo(v.metodo_pago)) {
-                                    payLabel = 'Tarjeta Regalo';
-                                    payStyle = 'bg-pink-50 text-pink-700 border-pink-200';
-                                  } else if (isTarjeta(v.metodo_pago)) {
-                                    payLabel = 'Tarjeta';
-                                    payStyle = 'bg-blue-50 text-blue-700 border-blue-200';
-                                  } else if (isTransferencia(v.metodo_pago)) {
-                                    payLabel = 'Transferencia';
-                                    payStyle = 'bg-purple-50 text-purple-700 border-purple-200';
-                                  } else if (isRappi(v.metodo_pago)) {
-                                    payLabel = 'Rappi';
-                                    payStyle = 'bg-amber-50 text-amber-700 border-amber-200';
-                                  } else if (isEfectivo(v.metodo_pago)) {
-                                    payLabel = 'Efectivo';
-                                    payStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                                  } else if (v.metodo_pago) {
-                                    payLabel = v.metodo_pago;
-                                  }
+                                  const desgloseVenta = getDesglosePagosVenta(v);
+                                  const getBadgeStyleForCat = (cat: string) => {
+                                    if (cat === 'tarjeta_regalo') return 'bg-pink-50 text-pink-700 border-pink-200';
+                                    if (cat === 'tarjeta') return 'bg-blue-50 text-blue-700 border-blue-200';
+                                    if (cat === 'transferencia') return 'bg-purple-50 text-purple-700 border-purple-200';
+                                    if (cat === 'rappi') return 'bg-amber-50 text-amber-700 border-amber-200';
+                                    return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                  };
 
                                   const colaboradorNombre = v.vendedor_nombre || (v as any).cajero_nombre || 'Colaborador';
 
@@ -2815,10 +2996,31 @@ export default function EmployeeWorkspace({
                                           <span className="text-slate-400 italic text-[11px]">Sin productos</span>
                                         )}
                                       </td>
-                                      <td className="py-3 px-3 text-xs whitespace-nowrap">
-                                        <span className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${payStyle}`}>
-                                          {payLabel}
-                                        </span>
+                                      <td className="py-3 px-3 text-xs">
+                                        {desgloseVenta.esMixto ? (
+                                          <div className="flex flex-col gap-1 min-w-[140px]">
+                                            <span className="inline-block w-fit px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-slate-800 text-white">
+                                              Pago Dividido / Mixto
+                                            </span>
+                                            {desgloseVenta.partes.map((parte, idxP) => (
+                                              <span
+                                                key={idxP}
+                                                className={`inline-flex items-center justify-between gap-1.5 px-2 py-0.5 text-[10px] font-bold rounded-md border ${getBadgeStyleForCat(parte.categoria)}`}
+                                              >
+                                                <span>{parte.label}:</span>
+                                                <span className="font-black">{formatMoney(parte.monto)}</span>
+                                              </span>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <span
+                                            className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border whitespace-nowrap ${getBadgeStyleForCat(
+                                              desgloseVenta.partes[0]?.categoria || 'efectivo'
+                                            )}`}
+                                          >
+                                            {desgloseVenta.partes[0]?.label || v.metodo_pago || 'Efectivo'}
+                                          </span>
+                                        )}
                                       </td>
                                       <td className="py-3 px-3 text-xs font-black text-[#2C3E50] text-right whitespace-nowrap">
                                         {formatMoney(v.total)}
@@ -2875,15 +3077,16 @@ export default function EmployeeWorkspace({
                     return normalizeDate(v) === todayStr;
                   });
 
-                  // Desglose por medio de pago de todos los colaboradores
-                  const totalEfectivo = ventasDelDia.filter(v => isEfectivo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
-                  const totalTarjeta = ventasDelDia.filter(v => isTarjeta(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
-                  const totalTransferencia = ventasDelDia.filter(v => isTransferencia(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
-                  const totalRappi = ventasDelDia.filter(v => isRappi(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
-                  const totalTarjetaRegalo = ventasDelDia.filter(v => isTarjetaRegalo(v.metodo_pago)).reduce((sum, v) => sum + Number(v.total || 0), 0);
+                  // Desglose exacto por medio de pago de todos los colaboradores (incluyendo pagos divididos y excedentes de Tarjeta Regalo)
+                  const resumenPagosDia = getResumenPagosVentas(ventasDelDia);
+                  const totalEfectivo = resumenPagosDia.efectivo;
+                  const totalTarjeta = resumenPagosDia.tarjeta;
+                  const totalTransferencia = resumenPagosDia.transferencia;
+                  const totalRappi = resumenPagosDia.rappi;
+                  const totalTarjetaRegalo = resumenPagosDia.tarjeta_regalo;
                   
                   // Total ventas del día registrado por todos los empleados
-                  const totalVentasDia = totalEfectivo + totalTarjeta + totalTransferencia + totalRappi + totalTarjetaRegalo;
+                  const totalVentasDia = resumenPagosDia.total;
 
                   const contadoParsed = parseFloat(cuadrePosContadoInput);
                   const hasContadoVal = cuadrePosContadoInput.trim() !== '' && !isNaN(contadoParsed);
@@ -2932,10 +3135,14 @@ export default function EmployeeWorkspace({
                           e.preventDefault();
                           const formData = new FormData(e.currentTarget);
                           const contadoVal = parseFloat(formData.get('efectivo_contado') as string) || 0;
+                          const horaActual = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
                           
                           const newCuadre = {
                             fecha: todayStr,
-                            hora_cierre: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+                            hora: horaActual,
+                            hora_cierre: horaActual,
+                            usuario_id: empleado.id,
+                            usuario_nombre: empleado.nombre,
                             empleado_id: empleado.id,
                             empleado_nombre: empleado.nombre,
                             total_ventas_dia: totalVentasDia,
@@ -3192,7 +3399,39 @@ export default function EmployeeWorkspace({
                   <h4 className="font-extrabold text-xs text-[#4B9CD3] uppercase tracking-wider">Historial de Productividad</h4>
                   <p className="text-[10px] text-slate-500 mt-0.5">Consulta tu rendimiento diario registrado en la base de datos Supabase.</p>
                 </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const todayStr = getLocalDateString();
+                      setFechaProgresoHistorial(todayStr);
+                      cargarProgresoHistorial(todayStr);
+                    }}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      fechaProgresoHistorial === getLocalDateString()
+                        ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                    title="Ver mi productividad de la jornada de hoy"
+                  >
+                    Hoy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sevenDaysAgoStr = getBogotaDateDaysAgo(7);
+                      setFechaProgresoHistorial(sevenDaysAgoStr);
+                      cargarProgresoHistorial(sevenDaysAgoStr);
+                    }}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      fechaProgresoHistorial === getBogotaDateDaysAgo(7)
+                        ? 'bg-[#4B9CD3] text-white shadow-2xs'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                    title="Ver productividad de hace 7 días"
+                  >
+                    Últimos 7 días
+                  </button>
                   <input
                     type="date"
                     value={fechaProgresoHistorial}
@@ -3657,10 +3896,15 @@ export default function EmployeeWorkspace({
                 {giftCardVerifiedData && (() => {
                   const totalFactura = mandatoryPaymentModal.total;
                   const saldoActual = Number(giftCardVerifiedData.current_balance || 0);
-                  const isFull = saldoActual >= totalFactura;
-                  const montoADescontar = isFull ? totalFactura : saldoActual;
-                  const saldoRestante = isFull ? (saldoActual - totalFactura) : 0;
-                  const diferenciaPendiente = isFull ? 0 : (totalFactura - saldoActual);
+                  const maxAplicable = Math.min(saldoActual, totalFactura);
+                  const parsedCustom = parseFloat(giftCardCustomAmountInput);
+                  const montoADescontar =
+                    !isNaN(parsedCustom) && parsedCustom > 0
+                      ? Math.min(parsedCustom, maxAplicable)
+                      : maxAplicable;
+                  const isFull = Math.abs(totalFactura - montoADescontar) < 0.01;
+                  const saldoRestante = Math.max(0, saldoActual - montoADescontar);
+                  const diferenciaPendiente = isFull ? 0 : Math.max(0, Number((totalFactura - montoADescontar).toFixed(2)));
 
                   return (
                     <div className="space-y-3 pt-1 border-t border-slate-100">
@@ -3688,10 +3932,33 @@ export default function EmployeeWorkspace({
                           <span>Total de la factura:</span>
                           <span className="font-bold text-[#2C3E50]">{formatMoney(totalFactura)}</span>
                         </div>
-                        <div className="flex justify-between items-center text-emerald-700 font-bold">
-                          <span>A debitar de Tarjeta Regalo:</span>
-                          <span>- {formatMoney(montoADescontar)}</span>
+
+                        <div className="space-y-1 pt-1 border-t border-slate-100">
+                          <div className="flex justify-between items-center text-pink-700 font-bold">
+                            <span>Monto a descontar de Tarjeta Regalo:</span>
+                            <span className="font-black">- {formatMoney(montoADescontar)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              max={maxAplicable}
+                              step="100"
+                              value={giftCardCustomAmountInput}
+                              onChange={(e) => setGiftCardCustomAmountInput(e.target.value)}
+                              className="w-full text-xs px-2.5 py-1.5 border border-pink-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-pink-400 font-bold text-pink-900 bg-pink-50/40"
+                              placeholder={`Máx: ${maxAplicable}`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setGiftCardCustomAmountInput(String(maxAplicable))}
+                              className="px-2.5 py-1.5 text-[10px] font-black bg-pink-100 hover:bg-pink-200 text-pink-800 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                            >
+                              Usar Máx ({formatMoney(maxAplicable)})
+                            </button>
+                          </div>
                         </div>
+
                         <div className="flex justify-between items-center text-slate-500 font-semibold pt-1 border-t border-slate-100">
                           <span>Saldo restante proyectado en tarjeta:</span>
                           <span className="font-black text-[#2C3E50]">{formatMoney(saldoRestante)}</span>
@@ -3699,18 +3966,18 @@ export default function EmployeeWorkspace({
 
                         {isFull ? (
                           <div className="p-2 bg-emerald-50 rounded-lg text-emerald-800 text-[11px] font-bold text-center border border-emerald-200">
-                            ¡Pago Completo! La tarjeta de regalo cubre la totalidad de la cuenta.
+                            ¡Pago Completo! En el cuadre de caja se sumarán {formatMoney(montoADescontar)} únicamente a Tarjeta Regalo.
                           </div>
                         ) : (
                           <div className="space-y-2.5 pt-2 border-t border-slate-100">
                             <div className="flex justify-between items-center bg-amber-50 p-2.5 rounded-lg border border-amber-200">
-                              <span className="font-extrabold text-amber-900 text-xs">Diferencia pendiente a pagar:</span>
+                              <span className="font-extrabold text-amber-900 text-xs">Restante a sumar en otro medio de pago:</span>
                               <span className="font-black text-amber-700 text-sm">{formatMoney(diferenciaPendiente)}</span>
                             </div>
 
                             <div className="space-y-1.5">
                               <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider block">
-                                Método de pago para la diferencia ({formatMoney(diferenciaPendiente)}):
+                                Medio de pago para el restante ({formatMoney(diferenciaPendiente)}):
                               </span>
                               <div className="grid grid-cols-2 gap-2">
                                 {['Efectivo', 'Tarjeta (Datáfono)', 'Transferencia (Nequi/Bancolombia)', 'Rappi'].map((met) => {
@@ -3731,6 +3998,17 @@ export default function EmployeeWorkspace({
                                     </button>
                                   );
                                 })}
+                              </div>
+                              <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] text-slate-600 font-semibold space-y-0.5">
+                                <span className="block font-extrabold text-[#2C3E50]">Resumen para el Cuadre de Caja:</span>
+                                <div className="flex justify-between">
+                                  <span>• Tarjeta Regalo:</span>
+                                  <span className="font-black text-pink-700">{formatMoney(montoADescontar)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>• {secondaryPaymentMethod}:</span>
+                                  <span className="font-black text-[#4B9CD3]">{formatMoney(diferenciaPendiente)}</span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -3777,6 +4055,212 @@ export default function EmployeeWorkspace({
                   </button>
                 </div>
               </div>
+            ) : isSplitPaymentActive ? (
+              /* FLUJO DE PAGO MIXTO / VARIOS MÉTODOS DE PAGO */
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSplitPaymentActive(false);
+                      setSplitPaymentError(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#4B9CD3] hover:text-[#3A82B4] transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Volver a medios de pago</span>
+                  </button>
+                  <div className="text-right">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Total a Dividir</span>
+                    <span className="text-xs font-black text-[#2C3E50]">{formatMoney(mandatoryPaymentModal.total)}</span>
+                  </div>
+                </div>
+
+                <div className="text-center space-y-1">
+                  <h4 className="text-sm font-black text-[#2C3E50]">Pago con Varios Métodos (Pago Mixto)</h4>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Divide el total de la compra entre Efectivo, Tarjeta, Transferencia o Rappi. Cada monto se sumará por separado en el Cuadre de Caja y en el panel de Administrador.
+                  </p>
+                </div>
+
+                {splitPaymentError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 p-2.5 rounded-xl flex items-start gap-2 text-xs font-semibold">
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                    <span>{splitPaymentError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                  {splitPaymentRows.map((row, idx) => {
+                    const otherRowsSum = splitPaymentRows.reduce(
+                      (acc, r, i) => (i === idx ? acc : acc + (parseFloat(r.monto) || 0)),
+                      0
+                    );
+                    const remainingForThisRow = Math.max(0, Number((mandatoryPaymentModal.total - otherRowsSum).toFixed(2)));
+
+                    return (
+                      <div key={row.id} className="bg-white border border-[#E2E8F0] p-3 rounded-xl space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider">
+                            Pago #{idx + 1}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSplitPaymentError(null);
+                                setSplitPaymentRows(prev =>
+                                  prev.map((r, i) => (i === idx ? { ...r, monto: String(remainingForThisRow) } : r))
+                                );
+                              }}
+                              className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-[#EBF5FB] hover:bg-[#D5EBF9] text-[#2C3E50] border border-[#AED6F1] transition-colors cursor-pointer"
+                              title="Asignar saldo restante a este medio de pago"
+                            >
+                              Asignar resto ({formatMoney(remainingForThisRow)})
+                            </button>
+                            {splitPaymentRows.length > 2 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSplitPaymentError(null);
+                                  setSplitPaymentRows(prev => prev.filter((_, i) => i !== idx));
+                                }}
+                                className="text-red-500 hover:text-red-700 font-black text-xs px-1.5 py-0.5 rounded hover:bg-red-50 cursor-pointer"
+                                title="Eliminar fila"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Medio de Pago</label>
+                            <select
+                              value={row.metodo}
+                              onChange={(e) => {
+                                const newMetodo = e.target.value;
+                                setSplitPaymentError(null);
+                                setSplitPaymentRows(prev =>
+                                  prev.map((r, i) => (i === idx ? { ...r, metodo: newMetodo } : r))
+                                );
+                              }}
+                              className="w-full text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg bg-slate-50 font-bold text-[#2C3E50] focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]"
+                            >
+                              <option value="Efectivo">Efectivo</option>
+                              <option value="Tarjeta (Datáfono)">Tarjeta (Datáfono)</option>
+                              <option value="Transferencia (Nequi/Bancolombia)">Transferencia (Nequi/Bancolombia)</option>
+                              <option value="Rappi">Rappi</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Monto ($)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="100"
+                              value={row.monto}
+                              onChange={(e) => {
+                                const valStr = e.target.value;
+                                setSplitPaymentError(null);
+                                setSplitPaymentRows(prev => {
+                                  const next = prev.map((r, i) => (i === idx ? { ...r, monto: valStr } : r));
+                                  // Si son 2 filas y el cajero edita la primera fila, autocompletar la segunda con el restante
+                                  if (next.length === 2 && idx === 0) {
+                                    const num1 = parseFloat(valStr) || 0;
+                                    const rest2 = Math.max(0, Number((mandatoryPaymentModal.total - num1).toFixed(2)));
+                                    next[1] = { ...next[1], monto: String(rest2) };
+                                  }
+                                  return next;
+                                });
+                              }}
+                              placeholder="0.00"
+                              className="w-full text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg bg-white font-black text-[#2C3E50] focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3]"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {splitPaymentRows.length < 4 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentSum = splitPaymentRows.reduce((acc, r) => acc + (parseFloat(r.monto) || 0), 0);
+                      const rest = Math.max(0, Number((mandatoryPaymentModal.total - currentSum).toFixed(2)));
+                      setSplitPaymentRows(prev => [
+                        ...prev,
+                        { id: `sp-${Date.now()}-${prev.length + 1}`, metodo: 'Transferencia (Nequi/Bancolombia)', monto: rest > 0 ? String(rest) : '' }
+                      ]);
+                    }}
+                    className="w-full py-2 px-3 border border-dashed border-[#4B9CD3] text-[#4B9CD3] hover:bg-[#EBF5FB]/50 font-extrabold text-xs rounded-xl transition-colors cursor-pointer"
+                  >
+                    + Agregar otro medio de pago
+                  </button>
+                )}
+
+                {(() => {
+                  const totalFactura = mandatoryPaymentModal.total;
+                  const sumaActual = Number(
+                    splitPaymentRows.reduce((acc, r) => acc + (parseFloat(r.monto) || 0), 0).toFixed(2)
+                  );
+                  const diff = Number((totalFactura - sumaActual).toFixed(2));
+                  const isExact = Math.abs(diff) < 0.01;
+
+                  return (
+                    <div className="space-y-3 pt-1 border-t border-slate-100">
+                      <div
+                        className={`p-3 rounded-xl border text-xs space-y-1 ${
+                          isExact
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                            : diff > 0
+                            ? 'bg-amber-50 border-amber-200 text-amber-900'
+                            : 'bg-red-50 border-red-200 text-red-900'
+                        }`}
+                      >
+                        <div className="flex justify-between font-semibold">
+                          <span>Suma de medios asignados:</span>
+                          <span className="font-black">{formatMoney(sumaActual)} / {formatMoney(totalFactura)}</span>
+                        </div>
+                        <div className="flex justify-between font-extrabold">
+                          <span>Estado del desglose:</span>
+                          <span>
+                            {isExact
+                              ? '✓ Monto total cubierto exactamente'
+                              : diff > 0
+                              ? `Falta asignar: ${formatMoney(diff)}`
+                              : `Excede por: ${formatMoney(Math.abs(diff))}`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={!isExact}
+                        onClick={handleConfirmarPagoMixto}
+                        className="w-full py-3.5 px-4 bg-[#4B9CD3] hover:bg-[#3A82B4] disabled:bg-slate-300 text-white font-black text-xs rounded-xl transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Confirmar Pago Dividido ({formatMoney(totalFactura)})</span>
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                <div className="pt-2 border-t border-[#E2E8F0]">
+                  <button
+                    type="button"
+                    onClick={handleClosePaymentModal}
+                    className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer text-center"
+                  >
+                    Cancelar / Modificar Pedido
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 {/* Botones de Acción Completa - Opciones de Selección */}
@@ -3816,9 +4300,16 @@ export default function EmployeeWorkspace({
                     <button
                       type="button"
                       onClick={() => handleSelectMandatoryPayment('Tarjeta Regalo')}
-                      className="w-full py-3.5 px-4 bg-white hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3]/30 hover:border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center sm:col-span-2"
+                      className="w-full py-3.5 px-4 bg-white hover:bg-pink-600 hover:text-white border-2 border-pink-300 hover:border-pink-600 text-pink-700 font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
                     >
-                      Tarjeta Regalo
+                      🎁 Tarjeta Regalo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectMandatoryPayment('Pago Mixto')}
+                      className="w-full py-3.5 px-4 bg-[#EBF5FB] hover:bg-[#4B9CD3] hover:text-white border-2 border-[#4B9CD3] text-[#2C3E50] font-black text-xs rounded-xl transition-all shadow-xs active:scale-98 cursor-pointer text-center"
+                    >
+                      💳+💵 Varios Métodos (Pago Mixto)
                     </button>
                   </div>
                 </div>

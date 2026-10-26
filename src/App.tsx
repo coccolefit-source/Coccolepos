@@ -435,7 +435,7 @@ export default function App() {
           clientes: consolidatedClientes.length > 0 ? consolidatedClientes : prev.clientes,
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
-          // anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
+          anuncios: supaAnnouncements !== null ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
           horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
           gastos: supaGastos !== null ? supaGastos : prev.gastos,
@@ -562,11 +562,47 @@ export default function App() {
           clientes: consolidatedClientes.length > 0 ? consolidatedClientes : prev.clientes,
           inventario: supaInventory !== null ? supaInventory : prev.inventario,
           productos: supaCampaignProds && supaCampaignProds.length > 0 ? supaCampaignProds : prev.productos,
-          // anuncios: supaAnnouncements && supaAnnouncements.length > 0 ? supaAnnouncements : prev.anuncios,
+          anuncios: supaAnnouncements !== null ? supaAnnouncements : prev.anuncios,
           productosCatalogo: supaCatalog && supaCatalog.length > 0 ? supaCatalog : prev.productosCatalogo,
           horarios: supaSchedules && supaSchedules.length > 0 ? supaSchedules : prev.horarios,
           gastos: supaGastos !== null ? supaGastos : prev.gastos,
           tarjetasRegalo: supaGiftCards ? supaGiftCards : [],
+          cuadresCaja: (() => {
+            const fromSupa: CuadreCaja[] = (supaTimeEntries || [])
+              .filter((f: any) => String(f.id || '').startsWith('cuadre-') || f.desglose_caja?.tipo === 'cuadre_caja')
+              .map((f: any) => {
+                const dc = f.desglose_caja || {};
+                const efEsp = Number(dc.efectivo_esperado ?? dc.cash_expected ?? 0);
+                const efCont = Number(dc.efectivo_contado ?? dc.cash_counted ?? 0);
+                const tarEsp = Number(dc.tarjeta_esperado ?? 0);
+                const trEsp = Number(dc.transferencia_esperado ?? 0);
+                const rapEsp = Number(dc.rappi_esperado ?? 0);
+                const regEsp = Number(dc.tarjeta_regalo_esperado ?? 0);
+                return {
+                  id: String(f.id),
+                  empleado_id: f.empleado_id || f.usuario_id,
+                  empleado_nombre: f.empleado_nombre || 'Colaborador',
+                  usuario_id: f.usuario_id || f.empleado_id,
+                  usuario_nombre: f.empleado_nombre || 'Colaborador',
+                  fecha: f.fecha || getLocalDateString(),
+                  hora: dc.hora_cierre || f.hora_salida || f.hora_entrada || '',
+                  hora_cierre: dc.hora_cierre || f.hora_salida || f.hora_entrada || '',
+                  total_ventas_dia: Number(dc.total_ventas_dia || (efEsp + tarEsp + trEsp + rapEsp + regEsp)),
+                  efectivo_esperado: efEsp,
+                  efectivo_contado: efCont,
+                  tarjeta_esperado: tarEsp,
+                  transferencia_esperado: trEsp,
+                  rappi_esperado: rapEsp,
+                  tarjeta_regalo_esperado: regEsp,
+                  diferencia_total: dc.diferencia_total !== undefined ? Number(dc.diferencia_total) : (efCont - efEsp),
+                  observaciones: dc.observaciones || f.incidencias || ''
+                };
+              });
+            if (fromSupa.length === 0) return prev.cuadresCaja;
+            const existingIds = new Set(fromSupa.map(c => c.id));
+            const localOnly = (prev.cuadresCaja || []).filter(c => !existingIds.has(c.id));
+            return [...fromSupa, ...localOnly];
+          })(),
           fichajes: supaTimeEntries && supaTimeEntries.length > 0 ? supaTimeEntries.map((f: any) => {
             const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
               ? String(f.fecha).trim()
@@ -638,23 +674,59 @@ export default function App() {
       async () => {
         const timeEntries = await fetchTimeEntriesFromSupabase();
         if (timeEntries && timeEntries.length > 0) {
-          setState(prev => ({
-            ...prev,
-          fichajes: timeEntries.map((f: any) => {
-              const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
-                ? String(f.fecha).trim()
-                : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
-              return {
-          // id: f.id,
-          // usuario_id: f.usuario_id || f.empleado_id,
-          // fecha: cleanFecha,
-          // hora_entrada: f.hora_entrada,
-          // hora_salida: f.hora_salida,
-          // puntual: f.puntual !== undefined ? f.puntual : true,
-          // activo: !f.hora_salida
-              };
-            })
-          }));
+          setState(prev => {
+            const fromSupa: CuadreCaja[] = (timeEntries || [])
+              .filter((f: any) => String(f.id || '').startsWith('cuadre-') || f.desglose_caja?.tipo === 'cuadre_caja')
+              .map((f: any) => {
+                const dc = f.desglose_caja || {};
+                const efEsp = Number(dc.efectivo_esperado ?? dc.cash_expected ?? 0);
+                const efCont = Number(dc.efectivo_contado ?? dc.cash_counted ?? 0);
+                const tarEsp = Number(dc.tarjeta_esperado ?? 0);
+                const trEsp = Number(dc.transferencia_esperado ?? 0);
+                const rapEsp = Number(dc.rappi_esperado ?? 0);
+                const regEsp = Number(dc.tarjeta_regalo_esperado ?? 0);
+                return {
+                  id: String(f.id),
+                  empleado_id: f.empleado_id || f.usuario_id,
+                  empleado_nombre: f.empleado_nombre || 'Colaborador',
+                  usuario_id: f.usuario_id || f.empleado_id,
+                  usuario_nombre: f.empleado_nombre || 'Colaborador',
+                  fecha: f.fecha || getLocalDateString(),
+                  hora: dc.hora_cierre || f.hora_salida || f.hora_entrada || '',
+                  hora_cierre: dc.hora_cierre || f.hora_salida || f.hora_entrada || '',
+                  total_ventas_dia: Number(dc.total_ventas_dia || (efEsp + tarEsp + trEsp + rapEsp + regEsp)),
+                  efectivo_esperado: efEsp,
+                  efectivo_contado: efCont,
+                  tarjeta_esperado: tarEsp,
+                  transferencia_esperado: trEsp,
+                  rappi_esperado: rapEsp,
+                  tarjeta_regalo_esperado: regEsp,
+                  diferencia_total: dc.diferencia_total !== undefined ? Number(dc.diferencia_total) : (efCont - efEsp),
+                  observaciones: dc.observaciones || f.incidencias || ''
+                };
+              });
+            const existingIds = new Set(fromSupa.map(c => c.id));
+            const localOnly = (prev.cuadresCaja || []).filter(c => !existingIds.has(c.id));
+
+            return {
+              ...prev,
+              cuadresCaja: fromSupa.length > 0 ? [...fromSupa, ...localOnly] : prev.cuadresCaja,
+              fichajes: timeEntries.map((f: any) => {
+                const cleanFecha = (f.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(f.fecha).trim()))
+                  ? String(f.fecha).trim()
+                  : (f.clock_in ? getLocalDateString(f.clock_in) : (f.created_at ? getLocalDateString(f.created_at) : getLocalDateString()));
+                return {
+            // id: f.id,
+            // usuario_id: f.usuario_id || f.empleado_id,
+            // fecha: cleanFecha,
+            // hora_entrada: f.hora_entrada,
+            // hora_salida: f.hora_salida,
+            // puntual: f.puntual !== undefined ? f.puntual : true,
+            // activo: !f.hora_salida
+                };
+              })
+            };
+          });
         }
       },
       async () => {
@@ -1705,7 +1777,8 @@ export default function App() {
     const tar = cuadre.tarjeta_esperado || 0;
     const tr = cuadre.transferencia_esperado || 0;
     const rap = cuadre.rappi_esperado || 0;
-    const totalGeneral = ef + tar + tr + rap;
+    const reg = cuadre.tarjeta_regalo_esperado || 0;
+    const totalGeneral = cuadre.total_ventas_dia || (ef + tar + tr + rap + reg);
 
     const dif = cuadre.diferencia_total ?? ((cuadre.efectivo_contado || 0) - ef);
     let estadoValidacion = "Efectivo Conciliado (Sin Diferencia)";
