@@ -16,7 +16,13 @@ process.on('unhandledRejection', (reason) => {
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const kService = process.env.K_SERVICE || '';
+  const isProd =
+    process.env.NODE_ENV === "production" ||
+    Boolean(kService && !kService.startsWith("ais-dev")) ||
+    Boolean(process.env.RENDER) ||
+    Boolean(process.argv[1] && process.argv[1].includes("server.cjs"));
+  const PORT = isProd ? (Number(process.env.PORT) || 3000) : 3000;
 
   app.use(express.json({ limit: '50mb' }));
 
@@ -735,12 +741,6 @@ Responde de forma concisa, precisa y analítica en español basada en los datos 
   });
 
   // Serve static files / Vite middleware
-  const kService = process.env.K_SERVICE || '';
-  const isProd =
-    process.env.NODE_ENV === "production" ||
-    Boolean(kService && !kService.startsWith("ais-dev")) ||
-    Boolean(process.env.RENDER) ||
-    Boolean(process.argv[1] && process.argv[1].includes("server.cjs"));
   if (!isProd) {
     // Serve a WebSocket-free /@vite/client module so HMR-disabled mode never throws WebSocket connection errors
     app.get('/@vite/client', (_req, res) => {

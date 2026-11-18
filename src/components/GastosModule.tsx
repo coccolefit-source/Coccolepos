@@ -27,7 +27,7 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
   const [metodoPago, setMetodoPago] = useState<string>('Efectivo');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Filtros rápidos y selector de fechas
+  const isEmployee = currentUser.rol !== 'admin';
   const hoyStr = getLocalDateString();
   const [tipoFiltro, setTipoFiltro] = useState<TipoFiltroGastos>('hoy');
   const [mostrarFiltroFechas, setMostrarFiltroFechas] = useState<boolean>(false);
@@ -60,7 +60,7 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
 
     setFormError(null);
     onSaveGasto({
-      fecha,
+      fecha: isEmployee ? hoyStr : fecha,
       descripcion: descripcion.trim(),
       categoria,
       monto: Number(monto),
@@ -73,30 +73,44 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
     setMonto('');
   };
 
-  const gastosFiltrados = gastos.filter(g => {
-    if (!g.fecha) return true;
-    if (tipoFiltro === 'hoy') {
-      return g.fecha === hoyStr;
-    }
-    if (tipoFiltro === 'ayer') {
-      return g.fecha === ayerStr;
-    }
-    if (tipoFiltro === 'semana') {
-      return g.fecha >= semanaInicioStr && g.fecha <= hoyStr;
-    }
-    if (tipoFiltro === 'quincena') {
-      return g.fecha >= quincenaInicioStr && g.fecha <= hoyStr;
-    }
-    if (tipoFiltro === 'mes') {
-      return g.fecha >= mesInicioStr && g.fecha <= hoyStr;
-    }
-    if (tipoFiltro === 'rango') {
-      if (fechaInicio && g.fecha < fechaInicio) return false;
-      if (fechaFin && g.fecha > fechaFin) return false;
-      return true;
-    }
-    return true; // 'todos'
-  });
+  // Si es empleado, restringir visibilidad estrictamente a sus propios gastos registrados hoy
+  const currentUserNombreNorm = (currentUser.nombre || '').trim().toLowerCase();
+  const gastosVisibles = isEmployee
+    ? gastos.filter(g => {
+        if (g.fecha !== hoyStr) return false;
+        if (g.usuario_id) {
+          return g.usuario_id === currentUser.id;
+        }
+        return (g.registrado_por || '').trim().toLowerCase() === currentUserNombreNorm;
+      })
+    : gastos;
+
+  const gastosFiltrados = isEmployee
+    ? gastosVisibles
+    : gastosVisibles.filter(g => {
+        if (!g.fecha) return true;
+        if (tipoFiltro === 'hoy') {
+          return g.fecha === hoyStr;
+        }
+        if (tipoFiltro === 'ayer') {
+          return g.fecha === ayerStr;
+        }
+        if (tipoFiltro === 'semana') {
+          return g.fecha >= semanaInicioStr && g.fecha <= hoyStr;
+        }
+        if (tipoFiltro === 'quincena') {
+          return g.fecha >= quincenaInicioStr && g.fecha <= hoyStr;
+        }
+        if (tipoFiltro === 'mes') {
+          return g.fecha >= mesInicioStr && g.fecha <= hoyStr;
+        }
+        if (tipoFiltro === 'rango') {
+          if (fechaInicio && g.fecha < fechaInicio) return false;
+          if (fechaFin && g.fecha > fechaFin) return false;
+          return true;
+        }
+        return true; // 'todos'
+      });
 
   const getTituloFiltro = () => {
     switch (tipoFiltro) {
@@ -149,13 +163,14 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
   const totalVentasFiltradas = ventasFiltradas.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
 
   const totalGastosFiltrados = gastosFiltrados.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
-  const totalHoy = gastos.filter(g => g.fecha === hoyStr).reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
+  const gastosHoyVisibles = gastosVisibles.filter(g => g.fecha === hoyStr);
+  const totalHoy = gastosHoyVisibles.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
   const balanceHoy = totalVentasHoy - totalHoy;
 
   return (
     <div className="space-y-6 w-full max-w-7xl mx-auto">
       {/* Header / Resumen Financiero: Total Ventas del Día, Gastos del Día, Balance y Filtro */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${isEmployee ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-4`}>
         {/* KPI 1: TOTAL DE VENTAS DEL DÍA */}
         <div id="kpi-ventas-del-dia" className="bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-xs flex flex-col justify-between gap-3">
           <div className="flex items-center gap-4">
@@ -189,9 +204,13 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
             <DollarSign className="w-6 h-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Gastos del Día</p>
+            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">
+              {isEmployee ? 'Mis Gastos de Hoy' : 'Gastos del Día'}
+            </p>
             <p className="text-xl font-black text-red-600">{formatMoney(totalHoy)}</p>
-            <p className="text-[11px] text-red-500 font-semibold truncate">{gastos.filter(g => g.fecha === hoyStr).length} gastos hoy</p>
+            <p className="text-[11px] text-red-500 font-semibold truncate">
+              {gastosHoyVisibles.length} {isEmployee ? 'registrados por ti hoy' : 'gastos hoy'}
+            </p>
           </div>
         </div>
 
@@ -207,23 +226,27 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
             <p className={`text-xl font-black ${balanceHoy >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
               {formatMoney(balanceHoy)}
             </p>
-            <p className="text-[11px] text-slate-500 font-semibold truncate">Ventas - Gastos de hoy</p>
-          </div>
-        </div>
-
-        {/* KPI 4: TOTAL GASTOS FILTRADOS */}
-        <div id="kpi-gastos-filtrados" className="bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-xs flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-lg shrink-0">
-            <Calendar className="w-6 h-6" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Total Gastos Filtrados</p>
-            <p className="text-xl font-black text-slate-900">{formatMoney(totalGastosFiltrados)}</p>
-            <p className="text-[11px] text-amber-700 font-semibold truncate" title={getTituloFiltro()}>
-              {getTituloFiltro()} ({gastosFiltrados.length})
+            <p className="text-[11px] text-slate-500 font-semibold truncate">
+              {isEmployee ? 'Ventas - Tus gastos de hoy' : 'Ventas - Gastos de hoy'}
             </p>
           </div>
         </div>
+
+        {/* KPI 4: TOTAL GASTOS FILTRADOS (Solo Administrador) */}
+        {!isEmployee && (
+          <div id="kpi-gastos-filtrados" className="bg-white border border-[#E2E8F0] p-4 rounded-xl shadow-xs flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-lg shrink-0">
+              <Calendar className="w-6 h-6" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Total Gastos Filtrados</p>
+              <p className="text-xl font-black text-slate-900">{formatMoney(totalGastosFiltrados)}</p>
+              <p className="text-[11px] text-amber-700 font-semibold truncate" title={getTituloFiltro()}>
+                {getTituloFiltro()} ({gastosFiltrados.length})
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -243,9 +266,13 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
               <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Fecha</label>
               <input
                 type="date"
-                value={fecha}
-                onChange={e => setFecha(e.target.value)}
-                className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                value={isEmployee ? hoyStr : fecha}
+                onChange={e => {
+                  if (!isEmployee) setFecha(e.target.value);
+                }}
+                readOnly={isEmployee}
+                disabled={isEmployee}
+                className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white disabled:bg-slate-50 disabled:text-slate-600 h-9"
                 required
               />
             </div>
@@ -319,94 +346,107 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
           <div className="flex flex-col gap-3 pb-3 border-b border-slate-100 mb-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
               <div>
-                <h3 className="font-extrabold text-sm text-[#2C3E50]">Historial de Gastos Registrados</h3>
+                <h3 className="font-extrabold text-sm text-[#2C3E50]">
+                  {isEmployee ? 'Mis Gastos Registrados Hoy' : 'Historial de Gastos Registrados'}
+                </h3>
                 <p className="text-xs text-slate-500">
-                  Mostrando: <strong className="text-[#4B9CD3] font-bold">{getTituloFiltro()}</strong>
+                  {isEmployee ? (
+                    <>Mostrando solo tus gastos registrados hoy (<strong className="text-[#4B9CD3] font-bold">{hoyStr}</strong>)</>
+                  ) : (
+                    <>Mostrando: <strong className="text-[#4B9CD3] font-bold">{getTituloFiltro()}</strong></>
+                  )}
                 </p>
               </div>
 
-              {/* Botón Filtro Fechas y Botones Rápidos */}
-              <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-                <button
-                  type="button"
-                  id="btn-filtro-fechas"
-                  onClick={() => setMostrarFiltroFechas(prev => !prev)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg border flex items-center gap-1.5 transition-all cursor-pointer ${
-                    mostrarFiltroFechas || tipoFiltro === 'rango'
-                      ? 'bg-[#4B9CD3] text-white border-[#4B9CD3] shadow-xs'
-                      : 'bg-white text-slate-700 border-[#E2E8F0] hover:bg-[#EBF5FB] hover:text-[#4B9CD3]'
-                  }`}
-                  title="Seleccionar rango de fechas personalizado"
-                >
+              {isEmployee ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1]">
                   <Calendar className="w-3.5 h-3.5" />
-                  <span>Fechas</span>
-                </button>
+                  <span>Hoy ({hoyStr})</span>
+                </span>
+              ) : (
+                /* Botón Filtro Fechas y Botones Rápidos (Solo Admin) */
+                <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    id="btn-filtro-fechas"
+                    onClick={() => setMostrarFiltroFechas(prev => !prev)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border flex items-center gap-1.5 transition-all cursor-pointer ${
+                      mostrarFiltroFechas || tipoFiltro === 'rango'
+                        ? 'bg-[#4B9CD3] text-white border-[#4B9CD3] shadow-xs'
+                        : 'bg-white text-slate-700 border-[#E2E8F0] hover:bg-[#EBF5FB] hover:text-[#4B9CD3]'
+                    }`}
+                    title="Seleccionar rango de fechas personalizado"
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Fechas</span>
+                  </button>
 
-                <div className="flex bg-[#EBF5FB] p-0.5 rounded-lg border border-[#AED6F1] flex-wrap gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => { setTipoFiltro('hoy'); setMostrarFiltroFechas(false); }}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                      tipoFiltro === 'hoy' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
-                    }`}
-                  >
-                    Hoy
-                  </button>
-                  <button
-                    type="button"
-                    id="btn-filtro-ayer"
-                    onClick={() => { setTipoFiltro('ayer'); setMostrarFiltroFechas(false); }}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                      tipoFiltro === 'ayer' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
-                    }`}
-                  >
-                    Ayer
-                  </button>
-                  <button
-                    type="button"
-                    id="btn-filtro-semana"
-                    onClick={() => { setTipoFiltro('semana'); setMostrarFiltroFechas(false); }}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                      tipoFiltro === 'semana' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
-                    }`}
-                  >
-                    Semana
-                  </button>
-                  <button
-                    type="button"
-                    id="btn-filtro-quincena"
-                    onClick={() => { setTipoFiltro('quincena'); setMostrarFiltroFechas(false); }}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                      tipoFiltro === 'quincena' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
-                    }`}
-                  >
-                    Quincena
-                  </button>
-                  <button
-                    type="button"
-                    id="btn-filtro-mes"
-                    onClick={() => { setTipoFiltro('mes'); setMostrarFiltroFechas(false); }}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                      tipoFiltro === 'mes' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
-                    }`}
-                  >
-                    Mes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setTipoFiltro('todos'); setMostrarFiltroFechas(false); }}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                      tipoFiltro === 'todos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
-                    }`}
-                  >
-                    Todos
-                  </button>
+                  <div className="flex bg-[#EBF5FB] p-0.5 rounded-lg border border-[#AED6F1] flex-wrap gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => { setTipoFiltro('hoy'); setMostrarFiltroFechas(false); }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                        tipoFiltro === 'hoy' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
+                      }`}
+                    >
+                      Hoy
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-filtro-ayer"
+                      onClick={() => { setTipoFiltro('ayer'); setMostrarFiltroFechas(false); }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                        tipoFiltro === 'ayer' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
+                      }`}
+                    >
+                      Ayer
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-filtro-semana"
+                      onClick={() => { setTipoFiltro('semana'); setMostrarFiltroFechas(false); }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                        tipoFiltro === 'semana' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
+                      }`}
+                    >
+                      Semana
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-filtro-quincena"
+                      onClick={() => { setTipoFiltro('quincena'); setMostrarFiltroFechas(false); }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                        tipoFiltro === 'quincena' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
+                      }`}
+                    >
+                      Quincena
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-filtro-mes"
+                      onClick={() => { setTipoFiltro('mes'); setMostrarFiltroFechas(false); }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                        tipoFiltro === 'mes' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
+                      }`}
+                    >
+                      Mes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setTipoFiltro('todos'); setMostrarFiltroFechas(false); }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                        tipoFiltro === 'todos' ? 'bg-[#4B9CD3] text-white shadow-2xs' : 'text-slate-600 hover:text-[#2C3E50]'
+                      }`}
+                    >
+                      Todos
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
-            {/* Panel Selector de Rango de Fechas Personalizado (Desde / Hasta) */}
-            {mostrarFiltroFechas && (
+            {/* Panel Selector de Rango de Fechas Personalizado (Solo Admin) */}
+            {!isEmployee && mostrarFiltroFechas && (
               <div className="bg-[#FFFDF6] border border-[#AED6F1] p-3 rounded-xl flex flex-wrap items-center gap-3 animate-in fade-in duration-150">
                 <div className="flex items-center gap-1.5 text-xs text-slate-700">
                   <Filter className="w-3.5 h-3.5 text-[#4B9CD3]" />
@@ -457,7 +497,9 @@ export default function GastosModule({ gastos, ventasRegistradas = [], currentUs
             {gastosFiltrados.length === 0 ? (
               <div className="text-center py-16 text-slate-400 text-xs">
                 <DollarSign className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                No hay gastos registrados para este periodo.
+                {isEmployee
+                  ? 'Aún no has registrado gastos el día de hoy.'
+                  : 'No hay gastos registrados para este periodo.'}
               </div>
             ) : (
               <table className="w-full text-left border-collapse">

@@ -42,6 +42,7 @@ import RegistroClientePublico from './components/RegistroClientePublico';
 import TarjetaFidelizacionDigital from './components/TarjetaFidelizacionDigital';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
+import { PoweredByBadge } from './components/PoweredByBadge';
 
  // Iconos Lucide
 import {
@@ -987,29 +988,37 @@ export default function App() {
 
   if (tarjetaClienteId) {
     return (
-      <TarjetaFidelizacionDigital
-        clienteId={tarjetaClienteId}
-        onCambiarCuenta={() => {
-          try {
-            localStorage.removeItem('coccole_cliente_wallet');
-            window.history.pushState({}, '', '/registro-cliente');
-          } catch (e) {}
-          setTarjetaClienteId(null);
-          setIsRegistroClienteRoute(true);
-        }}
-      />
+      <>
+        <TarjetaFidelizacionDigital
+          clienteId={tarjetaClienteId}
+          onCambiarCuenta={() => {
+            try {
+              localStorage.removeItem('coccole_cliente_wallet');
+              window.history.pushState({}, '', '/registro-cliente');
+            } catch (e) {}
+            setTarjetaClienteId(null);
+            setIsRegistroClienteRoute(true);
+          }}
+        />
+        <PoweredByBadge />
+      </>
     );
   }
 
   if (isRegistroClienteRoute) {
-    return <RegistroClientePublico />;
+    return (
+      <>
+        <RegistroClientePublico />
+        <PoweredByBadge />
+      </>
+    );
   }
 
    // Si no hay usuario activo, mostramos el login
   if (!activeUserRole) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-3 sm:p-6 antialiased">
-        <div className="w-full max-w-md mx-auto">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-3 sm:p-6 antialiased relative">
+        <div className="w-full max-w-md mx-auto flex flex-col items-center">
           <Login
             usuarios={state.usuarios}
             onLogin={setActiveUserRole}
@@ -1018,6 +1027,7 @@ export default function App() {
             onUpdateUserPin={handleUpdateUserPin}
           />
         </div>
+        <PoweredByBadge />
       </div>
     );
   }
@@ -2838,10 +2848,19 @@ export default function App() {
       </main>
 
       {/* FOOTER */}
-      <footer className="bg-white border-t border-slate-200 mt-12 py-5 text-center text-xs text-slate-400">
-        <p className="font-medium">COCCOLE FIT © {new Date().getFullYear()} - Placer Sin Culpa</p>
-        <p className="text-[10px] text-slate-400 mt-1">Diseñado con propósitos administrativos, control operativo, gamificación e integraciones de calidad.</p>
+      <footer className="bg-white border-t border-slate-200 mt-12 py-6 text-center text-xs text-slate-400">
+        <div className="flex flex-col items-center justify-center gap-2">
+          <p className="font-semibold text-slate-700">COCCOLE FIT © {new Date().getFullYear()} - Placer Sin Culpa</p>
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 bg-[#EBF5FB] border border-[#AED6F1] rounded-full text-xs text-slate-600 shadow-2xs">
+            <span>Herramienta creada por</span>
+            <span className="font-black text-[#4B9CD3] tracking-wider">PRIME G</span>
+          </div>
+          <p className="text-[10px] text-slate-400">Diseñado con propósitos administrativos, control operativo, gamificación e integraciones de calidad.</p>
+        </div>
       </footer>
+
+      {/* Floating Powered by Prime G badge */}
+      <PoweredByBadge />
 
     </div>
   );

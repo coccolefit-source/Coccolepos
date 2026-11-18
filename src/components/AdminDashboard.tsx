@@ -80,7 +80,12 @@ import {
   Copy,
   Check,
   Lightbulb,
-  QrCode
+  QrCode,
+  Eye,
+  ShoppingBag,
+  Receipt,
+  MessageCircle,
+  Gift
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { calcularTiempoTarea } from '../lib/taskUtils';
@@ -891,6 +896,171 @@ export default function AdminDashboard({
   const [giftCardSearchTerm, setGiftCardSearchTerm] = useState('');
   const [isSubmittingGiftCard, setIsSubmittingGiftCard] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [selectedClienteHistorial, setSelectedClienteHistorial] = useState<Cliente | null>(null);
+  const [clienteHistorialSearch, setClienteHistorialSearch] = useState('');
+  const [whatsAppClienteModal, setWhatsAppClienteModal] = useState<Cliente | null>(null);
+  const [whatsAppPhoneInput, setWhatsAppPhoneInput] = useState('');
+  const [whatsAppMessageText, setWhatsAppMessageText] = useState('');
+  const [whatsAppStickersOverride, setWhatsAppStickersOverride] = useState<number>(0);
+  const [whatsAppCopied, setWhatsAppCopied] = useState(false);
+
+  const getClienteStickersActivos = (cli: Cliente): number => {
+    const rewardsRedeemed = Number(cli.rewards_redeemed ?? 0);
+    const explicitStickers =
+      cli.stickers_count !== undefined && cli.stickers_count !== null
+        ? Number(cli.stickers_count)
+        : 0;
+    const comprasCount = Number(cli.total_compras_count ?? 0);
+    const visitas = Number(cli.visitas_acumuladas ?? 0);
+
+    let raw = explicitStickers;
+    if (raw <= 0) {
+      raw = Math.max(visitas, comprasCount, 0);
+    } else if (rewardsRedeemed === 0 && raw <= 1 && comprasCount > 1) {
+      raw = Math.max(visitas, comprasCount, raw);
+    }
+
+    if (raw <= 0) return 0;
+    if (raw >= 10 && raw % 10 === 0) return 10;
+    if (raw > 10) return raw % 10;
+    return raw;
+  };
+
+  const formatWhatsAppPhone = (rawPhone?: string): string => {
+    const digits = (rawPhone || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10 && digits.startsWith('3')) {
+      return `57${digits}`;
+    }
+    return digits;
+  };
+
+  const getWhatsAppMilestoneInfo = (cli: Cliente, stickersCount: number) => {
+    const stickers = Math.max(0, Math.min(10, Math.round(stickersCount)));
+    const faltantes = Math.max(0, 10 - stickers);
+    const primerNombre = (cli.nombre || 'Cliente').trim().split(/\s+/)[0] || 'Cliente';
+
+    if (stickers === 10) {
+      return {
+        stickers,
+        faltantes: 0,
+        stageLabel: '🏆 Nivel 10/10 · ¡Reclamar Premio!',
+        badgeClass: 'bg-amber-100 text-amber-900 border-amber-300',
+        message: `¡Hola ${primerNombre}! 🎉🏆 ¡Felicidades de parte de COCCOLE FIT! ¡Ya completaste tus 10 stickers (10/10) en tu tarjeta de fidelización! 🍓🥤🥪🥗 Te invitamos a pasar por nuestra tienda para reclamar tu premio especial en caja. ¡Te esperamos para entregarte tu recompensa! ✨`
+      };
+    }
+
+    if (stickers === 9) {
+      return {
+        stickers,
+        faltantes: 1,
+        stageLabel: '🔥 Nivel 9/10 · ¡A 1 solo ticket!',
+        badgeClass: 'bg-rose-100 text-rose-800 border-rose-300',
+        message: `¡Hola ${primerNombre}! 🔥✨ ¡Estás a un solo paso de ganar en COCCOLE FIT! Ya llevas *9 de 10 stickers* y te falta *solo 1 ticket* para completar los 10 y llevarte tu premio. 🏆 ¡Ven por tu próximo favorito saludable y desbloquea tu recompensa! 🍓💚`
+      };
+    }
+
+    if (stickers === 8) {
+      return {
+        stickers,
+        faltantes: 2,
+        stageLabel: '🚀 Nivel 8/10 · ¡Recta final (faltan 2)!',
+        badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+        message: `¡Hola ${primerNombre}! 🚀💙 ¡Entraste en la recta final en COCCOLE FIT! Ya acumulas *8 de 10 stickers* en tu Pasaporte de Beneficios y solo te faltan *2 tickets* para completar los 10 y ganarte tu premio. 🍓🥪 ¡Te esperamos muy pronto! ✨`
+      };
+    }
+
+    if (stickers === 6) {
+      return {
+        stickers,
+        faltantes: 4,
+        stageLabel: '⚡ Nivel 6/10 · ¡Ya estás llegando!',
+        badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+        message: `¡Hola ${primerNombre}! ⚡😊 ¡Qué alegría verte avanzar en COCCOLE FIT! Ya vas por *6 de 10 stickers*, ¡ya estás llegando a la meta! Solo te faltan *4 tickets* para completar tus 10 stickers y ganarte tu premio. 🍓🥤 ¡Nos vemos pronto por tu próximo antojo! ✨`
+      };
+    }
+
+    if (stickers === 7) {
+      return {
+        stickers,
+        faltantes: 3,
+        stageLabel: '🌟 Nivel 7/10 · ¡Cada vez más cerca (faltan 3)!',
+        badgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
+        message: `¡Hola ${primerNombre}! 🌟✨ ¡Vas súper bien en COCCOLE FIT! Ya llevas *7 de 10 stickers* y solo te faltan *3 tickets* para completar los 10 stickers y ganarte tu premio. 🍓🥗 ¡Te esperamos pronto! 💚`
+      };
+    }
+
+    return {
+      stickers,
+      faltantes,
+      stageLabel: `✨ Progreso ${stickers}/10 · Faltan ${faltantes} ${faltantes === 1 ? 'ticket' : 'tickets'}`,
+      badgeClass: 'bg-[#EBF5FB] text-[#4B9CD3] border-[#AED6F1]',
+      message: `¡Hola ${primerNombre}! 💙🍓 Gracias por ser parte de COCCOLE FIT. Te contamos que ya llevas *${stickers} de 10 stickers* en tu tarjeta de fidelización y te faltan *${faltantes} ${faltantes === 1 ? 'ticket' : 'tickets'}* para completar los 10 y ganarte tu premio. 🏆 ¡Te esperamos por tu próximo antojo sin culpa! ✨`
+    };
+  };
+
+  const openWhatsAppModal = (cli: Cliente) => {
+    const stickers = getClienteStickersActivos(cli);
+    const info = getWhatsAppMilestoneInfo(cli, stickers);
+    setWhatsAppStickersOverride(stickers);
+    setWhatsAppPhoneInput(formatWhatsAppPhone(cli.telefono));
+    setWhatsAppMessageText(info.message);
+    setWhatsAppCopied(false);
+    setWhatsAppClienteModal(cli);
+  };
+
+  // Estados y helpers para WhatsApp de Tarjetas Regalo (Saldo Pendiente)
+  const [whatsAppGiftCardModal, setWhatsAppGiftCardModal] = useState<TarjetaRegalo | null>(null);
+  const [giftCardWaPhone, setGiftCardWaPhone] = useState('');
+  const [giftCardWaMessage, setGiftCardWaMessage] = useState('');
+  const [giftCardWaCopied, setGiftCardWaCopied] = useState(false);
+  const [giftCardWaSelectedClienteId, setGiftCardWaSelectedClienteId] = useState('');
+
+  const buildGiftCardWhatsAppMessage = (card: TarjetaRegalo, overrideNombre?: string): string => {
+    const rawName = (overrideNombre || card.cliente_nombre || '').trim();
+    const primerNombre = rawName ? rawName.split(/\s+/)[0] : '';
+    const saludo = primerNombre ? `¡Hola ${primerNombre}!` : '¡Hola!';
+    const saldoPendiente = Number(card.saldo_actual || 0);
+    const saldoFormateado = formatMoney(saldoPendiente);
+
+    if (saldoPendiente > 0 && card.estado === 'activa') {
+      return `${saludo} 🎁✨ De parte de *COCCOLE FIT* te recordamos que tienes una Tarjeta Regalo activa (Código: *${card.codigo}*) con un saldo pendiente de *${saldoFormateado}* disponible para disfrutar. 🍓🥤🥪🥗 ¡Te invitamos a pasar por nuestra tienda y redimir tu saldo en tu próximo antojo sin culpa! 💚`;
+    }
+
+    if (saldoPendiente > 0) {
+      return `${saludo} 🎁✨ De parte de *COCCOLE FIT* te informamos que tu Tarjeta Regalo (Código: *${card.codigo}*) registra un saldo pendiente de *${saldoFormateado}*. ¡Te invitamos a visitarnos en tienda para revisar y redimir tu beneficio! 🍓💚`;
+    }
+
+    return `${saludo} 💙🎁 De parte de *COCCOLE FIT* te confirmamos que tu Tarjeta Regalo (Código: *${card.codigo}*) ya fue redimida en su totalidad (saldo pendiente: *$0*). ¡Gracias por elegirnos para disfrutar sin culpa! 🍓✨`;
+  };
+
+  const openGiftCardWhatsAppModal = (card: TarjetaRegalo) => {
+    const norm = (s?: string) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const targetName = norm(card.cliente_nombre);
+
+    let matchedCli: Cliente | undefined;
+    if (targetName) {
+      matchedCli = (clientes || []).find(c => norm(c.nombre) === targetName)
+        || (clientes || []).find(c => norm(c.nombre).includes(targetName) || targetName.includes(norm(c.nombre)));
+    }
+
+    let foundPhone = matchedCli?.telefono || '';
+    if (!foundPhone) {
+      const matchedSale = (ventasRegistradas || []).find(v =>
+        (v.tarjeta_regalo_codigo && v.tarjeta_regalo_codigo.toUpperCase() === card.codigo.toUpperCase() && v.cliente_telefono) ||
+        (targetName && norm(v.cliente_nombre) === targetName && v.cliente_telefono)
+      );
+      if (matchedSale?.cliente_telefono) {
+        foundPhone = matchedSale.cliente_telefono;
+      }
+    }
+
+    setGiftCardWaSelectedClienteId(matchedCli?.id || '');
+    setGiftCardWaPhone(formatWhatsAppPhone(foundPhone));
+    setGiftCardWaMessage(buildGiftCardWhatsAppMessage(card, matchedCli?.nombre));
+    setGiftCardWaCopied(false);
+    setWhatsAppGiftCardModal(card);
+  };
 
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
@@ -3161,6 +3331,15 @@ export default function AdminDashboard({
                               <div className="flex items-center justify-center gap-1.5">
                                 <button
                                   type="button"
+                                  onClick={() => openGiftCardWhatsAppModal(card)}
+                                  className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded transition-colors cursor-pointer inline-flex items-center gap-1 shadow-2xs"
+                                  title="Enviar saldo pendiente por WhatsApp e invitar a redimir"
+                                >
+                                  <MessageCircle className="w-3 h-3 shrink-0" />
+                                  <span>WhatsApp</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => {
                                     navigator.clipboard.writeText(card.codigo);
                                     alert(`Código ${card.codigo} copiado al portapapeles.`);
@@ -3321,19 +3500,65 @@ export default function AdminDashboard({
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                       {filteredClientes.length > 0 ? (
-                        filteredClientes.map((cli) => (
-                          <tr key={cli.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 font-bold text-[#2C3E50]">{cli.nombre}</td>
-                            <td className="p-3 text-slate-600">{cli.telefono}</td>
-                            <td className="p-3 font-bold text-[#4B9CD3]">{formatMoney(cli.total_compras_monto)}</td>
-                            <td className="p-3">
-                              <span className="inline-block px-2 py-0.5 bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] font-bold rounded-md text-[11px]">
-                                {cli.total_compras_count} compras
-                              </span>
-                            </td>
-                            <td className="p-3 text-slate-500">{cli.ultima_fecha_compra || 'N/A'}</td>
-                          </tr>
-                        ))
+                        filteredClientes.map((cli) => {
+                          const stickersCli = getClienteStickersActivos(cli);
+                          const stickerBadgeStyle =
+                            stickersCli >= 10
+                              ? 'bg-amber-100 text-amber-900 border-amber-300'
+                              : stickersCli === 9
+                              ? 'bg-rose-100 text-rose-800 border-rose-300'
+                              : stickersCli === 8
+                              ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                              : stickersCli === 6
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                              : 'bg-slate-100 text-slate-600 border-slate-200';
+                          return (
+                            <tr key={cli.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-3 font-bold text-[#2C3E50]">{cli.nombre}</td>
+                              <td className="p-3 text-slate-600">{cli.telefono}</td>
+                              <td className="p-3 font-bold text-[#4B9CD3]">{formatMoney(cli.total_compras_monto)}</td>
+                              <td className="p-3">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span className="inline-block w-fit px-2 py-0.5 bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] font-bold rounded-md text-[11px] whitespace-nowrap">
+                                      {cli.total_compras_count} compras
+                                    </span>
+                                    <span
+                                      className={`inline-block w-fit px-1.5 py-0.5 border font-extrabold rounded-md text-[10px] whitespace-nowrap ${stickerBadgeStyle}`}
+                                      title={`Lleva ${stickersCli} de 10 stickers`}
+                                    >
+                                      {stickersCli}/10 stickers
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setClienteHistorialSearch('');
+                                        setSelectedClienteHistorial(cli);
+                                      }}
+                                      className="inline-flex items-center justify-center gap-1 w-fit px-2.5 py-1 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold rounded-md text-[10px] transition-colors cursor-pointer shadow-2xs whitespace-nowrap"
+                                      title="Ver historial de compras, productos, fechas y gasto total del cliente"
+                                    >
+                                      <Eye className="w-3 h-3 shrink-0" />
+                                      <span>Ver Compras</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openWhatsAppModal(cli)}
+                                      className="inline-flex items-center justify-center gap-1 w-fit px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-md text-[10px] transition-colors cursor-pointer shadow-2xs whitespace-nowrap"
+                                      title="Enviar WhatsApp al cliente con sus stickers y tickets faltantes"
+                                    >
+                                      <MessageCircle className="w-3 h-3 shrink-0" />
+                                      <span>WhatsApp</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-3 text-slate-500">{cli.ultima_fecha_compra || 'N/A'}</td>
+                            </tr>
+                          );
+                        })
                       ) : (
                         <tr>
                           <td colSpan={5} className="p-8 text-center text-slate-400 font-semibold">
@@ -8385,6 +8610,782 @@ export default function AdminDashboard({
         isOpen={showQrModal}
         onClose={() => setShowQrModal(false)}
       />
+
+      {/* MODAL DE HISTORIAL DE COMPRAS DEL CLIENTE (FIDELIZACIÓN) */}
+      {selectedClienteHistorial && (() => {
+        const cli = selectedClienteHistorial;
+        const normalizeDigits = (val?: string) => (val || '').replace(/\D/g, '');
+        const normalizeName = (val?: string) => (val || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const cliDigits = normalizeDigits(cli.telefono);
+        const cliPhoneTrimmed = (cli.telefono || '').trim();
+        const cliNameNorm = normalizeName(cli.nombre);
+
+        const formatVentaFecha = (fechaStr?: string) => {
+          if (!fechaStr) return 'Sin fecha';
+          const parts = fechaStr.split('-').map(Number);
+          if (parts.length === 3 && !parts.some(isNaN)) {
+            const localDate = new Date(parts[0], parts[1] - 1, parts[2]);
+            return new Intl.DateTimeFormat('es-CO', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric'
+            }).format(localDate);
+          }
+          return fechaStr;
+        };
+
+        const matchedVentas = (ventasRegistradas || [])
+          .filter(v => {
+            if (v.cliente_id && cli.id && v.cliente_id === cli.id) return true;
+            const saleDigits = normalizeDigits(v.cliente_telefono);
+            const salePhoneTrimmed = (v.cliente_telefono || '').trim();
+            if (cliDigits.length >= 7 && saleDigits.length >= 7) {
+              if (saleDigits === cliDigits || saleDigits.endsWith(cliDigits) || cliDigits.endsWith(saleDigits)) {
+                return true;
+              }
+            } else if (cliPhoneTrimmed && salePhoneTrimmed && cliPhoneTrimmed === salePhoneTrimmed) {
+              return true;
+            }
+            if (!v.cliente_id && !salePhoneTrimmed && cliNameNorm && normalizeName(v.cliente_nombre) === cliNameNorm) {
+              return true;
+            }
+            return false;
+          })
+          .sort((a, b) => {
+            const dateCmp = (b.fecha || '').localeCompare(a.fecha || '');
+            if (dateCmp !== 0) return dateCmp;
+            return (b.hora || '').localeCompare(a.hora || '');
+          });
+
+        const activeVentas = matchedVentas.filter(v => (v.estado || '').toLowerCase() !== 'anulada');
+        const totalGastadoVentas = activeVentas.reduce((sum, v) => sum + (Number(v.total) || 0), 0);
+        const totalPerfil = Number(cli.total_compras_monto || 0);
+        const totalMostrado = activeVentas.length > 0 ? totalGastadoVentas : totalPerfil;
+        const ticketPromedio = activeVentas.length > 0 ? totalGastadoVentas / activeVentas.length : (cli.total_compras_count > 0 ? totalPerfil / cli.total_compras_count : 0);
+
+        const productSummaryMap = new Map<string, { nombre: string; cantidad: number; gasto: number }>();
+        let totalUnidades = 0;
+
+        activeVentas.forEach(v => {
+          (v.productos_vendidos || []).forEach(p => {
+            const qty = Math.max(1, Number(p.cantidad) || 1);
+            const unitPrice = Number(p.precio) || 0;
+            const key = (p.nombre || 'Producto').trim().toLowerCase();
+            totalUnidades += qty;
+            const prev = productSummaryMap.get(key);
+            if (prev) {
+              prev.cantidad += qty;
+              prev.gasto += unitPrice * qty;
+            } else {
+              productSummaryMap.set(key, {
+                nombre: p.nombre || 'Producto',
+                cantidad: qty,
+                gasto: unitPrice * qty
+              });
+            }
+          });
+        });
+
+        const topProductos = Array.from(productSummaryMap.values()).sort((a, b) => b.cantidad - a.cantidad || b.gasto - a.gasto);
+
+        const qHist = clienteHistorialSearch.trim().toLowerCase();
+        const filteredVentasModal = !qHist
+          ? matchedVentas
+          : matchedVentas.filter(v =>
+              (v.fecha || '').toLowerCase().includes(qHist) ||
+              (v.vendedor_nombre || '').toLowerCase().includes(qHist) ||
+              (v.metodo_pago || '').toLowerCase().includes(qHist) ||
+              (v.productos_vendidos || []).some(p => (p.nombre || '').toLowerCase().includes(qHist))
+            );
+
+        return (
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4"
+            onClick={() => setSelectedClienteHistorial(null)}
+          >
+            <div
+              className="bg-[#FFFDF6] border-2 border-[#4B9CD3] rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col text-[#2C3E50] relative animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Encabezado del Modal */}
+              <div className="p-4 sm:p-5 bg-white border-b border-[#E2E8F0] flex items-start justify-between gap-3 shrink-0">
+                <div className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#4B9CD3] block">
+                    Programa de Fidelización · Detalle de Compras
+                  </span>
+                  <h3 className="text-lg font-extrabold text-[#2C3E50] leading-tight">
+                    {cli.nombre}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      <Phone className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                      {cli.telefono || 'Sin teléfono'}
+                    </span>
+                    {cli.fecha_registro && (
+                      <span className="inline-flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                        Registro: {formatVentaFecha(cli.fecha_registro)}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] text-[10px] font-bold">
+                      {cli.stickers_count ?? cli.visitas_acumuladas ?? cli.total_compras_count ?? 0} sellos
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedClienteHistorial(null)}
+                  className="text-slate-400 hover:text-slate-700 font-extrabold text-xs w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+                  title="Cerrar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Contenido Scrollable */}
+              <div className="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1">
+                {/* KPIs del Cliente */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 shadow-2xs">
+                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
+                      Total Gastado
+                    </span>
+                    <p className="text-xl font-black text-[#2C3E50] mt-0.5">
+                      {formatMoney(totalMostrado)}
+                    </p>
+                    {activeVentas.length > 0 && Math.abs(totalPerfil - totalGastadoVentas) > 1 ? (
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Acumulado en ficha: <strong className="text-[#4B9CD3]">{formatMoney(totalPerfil)}</strong>
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Ticket promedio: <strong className="text-slate-700">{formatMoney(ticketPromedio)}</strong>
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 shadow-2xs">
+                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
+                      Compras Realizadas
+                    </span>
+                    <p className="text-xl font-black text-[#2C3E50] mt-0.5">
+                      {activeVentas.length > 0 ? activeVentas.length : (cli.total_compras_count || 0)}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {activeVentas.length > 0
+                        ? `${totalUnidades} productos comprados en total`
+                        : `${cli.total_compras_count || 0} visitas registradas`}
+                    </p>
+                  </div>
+
+                  <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 shadow-2xs">
+                    <span className="text-[10px] font-black uppercase text-[#4B9CD3] tracking-wider block">
+                      Última Compra
+                    </span>
+                    <p className="text-base font-extrabold text-[#2C3E50] mt-1">
+                      {formatVentaFecha(activeVentas[0]?.fecha || cli.ultima_fecha_compra)}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {activeVentas[0]?.hora ? `Hora: ${activeVentas[0].hora}` : 'Fecha registrada en historial'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Resumen de Productos Comprados */}
+                {topProductos.length > 0 && (
+                  <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-extrabold uppercase tracking-wider text-[#2C3E50] flex items-center gap-1.5">
+                        <ShoppingBag className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                        Productos Adquiridos (Resumen)
+                      </h4>
+                      <span className="text-[10px] font-bold text-slate-500">
+                        {topProductos.length} {topProductos.length === 1 ? 'producto distinto' : 'productos distintos'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {topProductos.map((prod, idx) => (
+                        <div
+                          key={idx}
+                          className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#EBF5FB]/70 border border-[#AED6F1] text-xs"
+                        >
+                          <span className="font-black text-[#4B9CD3]">{prod.cantidad}x</span>
+                          <span className="font-bold text-[#2C3E50]">{prod.nombre}</span>
+                          {prod.gasto > 0 && (
+                            <span className="text-[10px] font-bold text-slate-500">
+                              ({formatMoney(prod.gasto)})
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Historial Cronológico de Compras */}
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-[#2C3E50] flex items-center gap-1.5">
+                      <Receipt className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                      Historial Detallado de Compras ({matchedVentas.length})
+                    </h4>
+
+                    {matchedVentas.length > 2 && (
+                      <div className="relative w-full sm:w-64">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={clienteHistorialSearch}
+                          onChange={(e) => setClienteHistorialSearch(e.target.value)}
+                          placeholder="Filtrar por producto o fecha..."
+                          className="w-full text-xs pl-8 pr-3 py-1.5 border border-[#E2E8F0] rounded-lg bg-white text-[#2C3E50] focus:outline-none focus:ring-1 focus:ring-[#4B9CD3]"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {filteredVentasModal.length > 0 ? (
+                    <div className="space-y-2.5">
+                      {filteredVentasModal.map((v) => {
+                        const isAnulada = (v.estado || '').toLowerCase() === 'anulada';
+                        const desglose = getDesglosePagosVenta(v);
+                        const metodoLabel = desglose.esMixto
+                          ? desglose.partes.map(p => `${p.label} (${formatMoney(p.monto)})`).join(' + ')
+                          : (v.metodo_pago || 'Efectivo');
+
+                        return (
+                          <div
+                            key={v.id}
+                            className={`rounded-xl border p-3.5 transition-colors ${
+                              isAnulada
+                                ? 'bg-rose-50/40 border-rose-200 opacity-80'
+                                : 'bg-white border-[#E2E8F0] shadow-2xs'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center gap-1 text-xs font-extrabold text-[#2C3E50]">
+                                  <Calendar className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                                  {formatVentaFecha(v.fecha)}
+                                </span>
+                                {v.hora && (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                                    <Clock className="w-3 h-3" />
+                                    {v.hora}
+                                  </span>
+                                )}
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                    isAnulada
+                                      ? 'bg-rose-100 text-rose-700'
+                                      : 'bg-emerald-100 text-emerald-700'
+                                  }`}
+                                >
+                                  {isAnulada ? 'Anulada' : 'Completada'}
+                                </span>
+                              </div>
+
+                              <div className="text-right">
+                                <span className={`text-sm font-black ${isAnulada ? 'line-through text-rose-600' : 'text-[#4B9CD3]'}`}>
+                                  {formatMoney(v.total)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Productos vendidos en la compra */}
+                            {v.productos_vendidos && v.productos_vendidos.length > 0 ? (
+                              <div className="space-y-1.5 mb-2.5">
+                                {v.productos_vendidos.map((item, itemIdx) => {
+                                  const qty = Math.max(1, Number(item.cantidad) || 1);
+                                  const unitPrice = Number(item.precio) || 0;
+                                  const subtotalItem = unitPrice * qty;
+                                  return (
+                                    <div
+                                      key={`${v.id}-item-${itemIdx}`}
+                                      className="flex items-center justify-between text-xs bg-slate-50/80 px-2.5 py-1.5 rounded-lg border border-slate-100"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="px-1.5 py-0.5 rounded bg-[#EBF5FB] text-[#4B9CD3] font-black text-[10px] shrink-0">
+                                          {qty}x
+                                        </span>
+                                        <span className="font-semibold text-[#2C3E50] truncate">
+                                          {item.nombre}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0 text-right">
+                                        {qty > 1 && unitPrice > 0 && (
+                                          <span className="text-[10px] text-slate-400">
+                                            {formatMoney(unitPrice)} c/u
+                                          </span>
+                                        )}
+                                        <span className="font-bold text-[#2C3E50]">
+                                          {formatMoney(subtotalItem)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-400 italic mb-2">
+                                Detalle individual de productos no registrado en esta orden.
+                              </p>
+                            )}
+
+                            {/* Metadatos de la venta */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 pt-1">
+                              <span>
+                                Medio de pago: <strong className="text-slate-700 capitalize">{metodoLabel}</strong>
+                              </span>
+                              <span>
+                                Atendido por: <strong className="text-slate-700">{v.vendedor_nombre || 'Staff'}</strong>
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="bg-white border border-dashed border-[#AED6F1] rounded-xl p-6 text-center space-y-1.5">
+                      <ShoppingBag className="w-7 h-7 text-[#4B9CD3]/60 mx-auto" />
+                      <p className="text-xs font-bold text-[#2C3E50]">
+                        {qHist
+                          ? 'No hay compras que coincidan con tu búsqueda.'
+                          : 'No se encontraron facturas detalladas asociadas en el historial de ventas POS.'}
+                      </p>
+                      {!qHist && totalPerfil > 0 && (
+                        <p className="text-[11px] text-slate-500">
+                          Este cliente registra <strong>{cli.total_compras_count} compras</strong> por un total acumulado de <strong>{formatMoney(totalPerfil)}</strong> en su perfil de fidelización.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Pie del Modal */}
+              <div className="p-3.5 sm:p-4 bg-white border-t border-[#E2E8F0] flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedClienteHistorial(null);
+                    openWhatsAppModal(cli);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Enviar WhatsApp ({getClienteStickersActivos(cli)}/10 stickers)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedClienteHistorial(null)}
+                  className="px-5 py-2 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL WHATSAPP DE STICKERS / PREMIOS (FIDELIZACIÓN) */}
+      {whatsAppClienteModal && (() => {
+        const cli = whatsAppClienteModal;
+        const milestone = getWhatsAppMilestoneInfo(cli, whatsAppStickersOverride);
+        const cleanPhoneDigits = whatsAppPhoneInput.replace(/\D/g, '');
+        const waHref = cleanPhoneDigits
+          ? `https://wa.me/${cleanPhoneDigits}?text=${encodeURIComponent(whatsAppMessageText)}`
+          : '';
+
+        return (
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4"
+            onClick={() => setWhatsAppClienteModal(null)}
+          >
+            <div
+              className="bg-[#FFFDF6] border-2 border-emerald-500 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col text-[#2C3E50] relative animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Encabezado */}
+              <div className="p-4 sm:p-5 bg-white border-b border-[#E2E8F0] flex items-start justify-between gap-3 shrink-0">
+                <div className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-1">
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    WhatsApp Fidelización · Aviso de Stickers
+                  </span>
+                  <h3 className="text-base font-extrabold text-[#2C3E50] leading-tight">
+                    {cli.nombre}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] font-black ${milestone.badgeClass}`}>
+                      {milestone.stageLabel}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setWhatsAppClienteModal(null)}
+                  className="text-slate-400 hover:text-slate-700 font-extrabold text-xs w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+                  title="Cerrar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Contenido */}
+              <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                {/* Progreso Visual 1..10 Stickers */}
+                <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-extrabold text-[#2C3E50]">
+                      Progreso detectado: <strong className="text-[#4B9CD3]">{milestone.stickers} de 10 stickers</strong>
+                    </span>
+                    <span className="font-black text-[11px] text-emerald-700">
+                      {milestone.faltantes === 0
+                        ? '🎉 ¡Listo para premio!'
+                        : `Faltan ${milestone.faltantes} ${milestone.faltantes === 1 ? 'ticket' : 'tickets'}`}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-10 gap-1">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
+                      const active = num <= milestone.stickers;
+                      const isTen = num === 10;
+                      return (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => {
+                            setWhatsAppStickersOverride(num);
+                            setWhatsAppMessageText(getWhatsAppMilestoneInfo(cli, num).message);
+                          }}
+                          title={`Ver/usar mensaje para nivel ${num}/10`}
+                          className={`h-7 rounded-lg text-[10px] font-black border transition-all cursor-pointer flex items-center justify-center ${
+                            active
+                              ? isTen
+                                ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-2xs'
+                                : 'bg-emerald-500 text-white border-emerald-600 shadow-2xs'
+                              : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-[#4B9CD3]'
+                          }`}
+                        >
+                          {isTen && active ? '🏆' : num}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-medium">
+                    El sistema detectó automáticamente el nivel del cliente (6 = ya está llegando, 8 = recta final, 9 = a 1 ticket, 10 = reclamar premio).
+                  </p>
+                </div>
+
+                {/* Teléfono WhatsApp */}
+                <div>
+                  <label className="block text-[10px] font-extrabold text-[#2C3E50] uppercase tracking-wider mb-1">
+                    Número de WhatsApp (con indicativo de país, ej. 57)
+                  </label>
+                  <input
+                    type="text"
+                    value={whatsAppPhoneInput}
+                    onChange={(e) => setWhatsAppPhoneInput(e.target.value)}
+                    placeholder="573001234567"
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg bg-white font-bold text-[#2C3E50] focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Mensaje Pre-cargado */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[10px] font-extrabold text-[#2C3E50] uppercase tracking-wider">
+                      Mensaje Personalizado de WhatsApp
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setWhatsAppMessageText(milestone.message)}
+                      className="text-[10px] font-bold text-[#4B9CD3] hover:underline cursor-pointer"
+                    >
+                      Restablecer mensaje automático
+                    </button>
+                  </div>
+                  <textarea
+                    rows={5}
+                    value={whatsAppMessageText}
+                    onChange={(e) => setWhatsAppMessageText(e.target.value)}
+                    className="w-full text-xs p-3 border border-[#E2E8F0] rounded-xl bg-white text-[#2C3E50] leading-relaxed focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Pie del Modal */}
+              <div className="p-3.5 sm:p-4 bg-white border-t border-[#E2E8F0] flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      navigator.clipboard.writeText(whatsAppMessageText);
+                      setWhatsAppCopied(true);
+                      setTimeout(() => setWhatsAppCopied(false), 2000);
+                    } catch (e) {}
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-[#2C3E50] font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  {whatsAppCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">¡Mensaje Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Copiar Mensaje</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setWhatsAppClienteModal(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                  {waHref ? (
+                    <a
+                      href={waHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-extrabold text-xs rounded-xl transition-colors shadow-sm"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar por WhatsApp</span>
+                    </a>
+                  ) : (
+                    <span className="px-4 py-2 bg-slate-200 text-slate-400 font-bold text-xs rounded-xl cursor-not-allowed">
+                      Sin teléfono válido
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL WHATSAPP DE TARJETA REGALO (SALDO PENDIENTE) */}
+      {whatsAppGiftCardModal && (() => {
+        const card = whatsAppGiftCardModal;
+        const cleanPhoneDigits = giftCardWaPhone.replace(/\D/g, '');
+        const waHref = cleanPhoneDigits
+          ? `https://wa.me/${cleanPhoneDigits}?text=${encodeURIComponent(giftCardWaMessage)}`
+          : '';
+        const saldoActual = Number(card.saldo_actual || 0);
+        const clientesConTelefono = (clientes || []).filter(c => (c.telefono || '').trim() !== '');
+
+        return (
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4"
+            onClick={() => setWhatsAppGiftCardModal(null)}
+          >
+            <div
+              className="bg-[#FFFDF6] border-2 border-emerald-500 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col text-[#2C3E50] relative animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Encabezado */}
+              <div className="p-4 sm:p-5 bg-white border-b border-[#E2E8F0] flex items-start justify-between gap-3 shrink-0">
+                <div className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-1">
+                    <Gift className="w-3.5 h-3.5" />
+                    WhatsApp Tarjeta Regalo · Saldo Pendiente
+                  </span>
+                  <h3 className="text-base font-extrabold text-[#2C3E50] leading-tight">
+                    {card.cliente_nombre || 'Cliente Tarjeta Regalo'}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#EBF5FB] text-[#4B9CD3] border border-[#AED6F1] text-[10px] font-black">
+                      Código: {card.codigo}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                      card.estado === 'activa'
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                        : card.estado === 'canjeada'
+                        ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                        : 'bg-amber-100 text-amber-800 border border-amber-200'
+                    }`}>
+                      {card.estado === 'activa' ? 'Activa' : card.estado === 'canjeada' ? 'Canjeada' : 'Inactiva'}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setWhatsAppGiftCardModal(null)}
+                  className="text-slate-400 hover:text-slate-700 font-extrabold text-xs w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+                  title="Cerrar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Contenido */}
+              <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                {/* Resumen de Saldo de la Tarjeta */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white border border-[#E2E8F0] rounded-xl p-3 shadow-2xs">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                      Monto Inicial
+                    </span>
+                    <p className="text-base font-extrabold text-slate-700 mt-0.5">
+                      {formatMoney(card.monto_inicial)}
+                    </p>
+                  </div>
+                  <div className={`border rounded-xl p-3 shadow-2xs ${
+                    saldoActual > 0 ? 'bg-emerald-50/70 border-emerald-200' : 'bg-slate-50 border-slate-200'
+                  }`}>
+                    <span className={`text-[10px] font-black uppercase tracking-wider block ${
+                      saldoActual > 0 ? 'text-emerald-700' : 'text-slate-500'
+                    }`}>
+                      Saldo Pendiente por Redimir
+                    </span>
+                    <p className={`text-lg font-black mt-0.5 ${
+                      saldoActual > 0 ? 'text-emerald-700' : 'text-slate-600'
+                    }`}>
+                      {formatMoney(saldoActual)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Selector Rápido de Cliente Registrado (opcional para autocompletar teléfono) */}
+                {clientesConTelefono.length > 0 && (
+                  <div>
+                    <label className="block text-[10px] font-extrabold text-[#2C3E50] uppercase tracking-wider mb-1">
+                      Seleccionar Cliente Registrado (Opcional para cargar teléfono)
+                    </label>
+                    <select
+                      value={giftCardWaSelectedClienteId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        setGiftCardWaSelectedClienteId(selectedId);
+                        const cli = clientesConTelefono.find(c => c.id === selectedId);
+                        if (cli) {
+                          setGiftCardWaPhone(formatWhatsAppPhone(cli.telefono));
+                          setGiftCardWaMessage(buildGiftCardWhatsAppMessage(card, cli.nombre));
+                        }
+                      }}
+                      className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg bg-white text-[#2C3E50] font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    >
+                      <option value="">-- Buscar / elegir cliente con teléfono --</option>
+                      {clientesConTelefono.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre} ({c.telefono})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Número de WhatsApp */}
+                <div>
+                  <label className="block text-[10px] font-extrabold text-[#2C3E50] uppercase tracking-wider mb-1">
+                    Número de WhatsApp (con indicativo de país, ej. 57)
+                  </label>
+                  <input
+                    type="text"
+                    value={giftCardWaPhone}
+                    onChange={(e) => setGiftCardWaPhone(e.target.value)}
+                    placeholder="573001234567"
+                    className="w-full text-xs px-3 py-2 border border-[#E2E8F0] rounded-lg bg-white font-bold text-[#2C3E50] focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                  {!cleanPhoneDigits && (
+                    <p className="text-[10px] text-amber-700 font-semibold mt-1">
+                      Ingresa el número de celular del cliente o selecciónalo de la lista de arriba para habilitar el envío directo.
+                    </p>
+                  )}
+                </div>
+
+                {/* Mensaje Pre-cargado */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[10px] font-extrabold text-[#2C3E50] uppercase tracking-wider">
+                      Mensaje de WhatsApp
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const selectedCli = clientesConTelefono.find(c => c.id === giftCardWaSelectedClienteId);
+                        setGiftCardWaMessage(buildGiftCardWhatsAppMessage(card, selectedCli?.nombre));
+                      }}
+                      className="text-[10px] font-bold text-[#4B9CD3] hover:underline cursor-pointer"
+                    >
+                      Restablecer mensaje automático
+                    </button>
+                  </div>
+                  <textarea
+                    rows={5}
+                    value={giftCardWaMessage}
+                    onChange={(e) => setGiftCardWaMessage(e.target.value)}
+                    className="w-full text-xs p-3 border border-[#E2E8F0] rounded-xl bg-white text-[#2C3E50] leading-relaxed focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Pie del Modal */}
+              <div className="p-3.5 sm:p-4 bg-white border-t border-[#E2E8F0] flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      navigator.clipboard.writeText(giftCardWaMessage);
+                      setGiftCardWaCopied(true);
+                      setTimeout(() => setGiftCardWaCopied(false), 2000);
+                    } catch (e) {}
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-[#2C3E50] font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  {giftCardWaCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">¡Mensaje Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Copiar Mensaje</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setWhatsAppGiftCardModal(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                  {waHref ? (
+                    <a
+                      href={waHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-extrabold text-xs rounded-xl transition-colors shadow-sm"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar por WhatsApp</span>
+                    </a>
+                  ) : (
+                    <span className="px-4 py-2 bg-slate-200 text-slate-400 font-bold text-xs rounded-xl cursor-not-allowed">
+                      Ingresa teléfono
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

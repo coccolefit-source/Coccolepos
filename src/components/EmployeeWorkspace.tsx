@@ -3494,17 +3494,28 @@ export default function EmployeeWorkspace({
             </div>
           )}
 
-          {employeeTab === 'gastos' && (
-            <div className="flex flex-col gap-6 w-full animate-in fade-in duration-200">
-              <GastosModule
-                gastos={gastos}
-                ventasRegistradas={ventasRegistradas}
-                currentUser={empleado}
-                onSaveGasto={onSaveGasto}
-                onDeleteGasto={onDeleteGasto}
-              />
-            </div>
-          )}
+          {employeeTab === 'gastos' && (() => {
+            const hoyStr = getLocalDateString();
+            const empNombreNorm = (empleado.nombre || '').trim().toLowerCase();
+            const gastosDelEmpleadoHoy = (gastos || []).filter(g => {
+              if (g.fecha !== hoyStr) return false;
+              if (g.usuario_id) {
+                return g.usuario_id === empleado.id;
+              }
+              return (g.registrado_por || '').trim().toLowerCase() === empNombreNorm;
+            });
+            return (
+              <div className="flex flex-col gap-6 w-full animate-in fade-in duration-200">
+                <GastosModule
+                  gastos={gastosDelEmpleadoHoy}
+                  ventasRegistradas={ventasRegistradas}
+                  currentUser={empleado}
+                  onSaveGasto={onSaveGasto}
+                  onDeleteGasto={onDeleteGasto}
+                />
+              </div>
+            );
+          })()}
         </div>
       </div>
 
