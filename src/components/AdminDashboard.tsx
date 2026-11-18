@@ -946,7 +946,19 @@ export default function AdminDashboard({
         faltantes: 0,
         stageLabel: '🏆 Nivel 10/10 · ¡Reclamar Premio!',
         badgeClass: 'bg-amber-100 text-amber-900 border-amber-300',
-        message: `¡Hola ${primerNombre}! 🎉🏆 ¡Felicidades de parte de COCCOLE FIT! ¡Ya completaste tus 10 stickers (10/10) en tu tarjeta de fidelización! 🍓🥤🥪🥗 Te invitamos a pasar por nuestra tienda para reclamar tu premio especial en caja. ¡Te esperamos para entregarte tu recompensa! ✨`
+        message: [
+          `¡Hola ${primerNombre}! 🎉🏆`,
+          '',
+          '¡Felicidades de parte de *COCCOLE FIT*! ¡Ya completaste tu tarjeta de fidelización!',
+          '──────────────',
+          '🎫 *Progreso:* *10 de 10 stickers*',
+          '🏆 *Estado:* *¡Premio desbloqueado!*',
+          '──────────────',
+          '',
+          '🍓🥤🥪🥗 Te invitamos a pasar por nuestra tienda para reclamar tu premio especial en caja.',
+          '',
+          '¡Te esperamos para entregarte tu recompensa! ✨'
+        ].join('\n')
       };
     }
 
@@ -956,7 +968,17 @@ export default function AdminDashboard({
         faltantes: 1,
         stageLabel: '🔥 Nivel 9/10 · ¡A 1 solo ticket!',
         badgeClass: 'bg-rose-100 text-rose-800 border-rose-300',
-        message: `¡Hola ${primerNombre}! 🔥✨ ¡Estás a un solo paso de ganar en COCCOLE FIT! Ya llevas *9 de 10 stickers* y te falta *solo 1 ticket* para completar los 10 y llevarte tu premio. 🏆 ¡Ven por tu próximo favorito saludable y desbloquea tu recompensa! 🍓💚`
+        message: [
+          `¡Hola ${primerNombre}! 🔥✨`,
+          '',
+          '¡Estás a un solo paso de ganar en *COCCOLE FIT*!',
+          '──────────────',
+          '🎫 *Progreso:* *9 de 10 stickers*',
+          '⏳ *Te falta:* *¡Solo 1 ticket!* para reclamar tu premio 🏆',
+          '──────────────',
+          '',
+          '🍓💚 ¡Ven por tu próximo favorito saludable y desbloquea tu recompensa!'
+        ].join('\n')
       };
     }
 
@@ -966,7 +988,17 @@ export default function AdminDashboard({
         faltantes: 2,
         stageLabel: '🚀 Nivel 8/10 · ¡Recta final (faltan 2)!',
         badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-300',
-        message: `¡Hola ${primerNombre}! 🚀💙 ¡Entraste en la recta final en COCCOLE FIT! Ya acumulas *8 de 10 stickers* en tu Pasaporte de Beneficios y solo te faltan *2 tickets* para completar los 10 y ganarte tu premio. 🍓🥪 ¡Te esperamos muy pronto! ✨`
+        message: [
+          `¡Hola ${primerNombre}! 🚀💙`,
+          '',
+          '¡Entraste en la recta final de tu Pasaporte de Beneficios en *COCCOLE FIT*!',
+          '──────────────',
+          '🎫 *Progreso:* *8 de 10 stickers*',
+          '⏳ *Te faltan:* *2 tickets* para completar los 10 y ganarte tu premio 🏆',
+          '──────────────',
+          '',
+          '🍓🥪 ¡Te esperamos muy pronto!'
+        ].join('\n')
       };
     }
 
@@ -976,7 +1008,17 @@ export default function AdminDashboard({
         faltantes: 4,
         stageLabel: '⚡ Nivel 6/10 · ¡Ya estás llegando!',
         badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-        message: `¡Hola ${primerNombre}! ⚡😊 ¡Qué alegría verte avanzar en COCCOLE FIT! Ya vas por *6 de 10 stickers*, ¡ya estás llegando a la meta! Solo te faltan *4 tickets* para completar tus 10 stickers y ganarte tu premio. 🍓🥤 ¡Nos vemos pronto por tu próximo antojo! ✨`
+        message: [
+          `¡Hola ${primerNombre}! ⚡😊`,
+          '',
+          '¡Qué alegría verte avanzar en *COCCOLE FIT*! ¡Ya estás llegando a la meta!',
+          '──────────────',
+          '🎫 *Progreso:* *6 de 10 stickers*',
+          '⏳ *Te faltan:* *4 tickets* para completar los 10 y ganarte tu premio 🏆',
+          '──────────────',
+          '',
+          '🍓🥤 ¡Nos vemos pronto por tu próximo antojo!'
+        ].join('\n')
       };
     }
 
@@ -986,7 +1028,17 @@ export default function AdminDashboard({
         faltantes: 3,
         stageLabel: '🌟 Nivel 7/10 · ¡Cada vez más cerca (faltan 3)!',
         badgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
-        message: `¡Hola ${primerNombre}! 🌟✨ ¡Vas súper bien en COCCOLE FIT! Ya llevas *7 de 10 stickers* y solo te faltan *3 tickets* para completar los 10 stickers y ganarte tu premio. 🍓🥗 ¡Te esperamos pronto! 💚`
+        message: [
+          `¡Hola ${primerNombre}! 🌟✨`,
+          '',
+          '¡Vas súper bien en *COCCOLE FIT*! Cada vez estás más cerca de tu premio.',
+          '──────────────',
+          '🎫 *Progreso:* *7 de 10 stickers*',
+          '⏳ *Te faltan:* *3 tickets* para completar los 10 stickers 🏆',
+          '──────────────',
+          '',
+          '🍓🥗 ¡Te esperamos pronto! 💚'
+        ].join('\n')
       };
     }
 
@@ -995,7 +1047,17 @@ export default function AdminDashboard({
       faltantes,
       stageLabel: `✨ Progreso ${stickers}/10 · Faltan ${faltantes} ${faltantes === 1 ? 'ticket' : 'tickets'}`,
       badgeClass: 'bg-[#EBF5FB] text-[#4B9CD3] border-[#AED6F1]',
-      message: `¡Hola ${primerNombre}! 💙🍓 Gracias por ser parte de COCCOLE FIT. Te contamos que ya llevas *${stickers} de 10 stickers* en tu tarjeta de fidelización y te faltan *${faltantes} ${faltantes === 1 ? 'ticket' : 'tickets'}* para completar los 10 y ganarte tu premio. 🏆 ¡Te esperamos por tu próximo antojo sin culpa! ✨`
+      message: [
+        `¡Hola ${primerNombre}! 💙🍓`,
+        '',
+        'Gracias por ser parte de *COCCOLE FIT*. Así va tu tarjeta de fidelización:',
+        '──────────────',
+        `🎫 *Progreso:* *${stickers} de 10 stickers*`,
+        `⏳ *Te ${faltantes === 1 ? 'falta' : 'faltan'}:* *${faltantes} ${faltantes === 1 ? 'ticket' : 'tickets'}* para ganarte tu premio 🏆`,
+        '──────────────',
+        '',
+        '✨ ¡Te esperamos por tu próximo antojo sin culpa!'
+      ].join('\n')
     };
   };
 
@@ -1024,14 +1086,44 @@ export default function AdminDashboard({
     const saldoFormateado = formatMoney(saldoPendiente);
 
     if (saldoPendiente > 0 && card.estado === 'activa') {
-      return `${saludo} 🎁✨ De parte de *COCCOLE FIT* te recordamos que tienes una Tarjeta Regalo activa (Código: *${card.codigo}*) con un saldo pendiente de *${saldoFormateado}* disponible para disfrutar. 🍓🥤🥪🥗 ¡Te invitamos a pasar por nuestra tienda y redimir tu saldo en tu próximo antojo sin culpa! 💚`;
+      return [
+        `${saludo} 🎁✨`,
+        '',
+        'De parte de *COCCOLE FIT* te recordamos que tienes una *Tarjeta Regalo activa* disponible para disfrutar:',
+        '──────────────',
+        `🎟️ *Código:* *${card.codigo}*`,
+        `💰 *Saldo pendiente:* *${saldoFormateado}*`,
+        '──────────────',
+        '',
+        '🍓🥤🥪🥗 ¡Te invitamos a pasar por nuestra tienda y redimir tu saldo en tu próximo antojo sin culpa! 💚'
+      ].join('\n');
     }
 
     if (saldoPendiente > 0) {
-      return `${saludo} 🎁✨ De parte de *COCCOLE FIT* te informamos que tu Tarjeta Regalo (Código: *${card.codigo}*) registra un saldo pendiente de *${saldoFormateado}*. ¡Te invitamos a visitarnos en tienda para revisar y redimir tu beneficio! 🍓💚`;
+      return [
+        `${saludo} 🎁✨`,
+        '',
+        'De parte de *COCCOLE FIT* te compartimos el estado actual de tu *Tarjeta Regalo*:',
+        '──────────────',
+        `🎟️ *Código:* *${card.codigo}*`,
+        `💰 *Saldo pendiente:* *${saldoFormateado}*`,
+        '──────────────',
+        '',
+        '🍓💚 ¡Te invitamos a visitarnos en tienda para revisar y redimir tu beneficio!'
+      ].join('\n');
     }
 
-    return `${saludo} 💙🎁 De parte de *COCCOLE FIT* te confirmamos que tu Tarjeta Regalo (Código: *${card.codigo}*) ya fue redimida en su totalidad (saldo pendiente: *$0*). ¡Gracias por elegirnos para disfrutar sin culpa! 🍓✨`;
+    return [
+      `${saludo} 💙🎁`,
+      '',
+      'De parte de *COCCOLE FIT* te confirmamos el estado de tu *Tarjeta Regalo*:',
+      '──────────────',
+      `🎟️ *Código:* *${card.codigo}*`,
+      '✅ *Saldo pendiente:* *$0* (Redimida en su totalidad)',
+      '──────────────',
+      '',
+      '🍓✨ ¡Gracias por elegirnos para disfrutar sin culpa!'
+    ].join('\n');
   };
 
   const openGiftCardWhatsAppModal = (card: TarjetaRegalo) => {
@@ -9110,7 +9202,7 @@ export default function AdminDashboard({
                     </button>
                   </div>
                   <textarea
-                    rows={5}
+                    rows={8}
                     value={whatsAppMessageText}
                     onChange={(e) => setWhatsAppMessageText(e.target.value)}
                     className="w-full text-xs p-3 border border-[#E2E8F0] rounded-xl bg-white text-[#2C3E50] leading-relaxed focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -9323,7 +9415,7 @@ export default function AdminDashboard({
                     </button>
                   </div>
                   <textarea
-                    rows={5}
+                    rows={8}
                     value={giftCardWaMessage}
                     onChange={(e) => setGiftCardWaMessage(e.target.value)}
                     className="w-full text-xs p-3 border border-[#E2E8F0] rounded-xl bg-white text-[#2C3E50] leading-relaxed focus:outline-none focus:ring-1 focus:ring-emerald-500"
