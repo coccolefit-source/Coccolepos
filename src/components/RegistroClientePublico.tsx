@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { getColombiaIsoTimestamp } from '../utils/dateColombia';
 import TarjetaFidelizacionDigital, { ClienteWalletData } from './TarjetaFidelizacionDigital';
 import {
   Sparkles,
@@ -125,7 +126,7 @@ export default function RegistroClientePublico() {
         visitas_acumuladas: 1,
         total_gastado: 0,
         habeas_data_accepted: true,
-        accepted_at: new Date().toISOString(),
+        accepted_at: getColombiaIsoTimestamp(),
         terms_version: 'v1.0-Ley1581'
       };
 

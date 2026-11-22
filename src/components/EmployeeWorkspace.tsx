@@ -4,6 +4,9 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { getLocalEvidenceSvg } from '../utils/avatar';
+import { getColombiaIsoTimestamp } from '../utils/dateColombia';
+import { showErrorToast, showSuccessToast } from '../utils/feedback';
 import {
   Usuario,
   Tarea,
@@ -125,10 +128,10 @@ interface EmployeeWorkspaceProps {
 }
 
 const PHOTO_PRESETS = [
-  { nombre: 'Barra Sanitizada ', url: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&q=80&w=300' },
-  { nombre: 'Ensaladas Preparadas ', url: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=300' },
-  { nombre: 'Cajas Despachadas ', url: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&q=80&w=300' },
-  { nombre: 'Licuadoras Limpias ', url: 'https://images.unsplash.com/photo-1578643463396-0997cb5328c1?auto=format&fit=crop&q=80&w=300' }
+  { nombre: 'Barra Sanitizada ', url: getLocalEvidenceSvg('Barra Sanitizada') },
+  { nombre: 'Ensaladas Preparadas ', url: getLocalEvidenceSvg('Ensaladas Preparadas') },
+  { nombre: 'Cajas Despachadas ', url: getLocalEvidenceSvg('Cajas Despachadas') },
+  { nombre: 'Licuadoras Limpias ', url: getLocalEvidenceSvg('Licuadoras Limpias') }
 ];
 
 export default function EmployeeWorkspace({
@@ -189,11 +192,11 @@ export default function EmployeeWorkspace({
         setCurrentAvatar(compressedBase64);
         empleado.foto_avatar = compressedBase64;
       } else {
-        alert('Error al guardar foto en Supabase: ' + (res.error || 'Error de conexión'));
+        showErrorToast('Error al guardar foto en Supabase: ' + (res.error || 'Error de conexión'));
       }
     } catch (err) {
       console.error('Error al procesar la foto:', err);
-      alert('No se pudo procesar la foto seleccionada.');
+      showErrorToast('No se pudo procesar la foto seleccionada.');
     } finally {
       setIsUploadingAvatar(false);
     }
@@ -559,7 +562,7 @@ export default function EmployeeWorkspace({
           completadas: Number(resolvedData.completadas) || 0,
           totales: Number(resolvedData.totales) || 0,
           porcentaje: Number(resolvedData.porcentaje) || 0,
-          updated_at: resolvedData.updated_at || new Date().toISOString()
+          updated_at: resolvedData.updated_at || getColombiaIsoTimestamp()
         });
       } else {
         setHistorialProgresoData(null);
@@ -1539,7 +1542,7 @@ export default function EmployeeWorkspace({
     setIncidenciaTitulo('');
     setIncidenciaDesc('');
     setShowIncidenciaModal(false);
-    alert('Reporte de incidencia enviado al administrador.');
+    showSuccessToast('Reporte de incidencia enviado al administrador.');
   };
 
   const getVentasProductoCount = (productId: string) => {

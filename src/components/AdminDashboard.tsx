@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import {
   Usuario,
   Tarea,
@@ -36,10 +36,34 @@ import {
   getResumenPagosVentas,
   ventaMatchesPaymentFilter
 } from '../types';
-import GastosModule from './GastosModule';
-import FichajesAsistenciaModule from './FichajesAsistenciaModule';
-import TendenciaModule from './TendenciaModule';
-import FinancierosModule from './FinancierosModule';
+import ErrorBoundary from './ErrorBoundary';
+import { getColombiaIsoTimestamp, getColombiaTimeString } from '../utils/dateColombia';
+import { getInitialsAvatar } from '../utils/avatar';
+import { safeFetchJson } from '../utils/safeFetchJson';
+import {
+  showSuccessToast,
+  showErrorToast,
+  showWarningToast,
+  confirmDialog
+} from '../utils/feedback';
+
+const GastosModule = lazy(() => import('./GastosModule'));
+const FichajesAsistenciaModule = lazy(() => import('./FichajesAsistenciaModule'));
+const TendenciaModule = lazy(() => import('./TendenciaModule'));
+const FinancierosModule = lazy(() => import('./FinancierosModule'));
+const RankingWeightsConfig = lazy(() =>
+  import('./RankingWeightsConfig').then((m) => ({ default: m.RankingWeightsConfig }))
+);
+const BusinessPerformanceChart = lazy(() =>
+  import('./BusinessPerformanceChart').then((m) => ({ default: m.BusinessPerformanceChart }))
+);
+
+const ModuleLoadingFallback = ({ label = 'Cargando módulo...' }: { label?: string }) => (
+  <div className="w-full bg-white border border-[#E2E8F0] rounded-xl p-8 flex items-center justify-center gap-3 text-xs font-bold text-slate-500">
+    <span className="inline-block w-4 h-4 rounded-full border-2 border-[#4B9CD3] border-t-transparent animate-spin" />
+    <span>{label}</span>
+  </div>
+);
 
 import {
   Plus,
@@ -85,9 +109,9 @@ import {
   ShoppingBag,
   Receipt,
   MessageCircle,
-  Gift
+  Gift,
+  KeyRound
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { calcularTiempoTarea } from '../lib/taskUtils';
 import {
   fetchWorkerCompleteMetricsFromSupabase,
@@ -101,15 +125,14 @@ import {
   insertAnnouncementInSupabase,
   updateAnnouncementInSupabase,
   deleteAnnouncementFromSupabase,
+  actualizarPinEnSupabase,
   formatFechaSemana,
   ProductoRendimientoItem,
   DiaVentaResumen
 } from '../lib/supabaseClient';
 import { getGlobalMetrics, formatMoney } from '../utils/metrics';
-import { RankingWeightsConfig } from './RankingWeightsConfig';
 import AnalyticsPanel from './AnalyticsPanel';
 import Leaderboard from './Leaderboard';
-import { BusinessPerformanceChart } from './BusinessPerformanceChart';
 import ModalQrFidelizacion from './ModalQrFidelizacion';
 
 export type AdminTab = 'tareas' | 'productos' | 'calidad' | 'anuncios' | 'empleados' | 'inventario' | 'horarios' | 'gastos' | 'ventas' | 'tendencia' | 'financieros' | 'supabase';
@@ -351,7 +374,7 @@ export default function AdminDashboard({
             completadas: e.sumComp,
             totales: e.sumTot,
             porcentaje: e.sumTot > 0 ? Math.round((e.sumComp / e.sumTot) * 100) : 0,
-            updated_at: new Date().toISOString()
+            updated_at: getColombiaIsoTimestamp()
           })));
         } else {
           setAdminProductividadData(effectiveList.map((d: any) => {
@@ -368,7 +391,7 @@ export default function AdminDashboard({
               completadas: rawComp,
               totales: rawTot,
               porcentaje: pct,
-              updated_at: d.updated_at || new Date().toISOString()
+              updated_at: d.updated_at || getColombiaIsoTimestamp()
             };
           }));
         }
@@ -550,13 +573,21 @@ export default function AdminDashboard({
   const [empNombre, setEmpNombre] = useState('');
   const [empArea, setEmpArea] = useState<AreaType>('Cocina/Preparación');
   const [empMeta, setEmpMeta] = useState(6);
-  const [empAvatar, setEmpAvatar] = useState('https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=120');
+  const [empAvatar, setEmpAvatar] = useState(() => getInitialsAvatar('Colaborador'));
   const [empInsignia, setEmpInsignia] = useState('Colaborador Fit 🥗');
   const [empEmail, setEmpEmail] = useState('');
   const [empTelefono, setEmpTelefono] = useState('');
   const [empPin, setEmpPin] = useState('');
+  const [empAdminPin, setEmpAdminPin] = useState('');
   const [empPinError, setEmpPinError] = useState('');
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
+
+  // Modal dedicado para cambiar PIN de colaborador vía RPC update_user_pin
+  const [pinModalEmp, setPinModalEmp] = useState<Usuario | null>(null);
+  const [pinModalNewPin, setPinModalNewPin] = useState('');
+  const [pinModalAdminPin, setPinModalAdminPin] = useState('');
+  const [pinModalError, setPinModalError] = useState('');
+  const [isUpdatingPin, setIsUpdatingPin] = useState(false);
 
   const handleGenerateRandomPin = () => {
     const activePins = new Set(
@@ -650,6 +681,105 @@ export default function AdminDashboard({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportProductosExcel = async () => {
+    if (!productosCatalogo || productosCatalogo.length === 0) return;
+    const XLSX = await import('xlsx');
+    const rows = productosCatalogo.map((p) => {
+      const vb = p.valor_bruto != null ? Number(p.valor_bruto) : Number(p.precio || 0);
+      const desc = p.descuento != null ? Number(p.descuento) : 0;
+      const subt = p.subtotal != null ? Number(p.subtotal) : Math.max(0, vb - desc);
+      const imp = p.impuesto_cargo != null ? Number(p.impuesto_cargo) : 0;
+      const tot = p.total != null ? Number(p.total) : Number(p.precio || 0);
+      const costo = p.precio_costo != null ? Number(p.precio_costo) : 0;
+      const ganancia = tot - costo;
+      const pct = tot > 0 && costo > 0 ? Number((((tot - costo) / tot) * 100).toFixed(1)) : 0;
+
+      return {
+        'Código Producto': p.codigo || '',
+        'Nombre Producto': p.nombre || '',
+        'Categoría': p.categoria || '',
+        'Valor Bruto ($)': Number(vb.toFixed(2)),
+        'Descuento ($)': Number(desc.toFixed(2)),
+        'Subtotal ($)': Number(subt.toFixed(2)),
+        'Impuesto Cargo ($)': Number(imp.toFixed(2)),
+        'Total Venta ($)': Number(tot.toFixed(2)),
+        'Precio Costo ($)': Number(costo.toFixed(2)),
+        'Margen Ganancia ($)': Number(ganancia.toFixed(2)),
+        'Rentabilidad (%)': `${pct}%`
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet['!cols'] = [
+      { wch: 16 },
+      { wch: 34 },
+      { wch: 18 },
+      { wch: 15 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 15 },
+      { wch: 18 },
+      { wch: 15 }
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Catálogo Productos');
+    XLSX.writeFile(workbook, `catalogo_productos_coccole_${getLocalDateString()}.xlsx`);
+  };
+
+  const handleExportProductosCsv = () => {
+    if (!productosCatalogo || productosCatalogo.length === 0) return;
+    const headers = [
+      'codigo',
+      'nombre',
+      'categoria',
+      'valor_bruto',
+      'descuento',
+      'subtotal',
+      'impuesto_cargo',
+      'total',
+      'precio_costo',
+      'margen_ganancia',
+      'rentabilidad_pct'
+    ];
+    const escapeCsv = (val: string) => `"${String(val || '').replace(/"/g, '""')}"`;
+    const rows = productosCatalogo.map((p) => {
+      const vb = p.valor_bruto != null ? Number(p.valor_bruto) : Number(p.precio || 0);
+      const desc = p.descuento != null ? Number(p.descuento) : 0;
+      const subt = p.subtotal != null ? Number(p.subtotal) : Math.max(0, vb - desc);
+      const imp = p.impuesto_cargo != null ? Number(p.impuesto_cargo) : 0;
+      const tot = p.total != null ? Number(p.total) : Number(p.precio || 0);
+      const costo = p.precio_costo != null ? Number(p.precio_costo) : 0;
+      const ganancia = tot - costo;
+      const pct = tot > 0 && costo > 0 ? `${(((tot - costo) / tot) * 100).toFixed(1)}%` : '0%';
+      return [
+        escapeCsv(p.codigo || ''),
+        escapeCsv(p.nombre || ''),
+        escapeCsv(p.categoria || ''),
+        vb.toFixed(2),
+        desc.toFixed(2),
+        subt.toFixed(2),
+        imp.toFixed(2),
+        tot.toFixed(2),
+        costo.toFixed(2),
+        ganancia.toFixed(2),
+        escapeCsv(pct)
+      ].join(',');
+    });
+
+    const csvText = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `catalogo_productos_coccole_${getLocalDateString()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
@@ -1629,7 +1759,7 @@ export default function AdminDashboard({
     setGeminiError(null);
 
     try {
-      const response = await fetch('/api/worker-ai-query', {
+      const res = await safeFetchJson<{ answer?: string }>('/api/worker-ai-query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1640,31 +1770,29 @@ export default function AdminDashboard({
         })
       });
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.error || `Error ${response.status} en la consulta a Gemini`);
+      if (!res.ok || !res.data) {
+        throw new Error(res.error || 'No se pudo obtener respuesta del asistente.');
       }
 
-      const data = await response.json();
-      const modelAnswer = data.answer || 'No se obtuvo respuesta de Gemini.';
+      const modelAnswer = res.data.answer || 'No se obtuvo respuesta del asistente.';
 
       setGeminiChatMessages(prev => [
         ...prev,
         {
           role: 'model',
           text: modelAnswer,
-          timestamp: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+          timestamp: getColombiaTimeString()
         }
       ]);
     } catch (err: any) {
-      console.error('Error al consultar a Gemini sobre el trabajador:', err);
-      setGeminiError(err.message || 'Error al comunicarse con Gemini');
+      console.error('Error al consultar al asistente sobre el trabajador:', err);
+      setGeminiError(err?.message || 'Error al comunicarse con el asistente');
       setGeminiChatMessages(prev => [
         ...prev,
         {
           role: 'model',
-          text: `No se pudo completar la consulta con Gemini: ${err.message}. Por favor verifica la conexión o intenta con otra pregunta.`,
-          timestamp: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+          text: `No se pudo completar la consulta: ${err?.message || 'Error de conexión'}. Por favor intenta nuevamente.`,
+          timestamp: getColombiaTimeString()
         }
       ]);
     } finally {
@@ -1683,7 +1811,7 @@ export default function AdminDashboard({
 
   const handleGenerarAsignacionPredeterminada = async () => {
     if (empleados.length === 0) {
-      alert("No hay colaboradores activos registrados en el sistema para asignarles tareas.");
+      showWarningToast('No hay colaboradores activos registrados en el sistema para asignarles tareas.');
       return;
     }
 
@@ -1882,11 +2010,16 @@ export default function AdminDashboard({
       }
     ];
 
-    if (confirm(`¿Estás seguro que deseas generar y asignar las 24 tareas predeterminadas para la fecha ${fechaFiltroBitacora} a cada uno de los colaboradores en orden estricto?`)) {
+    const confirmedBulk = await confirmDialog({
+      title: 'Generar tareas predeterminadas',
+      message: `¿Estás seguro de que deseas generar y asignar las 24 tareas predeterminadas para la fecha ${fechaFiltroBitacora} a cada uno de los colaboradores en orden estricto?`,
+      confirmLabel: 'Generar 24 tareas'
+    });
+
+    if (confirmedBulk) {
       try {
         const tareasParaCrear: Omit<Tarea, 'id'>[] = [];
-        
-        // Recorrer cada empleado y generar sus 24 tareas oficiales en orden estricto para la fecha seleccionada
+
         for (const emp of empleados) {
           defaultTasksTemplates.forEach((template, index) => {
             tareasParaCrear.push({
@@ -1907,20 +2040,19 @@ export default function AdminDashboard({
         if (onAddTareasBulk) {
           const ok = await onAddTareasBulk(tareasParaCrear);
           if (ok) {
-            alert(`¡Éxito! Las 24 tareas se han generado y guardado en Supabase para el ${fechaFiltroBitacora}.`);
+            showSuccessToast(`Las 24 tareas se han generado y guardado en Supabase para el ${fechaFiltroBitacora}.`);
             await cargarTareasAdminPorFecha(fechaFiltroBitacora);
           }
         } else {
-          // Fallback sequential
           for (const item of tareasParaCrear) {
             await onAddTarea(item);
           }
-          alert(`¡Éxito! Las 24 tareas se han generado y guardado en Supabase para el ${fechaFiltroBitacora}.`);
+          showSuccessToast(`Las 24 tareas se han generado y guardado en Supabase para el ${fechaFiltroBitacora}.`);
           await cargarTareasAdminPorFecha(fechaFiltroBitacora);
         }
       } catch (err: any) {
-        console.error("Error al autogenerar tareas:", err);
-        alert("Ocurrió un error al generar algunas de las tareas.");
+        console.error('Error al autogenerar tareas:', err);
+        showErrorToast('Ocurrió un error al generar algunas de las tareas.');
       }
     }
   };
@@ -1928,16 +2060,20 @@ export default function AdminDashboard({
   const [eliminandoTareas, setEliminandoTareas] = useState(false);
 
   const handleBorrarTodasLasTareas = async () => {
-    const tareasTarget = (tareasAdminFecha !== null ? tareasAdminFecha : tareas).filter(t => 
+    const tareasTarget = (tareasAdminFecha !== null ? tareasAdminFecha : tareas).filter(t =>
       !t.fecha || getLocalDateString(t.fecha) === fechaFiltroBitacora
     );
 
     const cantidad = tareasTarget.length;
-    const confirmacion = window.confirm(
-      cantidad > 0
-        ? `¿Estás seguro de que deseas ELIMINAR TODAS las tareas (${cantidad} tareas) correspondientes a la fecha ${fechaFiltroBitacora}?\n\nEsta acción borrará los registros en Supabase de forma permanente.`
-        : `¿Deseas vaciar y eliminar cualquier tarea registrada para la fecha ${fechaFiltroBitacora}?`
-    );
+    const confirmacion = await confirmDialog({
+      title: 'Eliminar todas las tareas del día',
+      message:
+        cantidad > 0
+          ? `¿Estás seguro de que deseas eliminar todas las tareas (${cantidad} tareas) correspondientes a la fecha ${fechaFiltroBitacora}? Esta acción borrará los registros en Supabase de forma permanente.`
+          : `¿Deseas vaciar y eliminar cualquier tarea registrada para la fecha ${fechaFiltroBitacora}?`,
+      confirmLabel: 'Eliminar todas',
+      tone: 'danger'
+    });
 
     if (!confirmacion) return;
 
@@ -1950,11 +2086,11 @@ export default function AdminDashboard({
       }
 
       setTareasAdminFecha([]);
-      alert(`Todas las tareas de la fecha ${fechaFiltroBitacora} han sido eliminadas correctamente.`);
+      showSuccessToast(`Todas las tareas de la fecha ${fechaFiltroBitacora} han sido eliminadas correctamente.`);
       await cargarTareasAdminPorFecha(fechaFiltroBitacora);
     } catch (err: any) {
-      console.error("Error al borrar todas las tareas:", err);
-      alert("Error al intentar eliminar las tareas: " + (err?.message || err));
+      console.error('Error al borrar todas las tareas:', err);
+      showErrorToast('Error al intentar eliminar las tareas: ' + (err?.message || err));
     } finally {
       setEliminandoTareas(false);
     }
@@ -1995,13 +2131,13 @@ export default function AdminDashboard({
       if (onAddTareasBulk) {
         onAddTareasBulk(tasksToCreate).then(async (ok) => {
           if (ok) {
-            alert("¡Tareas asignadas a todos los trabajadores correctamente!");
+            showSuccessToast('Tareas asignadas a todos los trabajadores correctamente.');
             await cargarTareasAdminPorFecha(fechaFiltroBitacora);
           }
         });
       } else {
         tasksToCreate.forEach(t => onAddTarea(t));
-        alert("¡Tareas asignadas a todos los trabajadores correctamente!");
+        showSuccessToast('Tareas asignadas a todos los trabajadores correctamente.');
         cargarTareasAdminPorFecha(fechaFiltroBitacora);
       }
     } else {
@@ -2054,7 +2190,7 @@ export default function AdminDashboard({
   const handleProdSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prodNombre.trim()) {
-      alert('Por favor ingresa el nombre del producto sugerido.');
+      showWarningToast('Por favor ingresa el nombre del producto sugerido.');
       return;
     }
 
@@ -2075,7 +2211,7 @@ export default function AdminDashboard({
       setProdNombre('');
       setProdMeta(15);
       setProdPuntos(10);
-      
+
       const inputNombre = document.getElementById('inputNombreSugerido') as HTMLInputElement;
       if (inputNombre) inputNombre.value = '';
       const inputMeta = document.getElementById('inputPrecioMeta') as HTMLInputElement;
@@ -2098,7 +2234,7 @@ export default function AdminDashboard({
 
     setIsSubmittingAnuncio(true);
     try {
-      const nowIso = new Date().toISOString();
+      const nowIso = getColombiaIsoTimestamp();
       const res = await insertAnnouncementInSupabase({
         titulo: tituloTrim,
         contenido: contenidoTrim,
@@ -2111,25 +2247,25 @@ export default function AdminDashboard({
         onAddAnuncio(res.data);
         setAnuncioTitulo('');
         setAnuncioContenido('');
+        showSuccessToast('Comunicado publicado correctamente.');
       } else {
-        console.warn('Advertencia al insertar en Supabase:', res.error);
         if (res.error) {
-          alert('Aviso de Supabase: ' + res.error);
+          showWarningToast('Aviso de Supabase: ' + res.error);
         }
         onAddAnuncio({
           titulo: tituloTrim,
           contenido: contenidoTrim,
-          fecha: nowIso.split('T')[0],
+          fecha: getLocalDateString(),
           fecha_creacion: nowIso,
           activo: true,
-          creador_nombre: 'Mariana Silva (Admin)'
+          creador_nombre: 'Administrador'
         });
         setAnuncioTitulo('');
         setAnuncioContenido('');
       }
     } catch (err: any) {
       console.error('Error al publicar anuncio en Supabase:', err);
-      alert('Error al publicar el comunicado: ' + (err?.message || err));
+      showErrorToast('Error al publicar el comunicado: ' + (err?.message || err));
     } finally {
       setIsSubmittingAnuncio(false);
     }
@@ -2148,14 +2284,22 @@ export default function AdminDashboard({
   };
 
   const handleDeleteAnuncioClick = async (an: Anuncio) => {
-    if (confirm(`¿Estás seguro de que deseas eliminar permanentemente el comunicado "${an.titulo}"?`)) {
+    const confirmed = await confirmDialog({
+      title: 'Eliminar comunicado',
+      message: `¿Estás seguro de que deseas eliminar permanentemente el comunicado "${an.titulo}"?`,
+      confirmLabel: 'Eliminar',
+      tone: 'danger'
+    });
+    if (confirmed) {
       try {
         await deleteAnnouncementFromSupabase(an.id);
         if (onDeleteAnuncio) {
           onDeleteAnuncio(an.id);
         }
+        showSuccessToast('Comunicado eliminado.');
       } catch (err: any) {
         console.error('Error al eliminar comunicado:', err);
+        showErrorToast('No se pudo eliminar el comunicado.');
       }
     }
   };
@@ -2164,19 +2308,19 @@ export default function AdminDashboard({
     e.preventDefault();
     if (!empNombre.trim()) return;
 
-    // Validar PIN de 4 dígitos exactos y unicidad
+    // Al crear es obligatorio un PIN de 4 dígitos; al editar solo se actualiza si se ingresa uno nuevo
     const cleanPin = empPin.trim();
-    if (!cleanPin) {
+    const cleanAdminPin = empAdminPin.trim();
+    if (!editingEmpId && !cleanPin) {
       setEmpPinError('El PIN de acceso es obligatorio (4 dígitos).');
       return;
     }
-    if (!/^\d{4}$/.test(cleanPin)) {
+    if (cleanPin && !/^\d{4}$/.test(cleanPin)) {
       setEmpPinError('El PIN debe tener exactamente 4 dígitos numéricos.');
       return;
     }
-    const pinInUse = usuarios.some(u => u.id !== editingEmpId && u.pin === cleanPin);
-    if (pinInUse) {
-      setEmpPinError('Este PIN ya está asignado a otro colaborador activo.');
+    if (editingEmpId && cleanPin && !/^\d{4}$/.test(cleanAdminPin)) {
+      setEmpPinError('Para cambiar el PIN del colaborador ingresa tu PIN de administrador actual (4 dígitos).');
       return;
     }
 
@@ -2184,31 +2328,45 @@ export default function AdminDashboard({
       setEmpNombre('');
       setEmpArea(categorias.areasTrabajo[0] || 'Cocina/Preparación');
       setEmpMeta(6);
+      setEmpAvatar(getInitialsAvatar('Colaborador'));
       setEmpInsignia('Colaborador Fit 🥗');
       setEmpEmail('');
       setEmpTelefono('');
       setEmpPin('');
+      setEmpAdminPin('');
       setEmpPinError('');
     };
 
     try {
+      const resolvedAvatar =
+        empAvatar && !empAvatar.includes('unsplash.com')
+          ? empAvatar
+          : getInitialsAvatar(empNombre);
+
       if (editingEmpId) {
         const existing = usuarios.find(u => u.id === editingEmpId);
         if (existing) {
+          if (cleanPin) {
+            const pinOk = await actualizarPinEnSupabase(editingEmpId, cleanPin, cleanAdminPin);
+            if (!pinOk) {
+              setEmpPinError('No se pudo actualizar el PIN. Verifica tu PIN de administrador.');
+              return;
+            }
+          }
           const result = await onEditUsuario({
             ...existing,
             nombre: empNombre,
             area_preferida: empArea,
             meta_tareas_diarias: Number(empMeta),
-            foto_avatar: empAvatar,
+            foto_avatar: resolvedAvatar,
             insignia_actual: empInsignia,
             email: empEmail,
-            telefono: empTelefono,
-            pin: cleanPin
+            telefono: empTelefono
           });
           if (result !== false) {
             setEditingEmpId(null);
             resetForm();
+            showSuccessToast('Colaborador actualizado correctamente.');
           }
         }
       } else {
@@ -2217,7 +2375,7 @@ export default function AdminDashboard({
           rol: 'empleado',
           area_preferida: empArea,
           meta_tareas_diarias: Number(empMeta),
-          foto_avatar: empAvatar,
+          foto_avatar: resolvedAvatar,
           insignia_actual: empInsignia,
           email: empEmail,
           telefono: empTelefono,
@@ -2225,10 +2383,50 @@ export default function AdminDashboard({
         });
         if (result !== false) {
           resetForm();
+          showSuccessToast('Colaborador registrado correctamente.');
         }
       }
     } catch (err) {
       console.error('Error al guardar perfil:', err);
+      showErrorToast('Error al guardar el perfil del colaborador.');
+    }
+  };
+
+  const handleOpenChangePinModal = (emp: Usuario) => {
+    setPinModalEmp(emp);
+    setPinModalNewPin('');
+    setPinModalAdminPin('');
+    setPinModalError('');
+  };
+
+  const handleSubmitChangePinModal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinModalEmp) return;
+
+    const cleanNewPin = pinModalNewPin.trim();
+    const cleanAdminPin = pinModalAdminPin.trim();
+    if (!/^\d{4}$/.test(cleanNewPin)) {
+      setPinModalError('El nuevo PIN del colaborador debe tener 4 dígitos numéricos.');
+      return;
+    }
+    if (!/^\d{4}$/.test(cleanAdminPin)) {
+      setPinModalError('Ingresa tu PIN de administrador actual (4 dígitos).');
+      return;
+    }
+
+    setIsUpdatingPin(true);
+    setPinModalError('');
+    try {
+      const ok = await actualizarPinEnSupabase(pinModalEmp.id, cleanNewPin, cleanAdminPin);
+      if (ok) {
+        setPinModalEmp(null);
+        setPinModalNewPin('');
+        setPinModalAdminPin('');
+      } else {
+        setPinModalError('No se pudo actualizar el PIN. Verifica tu PIN de administrador.');
+      }
+    } finally {
+      setIsUpdatingPin(false);
     }
   };
 
@@ -2241,7 +2439,8 @@ export default function AdminDashboard({
     setEmpInsignia(u.insignia_actual || 'Colaborador Fit 🥗');
     setEmpEmail(u.email || '');
     setEmpTelefono(u.telefono || '');
-    setEmpPin(u.pin || '');
+    setEmpPin('');
+    setEmpAdminPin('');
     setEmpPinError('');
   };
 
@@ -2284,7 +2483,8 @@ export default function AdminDashboard({
     return Number(cleaned);
   };
 
-  const handleDownloadSampleExcel = () => {
+  const handleDownloadSampleExcel = async () => {
+    const XLSX = await import('xlsx');
     const sampleData = [
       ['Código', 'Nombre del Producto', 'Categoría', 'Precio Venta', 'Costo Unitario', 'Stock Actual', 'Stock Mínimo', 'Unidad'],
       ['PROD-001', 'Pan de Bonito Fit', 'Panadería', 4900, 2200, 30, 5, 'Unidad'],
@@ -2310,8 +2510,9 @@ export default function AdminDashboard({
     setImportStatus({ type: 'loading', message: `Procesando archivo "${file.name}"...` });
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
+        const XLSX = await import('xlsx');
         const data = evt.target?.result;
         if (!data) throw new Error('No se pudo leer el archivo.');
 
@@ -3087,7 +3288,8 @@ export default function AdminDashboard({
         });
 
         // --- CÁLCULO DE DATOS PARA LAS GRÁFICAS DE TENDENCIA ---
-        let chartData: Array<{ label: string; value: number }> = [];
+        let chartData: Array<{ label: string; value: number; count: number }> = [];
+        const isVentaActiva = (v: Venta) => (v.estado || '').trim().toLowerCase() !== 'anulada';
         
         if (chartView === '7days') {
           const days = [];
@@ -3095,11 +3297,11 @@ export default function AdminDashboard({
             days.push(getBogotaDateDaysAgo(i));
           }
           chartData = days.map(d => {
-            const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
-            const total = daySales.reduce((sum, s) => sum + s.total, 0);
+            const daySales = (ventasRegistradas || []).filter(v => (v.fecha || '').slice(0, 10) === d && isVentaActiva(v));
+            const total = daySales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
             const parts = d.split('-');
             const label = `${parts[2]}/${parts[1]}`;
-            return { label, value: total };
+            return { label, value: total, count: daySales.length };
           });
         } else if (chartView === '15days') {
           const days = [];
@@ -3107,22 +3309,66 @@ export default function AdminDashboard({
             days.push(getBogotaDateDaysAgo(i));
           }
           chartData = days.map(d => {
-            const daySales = (ventasRegistradas || []).filter(v => v.fecha === d && v.estado !== 'Anulada');
-            const total = daySales.reduce((sum, s) => sum + s.total, 0);
+            const daySales = (ventasRegistradas || []).filter(v => (v.fecha || '').slice(0, 10) === d && isVentaActiva(v));
+            const total = daySales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
             const parts = d.split('-');
             const label = `${parts[2]}/${parts[1]}`;
-            return { label, value: total };
+            return { label, value: total, count: daySales.length };
           });
         } else {
-          const months = [
-            { key: '2026-06', name: 'Junio' },
-            { key: '2026-07', name: 'Julio' },
-            { key: '2026-08', name: 'Agosto' }
+          const MESES_ES = [
+            'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
           ];
+          const MESES_CORTOS = [
+            'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+            'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'
+          ];
+
+          const todayParts = getLocalDateString().split('-');
+          const currentYear = parseInt(todayParts[0], 10) || new Date().getFullYear();
+          const currentMonthIdx = (parseInt(todayParts[1], 10) || (new Date().getMonth() + 1)) - 1; // 0..11
+          const currentAbsMonth = currentYear * 12 + currentMonthIdx;
+
+          const activeSales = (ventasRegistradas || []).filter(v => isVentaActiva(v) && /^\d{4}-\d{2}/.test(v.fecha || ''));
+          const saleAbsMonths = activeSales.map(v => {
+            const [yStr, mStr] = v.fecha.split('-');
+            return parseInt(yStr, 10) * 12 + (parseInt(mStr, 10) - 1);
+          }).filter(n => !isNaN(n));
+
+          const endAbsMonth = saleAbsMonths.length > 0
+            ? Math.max(currentAbsMonth, ...saleAbsMonths)
+            : currentAbsMonth;
+
+          const minWindowStart = endAbsMonth - 11; // Máximo 12 meses para mantener legibilidad
+          let startAbsMonth: number;
+          if (saleAbsMonths.length > 0) {
+            const earliestSaleMonth = Math.min(...saleAbsMonths);
+            // Mostrar desde el primer mes con ventas (máx 12 meses atrás), garantizando al menos 3 meses
+            startAbsMonth = Math.max(minWindowStart, Math.min(earliestSaleMonth, endAbsMonth - 2));
+          } else {
+            // Si aún no hay ventas registradas, mostrar los últimos 6 meses hasta el mes actual
+            startAbsMonth = endAbsMonth - 5;
+          }
+
+          const months: Array<{ key: string; name: string }> = [];
+          const spansMultipleYears = Math.floor(startAbsMonth / 12) !== Math.floor(endAbsMonth / 12);
+          const totalMonthsCount = endAbsMonth - startAbsMonth + 1;
+
+          for (let abs = startAbsMonth; abs <= endAbsMonth; abs++) {
+            const yr = Math.floor(abs / 12);
+            const mIdx = ((abs % 12) + 12) % 12;
+            const key = `${yr}-${String(mIdx + 1).padStart(2, '0')}`;
+            const label = spansMultipleYears
+              ? `${MESES_CORTOS[mIdx]} ${String(yr).slice(-2)}`
+              : (totalMonthsCount > 6 ? MESES_CORTOS[mIdx] : MESES_ES[mIdx]);
+            months.push({ key, name: label });
+          }
+
           chartData = months.map(m => {
-            const monthSales = (ventasRegistradas || []).filter(v => v.fecha.startsWith(m.key) && v.estado !== 'Anulada');
-            const total = monthSales.reduce((sum, s) => sum + s.total, 0);
-            return { label: m.name, value: total };
+            const monthSales = activeSales.filter(v => (v.fecha || '').startsWith(m.key));
+            const total = monthSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+            return { label: m.name, value: total, count: monthSales.length };
           });
         }
 
@@ -3216,13 +3462,13 @@ export default function AdminDashboard({
                   const conceptoNotas = (formData.get('notas') as string || '').trim();
 
                   if (!codigo || parseFloat(monto) <= 0) {
-                    alert('Por favor ingresa un código válido y un monto mayor a 0.');
+                    showWarningToast('Por favor ingresa un código válido y un monto mayor a 0.');
                     return;
                   }
 
-                  const supabase = (window as any).supabase || getSupabaseClient();
+                  const supabase = getSupabaseClient();
                   if (!supabase) {
-                    alert('No se detectó cliente de Supabase configurado.');
+                    showErrorToast('No se detectó cliente de Supabase configurado.');
                     return;
                   }
 
@@ -3246,11 +3492,11 @@ export default function AdminDashboard({
                     if (error) {
                       console.error('[Supabase] Error al insertar en gift_cards:', error);
                       if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('gift_cards_code_key')) {
-                        alert(`El código de tarjeta "${codigo.trim().toUpperCase()}" ya existe en Supabase. Por favor ingresa o genera un código diferente.`);
+                        showWarningToast(`El código de tarjeta "${codigo.trim().toUpperCase()}" ya existe. Ingresa o genera uno diferente.`);
                       } else if (error.code === '42501' || error.message?.includes('row-level security')) {
-                        alert('Error RLS en Supabase (42501): Permiso denegado por Row-Level Security en gift_cards.\n\nPara solucionarlo, ejecuta en el SQL Editor de Supabase:\nALTER TABLE public.gift_cards DISABLE ROW LEVEL SECURITY;');
+                        showErrorToast('Permiso denegado por las políticas de seguridad de Supabase. Inicia sesión con una cuenta de administrador verificada.');
                       } else {
-                        alert('Error al guardar tarjeta en Supabase: ' + (error.message || 'Error desconocido'));
+                        showErrorToast('Error al guardar tarjeta en Supabase: ' + (error.message || 'Error desconocido'));
                       }
                       setIsSubmittingGiftCard(false);
                       return;
@@ -3276,10 +3522,10 @@ export default function AdminDashboard({
 
                     formElement.reset();
                     setGiftCardFormCode('');
-                    alert(`¡Tarjeta Regalo ${cleanCode} creada y activada exitosamente en Supabase!`);
+                    showSuccessToast(`Tarjeta Regalo ${cleanCode} creada y activada exitosamente.`);
                   } catch (err: any) {
                     console.error('Excepción al crear tarjeta en Supabase:', err);
-                    alert('Error inesperado al crear tarjeta: ' + (err.message || 'Error de conexión'));
+                    showErrorToast('Error inesperado al crear tarjeta: ' + (err?.message || 'Error de conexión'));
                   } finally {
                     setIsSubmittingGiftCard(false);
                   }
@@ -3434,7 +3680,7 @@ export default function AdminDashboard({
                                   type="button"
                                   onClick={() => {
                                     navigator.clipboard.writeText(card.codigo);
-                                    alert(`Código ${card.codigo} copiado al portapapeles.`);
+                                    showSuccessToast(`Código ${card.codigo} copiado al portapapeles.`);
                                   }}
                                   className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded transition-colors cursor-pointer"
                                   title="Copiar código"
@@ -3443,9 +3689,16 @@ export default function AdminDashboard({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    if (confirm(`¿Estás seguro de eliminar la tarjeta regalo ${card.codigo}?`)) {
-                                      if (onDeleteTarjetaRegalo) onDeleteTarjetaRegalo(card.id);
+                                  onClick={async () => {
+                                    const ok = await confirmDialog({
+                                      title: 'Eliminar tarjeta regalo',
+                                      message: `¿Estás seguro de eliminar la tarjeta regalo ${card.codigo}?`,
+                                      confirmLabel: 'Eliminar',
+                                      tone: 'danger'
+                                    });
+                                    if (ok && onDeleteTarjetaRegalo) {
+                                      onDeleteTarjetaRegalo(card.id);
+                                      showSuccessToast(`Tarjeta regalo ${card.codigo} eliminada.`);
                                     }
                                   }}
                                   className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded transition-colors cursor-pointer flex items-center justify-center"
@@ -3883,7 +4136,7 @@ export default function AdminDashboard({
 
               {/* Renderizado de Gráfico de Barras y Líneas Dinámico en SVG (Permite desplazamiento horizontal en móviles y tabletas) */}
               <div className="w-full overflow-x-auto touch-pan-x pb-2 scrollbar-thin">
-                <div className="h-64 min-w-[620px] sm:min-w-full bg-slate-50/50 rounded-xl border border-dashed border-slate-200/80 p-4 relative flex flex-col justify-between">
+                <div className={`h-64 ${chartData.length <= 4 ? 'min-w-full' : 'min-w-[620px] sm:min-w-full'} bg-slate-50/50 rounded-xl border border-dashed border-slate-200/80 p-4 relative flex flex-col justify-between`}>
                 <div className="flex-1 flex items-end justify-between gap-2.5 pt-4 px-2">
                   {chartData.map((d, index) => {
                     const pct = (d.value / maxVal) * 100;
@@ -3901,9 +4154,14 @@ export default function AdminDashboard({
                         />
 
                         {/* Label de fecha */}
-                        <span className="text-[10px] text-slate-500 font-bold mt-2 truncate max-w-full">
+                        <span className="text-[10px] text-slate-600 font-bold mt-2 truncate max-w-full">
                           {d.label}
                         </span>
+                        {chartView === 'monthly' && (
+                          <span className="text-[9px] text-slate-400 font-semibold whitespace-nowrap">
+                            {d.count} {d.count === 1 ? 'venta' : 'ventas'}
+                          </span>
+                        )}
                       </div>
                     );
                   })}
@@ -4524,15 +4782,15 @@ export default function AdminDashboard({
                       </span>
                     </div>
 
-                    {/* Buscador y Exportador */}
-                    <div className="flex gap-2 items-center">
-                      <div className="relative">
+                    {/* Buscador y Acciones (Importar / Descargar Catálogo) */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
+                      <div className="relative w-full sm:w-60">
                         <input
                           type="text"
                           placeholder="Buscar código, nombre o categoría..."
                           value={catCatalogSearch}
                           onChange={(e) => setCatCatalogSearch(e.target.value)}
-                          className="text-xs pl-7 pr-3 py-1.5 border border-[#E2E8F0] rounded-lg bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] w-56 sm:w-64"
+                          className="text-xs pl-7 pr-7 py-1.5 border border-[#E2E8F0] rounded-lg bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] w-full"
                         />
                         <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" />
                         {catCatalogSearch && (
@@ -4546,59 +4804,39 @@ export default function AdminDashboard({
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setShowCsvModal(true)}
-                        className="bg-[#4B9CD3] hover:bg-[#3B8CB3] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
-                        title="Importar productos de manera masiva desde un archivo CSV"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-white" />
-                        <span>Carga Masiva CSV</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleExportProductosExcel}
+                          disabled={productosCatalogo.length === 0}
+                          className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                          title={`Descargar los ${productosCatalogo.length} productos cargados en Excel (.xlsx)`}
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          <span>Descargar Productos (Excel)</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (productosCatalogo.length === 0) return;
-                          const headers = ['Código producto', 'Nombre producto', 'Categoría', 'Valor bruto', 'Descuento', 'Subtotal', 'Impuesto cargo', 'Total', 'Precio Costo', 'Margen Ganancia ($)', 'Margen (%)'];
-                          const rows = productosCatalogo.map(p => {
-                            const vb = p.valor_bruto != null ? p.valor_bruto : p.precio;
-                            const desc = p.descuento != null ? p.descuento : 0;
-                            const subt = p.subtotal != null ? p.subtotal : Math.max(0, vb - desc);
-                            const imp = p.impuesto_cargo != null ? p.impuesto_cargo : 0;
-                            const tot = p.total != null ? p.total : p.precio;
-                            const costo = p.precio_costo != null ? p.precio_costo : 0;
-                            const ganancia = tot - costo;
-                            const pct = tot > 0 && costo > 0 ? ((tot - costo) / tot * 100).toFixed(1) + '%' : '0%';
-                            return [
-                              `"${p.codigo}"`,
-                              `"${p.nombre.replace(/"/g, '""')}"`,
-                              `"${p.categoria || ''}"`,
-                              vb.toFixed(2),
-                              desc.toFixed(2),
-                              subt.toFixed(2),
-                              imp.toFixed(2),
-                              tot.toFixed(2),
-                              costo.toFixed(2),
-                              ganancia.toFixed(2),
-                              `"${pct}"`
-                            ].join(',');
-                          });
-                          const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows].join('\n');
-                          const encodedUri = encodeURI(csvContent);
-                          const link = document.createElement('a');
-                          link.setAttribute('href', encodedUri);
-                          link.setAttribute('download', `catalogo_productos_${getLocalDateString()}.csv`);
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        }}
-                        className="border border-[#E2E8F0] hover:bg-slate-50 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-                        title="Exportar a archivo CSV"
-                      >
-                        <Download className="w-3.5 h-3.5 text-[#4B9CD3]" />
-                        <span className="hidden sm:inline">Exportar CSV</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={handleExportProductosCsv}
+                          disabled={productosCatalogo.length === 0}
+                          className="border border-[#AED6F1] bg-[#EBF5FB] hover:bg-[#D6EAF8] disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400 text-[#1B4F72] text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                          title={`Descargar los ${productosCatalogo.length} productos cargados en CSV`}
+                        >
+                          <Download className="w-3.5 h-3.5 text-[#4B9CD3]" />
+                          <span>Descargar CSV</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setShowCsvModal(true)}
+                          className="bg-[#4B9CD3] hover:bg-[#3B8CB3] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                          title="Importar productos de manera masiva desde un archivo CSV"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-white" />
+                          <span>Carga Masiva CSV</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -4765,8 +5003,14 @@ export default function AdminDashboard({
                                         </button>
                                         <button
                                           type="button"
-                                          onClick={() => {
-                                            if (window.confirm(`¿Seguro que deseas eliminar el producto "${p.nombre}"?`)) {
+                                          onClick={async () => {
+                                            const ok = await confirmDialog({
+                                              title: 'Eliminar producto',
+                                              message: `¿Seguro que deseas eliminar el producto "${p.nombre}" del catálogo?`,
+                                              confirmLabel: 'Eliminar',
+                                              tone: 'danger'
+                                            });
+                                            if (ok) {
                                               onDeleteProductoCatalogo(p.id);
                                             }
                                           }}
@@ -4971,13 +5215,17 @@ export default function AdminDashboard({
 
       {isTabOpen('gastos') && (
         <div className={activeTab === 'gastos' ? 'flex flex-col gap-6 w-full animate-in fade-in duration-200' : 'hidden'}>
-          <GastosModule
-            gastos={gastos}
-            ventasRegistradas={ventasRegistradas}
-            currentUser={usuarios.find(u => u.rol === 'admin') || usuarios[0] || ({ id: 'admin', nombre: 'Administrador', rol: 'admin' } as any)}
-            onSaveGasto={onSaveGasto}
-            onDeleteGasto={onDeleteGasto}
-          />
+          <ErrorBoundary moduleName="Módulo de Gastos">
+            <Suspense fallback={<ModuleLoadingFallback label="Cargando módulo de gastos..." />}>
+              <GastosModule
+                gastos={gastos}
+                ventasRegistradas={ventasRegistradas}
+                currentUser={usuarios.find(u => u.rol === 'admin') || usuarios[0] || ({ id: 'admin', nombre: 'Administrador', rol: 'admin' } as any)}
+                onSaveGasto={onSaveGasto}
+                onDeleteGasto={onDeleteGasto}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       )}
 
@@ -5398,10 +5646,14 @@ export default function AdminDashboard({
 
       {isTabOpen('tendencia') && (
         <div className={activeTab === 'tendencia' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
-          <TendenciaModule
-            ventasRegistradas={ventasRegistradas}
-            productosCatalogo={productosCatalogo}
-          />
+          <ErrorBoundary moduleName="Módulo de Tendencias">
+            <Suspense fallback={<ModuleLoadingFallback label="Cargando reportes y gráficos de tendencia..." />}>
+              <TendenciaModule
+                ventasRegistradas={ventasRegistradas}
+                productosCatalogo={productosCatalogo}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       )}
 
@@ -5409,11 +5661,15 @@ export default function AdminDashboard({
 
       {isTabOpen('financieros') && (
         <div className={activeTab === 'financieros' ? 'flex flex-col gap-6 w-full' : 'hidden'}>
-          <FinancierosModule
-            ventasRegistradas={ventasRegistradas}
-            gastos={gastos}
-            productosCatalogo={productosCatalogo}
-          />
+          <ErrorBoundary moduleName="Módulo Financiero y Deck">
+            <Suspense fallback={<ModuleLoadingFallback label="Cargando módulo financiero y rentabilidad..." />}>
+              <FinancierosModule
+                ventasRegistradas={ventasRegistradas}
+                gastos={gastos}
+                productosCatalogo={productosCatalogo}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       )}
 
@@ -5920,7 +6176,11 @@ export default function AdminDashboard({
             </div>
             {/* Gráfico de rendimiento comercial diario vs objetivo mensual */}
             <div id="row-business-performance-chart" className="w-full">
-              <BusinessPerformanceChart ventas={ventasRegistradas} />
+              <ErrorBoundary moduleName="Gráfico de Rendimiento">
+                <Suspense fallback={<ModuleLoadingFallback label="Cargando gráfico de rendimiento..." />}>
+                  <BusinessPerformanceChart ventas={ventasRegistradas} />
+                </Suspense>
+              </ErrorBoundary>
             </div>
 
             {/* Tabla de Posiciones y Ranking */}
@@ -5939,16 +6199,20 @@ export default function AdminDashboard({
           </div>
 
           {/* Configuración de Ponderación del Ranking de Colaboradores & Ventas Sugeridas */}
-          <RankingWeightsConfig
-            currentWeights={rankingWeights}
-            onUpdateWeights={(newWeights) => {
-              if (onUpdateRankingWeights) {
-                onUpdateRankingWeights(newWeights);
-              }
-            }}
-            upsellRules={upsellRules}
-            onUpdateUpsellRules={onUpdateUpsellRules}
-          />
+          <ErrorBoundary moduleName="Configuración de Ranking">
+            <Suspense fallback={<ModuleLoadingFallback label="Cargando configuración de ranking..." />}>
+              <RankingWeightsConfig
+                currentWeights={rankingWeights}
+                onUpdateWeights={(newWeights) => {
+                  if (onUpdateRankingWeights) {
+                    onUpdateRankingWeights(newWeights);
+                  }
+                }}
+                upsellRules={upsellRules}
+                onUpdateUpsellRules={onUpdateUpsellRules}
+              />
+            </Suspense>
+          </ErrorBoundary>
 
           {/* Fila A (Formulario - Registrar Nuevo Colaborador) */}
 
@@ -6028,16 +6292,17 @@ export default function AdminDashboard({
                   </label>
                   <div className="flex gap-2">
                     <input
-                      type="text"
+                      type="password"
+                      inputMode="numeric"
                       maxLength={4}
-                      placeholder="1234"
+                      placeholder={editingEmpId ? 'Opcional' : '••••'}
                       value={empPin}
                       onChange={(e) => {
                         setEmpPin(e.target.value.replace(/\D/g, '').slice(0, 4));
                         setEmpPinError('');
                       }}
-                      className="w-20 text-center font-mono font-bold text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
-                      required
+                      className="w-24 text-center font-mono font-bold text-xs px-2.5 py-2 border border-[#E2E8F0] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#4B9CD3] bg-white h-9"
+                      required={!editingEmpId}
                     />
                     <button
                       type="button"
@@ -6047,6 +6312,26 @@ export default function AdminDashboard({
                       Generar PIN Aleatorio
                     </button>
                   </div>
+                  {editingEmpId && empPin.length > 0 && (
+                    <div className="mt-2">
+                      <label className="block text-[10px] font-bold text-amber-700 uppercase mb-1">
+                        Tu PIN de Administrador (autoriza el cambio)
+                      </label>
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder="PIN Admin (4 dígitos)"
+                        value={empAdminPin}
+                        onChange={(e) => {
+                          setEmpAdminPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                          setEmpPinError('');
+                        }}
+                        className="w-full font-mono font-bold text-xs px-2.5 py-2 border border-amber-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 bg-amber-50/40 h-9"
+                        required
+                      />
+                    </div>
+                  )}
                   {empPinError && (
                     <p className="text-[10px] font-bold text-red-500 mt-1">{empPinError}</p>
                   )}
@@ -6150,7 +6435,7 @@ export default function AdminDashboard({
                             Meta: {emp.meta_tareas_diarias || 6} t/d
                           </span>
                           <span className="px-1.5 py-0.5 rounded-sm border border-[#AED6F1] bg-[#EBF5FB] text-[9px] font-extrabold text-[#2C3E50] font-mono">
-                            PIN: {emp.pin || 'Sin PIN'}
+                            PIN protegido
                           </span>
                         </div>
                       </div>
@@ -6158,13 +6443,20 @@ export default function AdminDashboard({
 
                     <div className="mt-4 pt-3 border-t border-[#E2E8F0]/40 flex flex-col gap-2">
                       <div className="flex justify-between items-center">
-                        <div className="flex gap-2">
+                        <div className="flex gap-1.5">
                           <button
                             onClick={() => handleEditEmpClick(emp)}
                             className="p-1.5 text-slate-600 hover:text-[#4B9CD3] hover:bg-[#EBF5FB]/50 rounded-lg transition-all cursor-pointer"
                             title="Editar Datos"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenChangePinModal(emp)}
+                            className="p-1.5 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all cursor-pointer"
+                            title="Cambiar PIN de acceso"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => onDeleteUsuario(emp.id)}
@@ -6358,9 +6650,15 @@ export default function AdminDashboard({
                         <>
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                               const match = horarios.find(t => t.id === editingSchId);
-                              if (confirm('¿Desea eliminar definitivamente este turno programado?')) {
+                              const ok = await confirmDialog({
+                                title: 'Eliminar turno programado',
+                                message: '¿Desea eliminar definitivamente este turno programado?',
+                                confirmLabel: 'Eliminar',
+                                tone: 'danger'
+                              });
+                              if (ok) {
                                 onDeleteTurno(editingSchId, match);
                                 setEditingSchId(null);
                                 setSchNota('');
@@ -6473,8 +6771,14 @@ export default function AdminDashboard({
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          if (confirm(`¿Eliminar turno del ${shift.dia_semana} (${shift.hora_entrada} - ${shift.hora_salida}) para ${emp.nombre}?`)) {
+                                        onClick={async () => {
+                                          const ok = await confirmDialog({
+                                            title: 'Eliminar turno',
+                                            message: `¿Eliminar turno del ${shift.dia_semana} (${shift.hora_entrada} - ${shift.hora_salida}) para ${emp.nombre}?`,
+                                            confirmLabel: 'Eliminar',
+                                            tone: 'danger'
+                                          });
+                                          if (ok) {
                                             onDeleteTurno(shift.id, shift);
                                           }
                                         }}
@@ -6501,14 +6805,18 @@ export default function AdminDashboard({
           {/* SUB-SECCIÓN 3: CONTROL DE ASISTENCIA Y FICHAJES */}
           {(empleadosSubTab === 'fichajes' || empleadosSubTab === 'ambos') && (
             <div className="space-y-6 w-full animate-in fade-in duration-150">
-              <FichajesAsistenciaModule
-                empleados={empleados}
-                fichajes={fichajes}
-                usuarios={usuarios}
-                tareas={tareas}
-                onDeleteFichaje={onDeleteFichaje}
-                onPreviewPhoto={(url) => setSelectedPreviewPhoto(url)}
-              />
+              <ErrorBoundary moduleName="Control de Asistencia y Fichajes">
+                <Suspense fallback={<ModuleLoadingFallback label="Cargando control de asistencia y fichajes..." />}>
+                  <FichajesAsistenciaModule
+                    empleados={empleados}
+                    fichajes={fichajes}
+                    usuarios={usuarios}
+                    tareas={tareas}
+                    onDeleteFichaje={onDeleteFichaje}
+                    onPreviewPhoto={(url) => setSelectedPreviewPhoto(url)}
+                  />
+                </Suspense>
+              </ErrorBoundary>
             </div>
           )}
         </div>
@@ -7726,7 +8034,7 @@ export default function AdminDashboard({
                       Asistente Gemini AI — {geminiModalWorker.nombre}
                     </h3>
                     <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 border border-blue-400/30 px-2 py-0.5 rounded-full">
-                      gemini-3.8-flash
+                      Asistente IA
                     </span>
                   </div>
                   <p className="text-[11px] text-blue-200/80 mt-0.5">
@@ -7737,8 +8045,12 @@ export default function AdminDashboard({
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    const confirmClear = window.confirm('¿Deseas reiniciar la conversación con Gemini sobre este colaborador?');
+                  onClick={async () => {
+                    const confirmClear = await confirmDialog({
+                      title: 'Reiniciar conversación',
+                      message: '¿Deseas reiniciar la conversación sobre este colaborador?',
+                      confirmLabel: 'Reiniciar'
+                    });
                     if (confirmClear) {
                       abrirGeminiConsultaTrabajador(geminiModalWorker, geminiWorkerContext);
                     }
@@ -9478,6 +9790,111 @@ export default function AdminDashboard({
           </div>
         );
       })()}
+
+      {/* MODAL CAMBIAR PIN DE COLABORADOR (RPC update_user_pin) */}
+      {pinModalEmp && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-[#AED6F1] rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="px-5 py-4 bg-[#EBF5FB]/60 border-b border-[#AED6F1]/60 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#4B9CD3] text-white flex items-center justify-center">
+                  <KeyRound className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-[#2C3E50]">Cambiar PIN de Acceso</h3>
+                  <p className="text-[11px] text-slate-500 font-semibold">{pinModalEmp.nombre}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinModalEmp(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                aria-label="Cerrar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitChangePinModal} className="p-5 space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1.5">
+                  Nuevo PIN del colaborador (4 dígitos)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="••••"
+                    value={pinModalNewPin}
+                    onChange={(e) => {
+                      setPinModalNewPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                      setPinModalError('');
+                    }}
+                    className="w-32 text-center font-mono font-extrabold tracking-widest text-sm px-3 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3]"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPinModalNewPin(Math.floor(1000 + Math.random() * 9000).toString());
+                      setPinModalError('');
+                    }}
+                    className="flex-1 bg-[#EBF5FB] hover:bg-[#D6EAF8] text-[#4B9CD3] border border-[#AED6F1] text-xs font-bold px-3 py-2.5 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Generar Aleatorio
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1.5">
+                  Tu PIN actual de Administrador (4 dígitos)
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  placeholder="PIN de autorización"
+                  value={pinModalAdminPin}
+                  onChange={(e) => {
+                    setPinModalAdminPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                    setPinModalError('');
+                  }}
+                  className="w-full font-mono font-extrabold tracking-widest text-sm px-3 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#4B9CD3]"
+                  required
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  El cambio se valida y cifra directamente en Supabase mediante la función segura.
+                </p>
+              </div>
+
+              {pinModalError && (
+                <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+                  {pinModalError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setPinModalEmp(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingPin}
+                  className="px-4 py-2 bg-[#4B9CD3] hover:bg-[#3A82B4] text-white font-extrabold text-xs rounded-xl transition-colors shadow-xs disabled:opacity-60 cursor-pointer"
+                >
+                  {isUpdatingPin ? 'Guardando...' : 'Actualizar PIN'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

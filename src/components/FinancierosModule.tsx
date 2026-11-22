@@ -6,6 +6,8 @@
 import React, { useState, useMemo } from 'react';
 import { Venta, Gasto } from '../types';
 import { formatMoney } from '../utils/metrics';
+import { safeFetchJson } from '../utils/safeFetchJson';
+import { showErrorToast } from '../utils/feedback';
 import {
   DollarSign,
   TrendingUp,
@@ -146,7 +148,7 @@ export default function FinancierosModule({
         }
       });
 
-      const resp = await fetch('/api/financial-filter-chat', {
+      const res = await safeFetchJson<{ answer?: string }>('/api/financial-filter-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -175,10 +177,16 @@ export default function FinancierosModule({
           }
         })
       });
-      const data = await resp.json();
-      setChatMessages(prev => [...prev, { role: 'assistant', content: data.answer || 'Sin respuesta.' }]);
-    } catch (err: any) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Error al consultar con Gemini.' }]);
+      if (!res.ok || !res.data) {
+        setChatMessages(prev => [
+          ...prev,
+          { role: 'assistant', content: res.error || 'No se pudo obtener respuesta del asistente financiero.' }
+        ]);
+      } else {
+        setChatMessages(prev => [...prev, { role: 'assistant', content: res.data?.answer || 'Sin respuesta.' }]);
+      }
+    } catch {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Error de conexión al consultar el asistente financiero.' }]);
     } finally {
       setIsChatLoading(false);
     }
@@ -304,7 +312,7 @@ export default function FinancierosModule({
       const worstDayStr = sortedDays.length > 0 ? `${sortedDays[sortedDays.length - 1][0]} (${formatMoney(sortedDays[sortedDays.length - 1][1])})` : 'Lunes';
       const peakMomentStr = sortedDays[0] ? `Día pico: ${sortedDays[0][0]} (${formatMoney(sortedDays[0][1])})` : 'Fines de semana al mediodía';
 
-      const response = await fetch('/api/financial-deck-ai', {
+      const res = await safeFetchJson('/api/financial-deck-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -341,16 +349,15 @@ export default function FinancierosModule({
         })
       });
 
-      if (!response.ok) {
-        throw new Error('Error al conectar con Gemini para generar el deck');
+      if (!res.ok || !res.data) {
+        throw new Error(res.error || 'No se pudo generar el Deck Financiero.');
       }
 
-      const data = await response.json();
-      setDeckData(data);
+      setDeckData(res.data);
       setIsDeckModalOpen(true);
     } catch (err: any) {
       console.error(err);
-      alert('Hubo un error generando el Deck Financiero: ' + err.message);
+      showErrorToast('Hubo un error generando el Deck Financiero: ' + (err?.message || 'Error de conexión'));
     } finally {
       setIsGeneratingDeck(false);
     }

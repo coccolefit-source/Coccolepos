@@ -4,6 +4,7 @@
 // ==========================================
 
 import { getSupabaseClient, getLocalDateString } from './supabaseClient';
+import { getColombiaIsoTimestamp } from '../utils/dateColombia';
 
 (function () {
   'use strict';
@@ -187,7 +188,7 @@ import { getSupabaseClient, getLocalDateString } from './supabaseClient';
             cliente.from('sales').insert([{
               product_name: '[SUGERIDA] ' + nombreProducto,
               quantity: 1,
-              created_at: new Date().toISOString(),
+              created_at: getColombiaIsoTimestamp(),
               date: getLocalDateString(),
               fecha: getLocalDateString(),
               tipo_venta: 'sugerida'

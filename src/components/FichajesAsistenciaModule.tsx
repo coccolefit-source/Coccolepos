@@ -7,6 +7,8 @@ import React from 'react';
 import { Usuario, Fichaje, Tarea } from '../types';
 import { UserCheck, CheckCircle, FileText } from 'lucide-react';
 import { calcularHorasTurno, getLocalDateString } from '../lib/supabaseClient';
+import { resolveSafeAvatar } from '../utils/avatar';
+import { confirmDialog } from '../utils/feedback';
 
 interface FichajesAsistenciaModuleProps {
   empleados: Usuario[];
@@ -149,17 +151,18 @@ export default function FichajesAsistenciaModule({
                     return (b.hora_entrada || '').localeCompare(a.hora_entrada || '');
                   })
                   .map(f => {
+                    const empName = (f as any).empleado_nombre || (f as any).usuario_nombre || 'Empleado';
                     const emp = usuarios.find(u => u.id === f.usuario_id || u.id === (f as any).empleado_id) || {
                       id: f.usuario_id || (f as any).empleado_id || 'emp',
-                      nombre: (f as any).empleado_nombre || (f as any).usuario_nombre || 'Empleado',
-                      foto_avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'
+                      nombre: empName,
+                      foto_avatar: resolveSafeAvatar(undefined, empName)
                     };
                     const dur = calcularHorasTurno(f.hora_entrada, f.hora_salida);
                     return (
                       <tr key={f.id} className="hover:bg-slate-50 transition-colors">
                         <td className="p-3 flex items-center gap-2.5">
                           <img
-                            src={emp?.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100'}
+                            src={resolveSafeAvatar(emp?.foto_avatar, emp?.nombre || empName)}
                             alt={emp?.nombre}
                             className="w-7 h-7 rounded-full object-cover border border-[#E2E8F0]"
                             referrerPolicy="no-referrer"
@@ -242,8 +245,14 @@ export default function FichajesAsistenciaModule({
                         <td className="p-3 text-right">
                           <button
                             type="button"
-                            onClick={() => {
-                              if (confirm('¿Desea eliminar este registro de asistencia?')) {
+                            onClick={async () => {
+                              const ok = await confirmDialog({
+                                title: 'Eliminar registro de asistencia',
+                                message: '¿Desea eliminar este registro de asistencia?',
+                                confirmLabel: 'Eliminar',
+                                tone: 'danger'
+                              });
+                              if (ok) {
                                 onDeleteFichaje?.(f.id);
                               }
                             }}

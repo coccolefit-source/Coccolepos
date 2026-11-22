@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import {
   Usuario,
   Tarea,
@@ -32,19 +32,28 @@ import {
   Cliente
 } from './types';
 
-// Componentes
-import AnalyticsPanel from './components/AnalyticsPanel';
-import Leaderboard from './components/Leaderboard';
-import AdminDashboard from './components/AdminDashboard';
-import EmployeeWorkspace from './components/EmployeeWorkspace';
+// Componentes ligeros críticos
 import Login from './components/Login';
-import RegistroClientePublico from './components/RegistroClientePublico';
-import TarjetaFidelizacionDigital from './components/TarjetaFidelizacionDigital';
 import { Logo } from './components/Logo';
 import { PushToastContainer } from './components/PushToastContainer';
 import { PoweredByBadge } from './components/PoweredByBadge';
+import ErrorBoundary from './components/ErrorBoundary';
+import { PWAInstallButton } from './components/PWAInstallButton';
 
- // Iconos Lucide
+// Módulos pesados cargados bajo demanda (Code Splitting)
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
+const EmployeeWorkspace = lazy(() => import('./components/EmployeeWorkspace'));
+const RegistroClientePublico = lazy(() => import('./components/RegistroClientePublico'));
+const TarjetaFidelizacionDigital = lazy(() => import('./components/TarjetaFidelizacionDigital'));
+
+const PageLoadingFallback = ({ label = 'Cargando Coccole Fit...' }: { label?: string }) => (
+  <div className="min-h-[60vh] w-full flex flex-col items-center justify-center gap-3 p-8 text-center">
+    <div className="w-8 h-8 rounded-full border-3 border-[#4B9CD3] border-t-transparent animate-spin" />
+    <p className="text-xs font-bold text-slate-500">{label}</p>
+  </div>
+);
+
+// Iconos Lucide
 import {
   User,
   RotateCcw,
@@ -58,12 +67,16 @@ import {
   Wallet
 } from 'lucide-react';
 
-import { getGlobalMetrics, formatMoney } from './utils/metrics';
+import { getGlobalMetrics } from './utils/metrics';
 import { useDevice } from './hooks/useDevice';
+import { getColombiaIsoTimestamp, getColombiaTimeString } from './utils/dateColombia';
+import { getInitialsAvatar } from './utils/avatar';
+import { showErrorToast, showWarningToast, confirmDialog } from './utils/feedback';
 
 // Servicios de Supabase
 import {
   isSupabaseConfigured,
+  fetchPublicStaffListFromSupabase,
   fetchProfilesFromSupabase,
   fetchSalesFromSupabase,
   fetchCustomersFromSupabase,
@@ -159,14 +172,13 @@ export default function App() {
       }
     } catch (e) {}
 
-    let initialClientes: Cliente[] = [];
+    // Nunca persistir ni leer listas completas de clientes (PII) en localStorage
     try {
-      const savedClientes = localStorage.getItem('coccole_clientes');
-      if (savedClientes) {
-        const parsed = JSON.parse(savedClientes);
-        if (Array.isArray(parsed)) initialClientes = parsed;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.removeItem('coccole_clientes');
       }
-    } catch (e) {}
+    } catch {}
+    const initialClientes: Cliente[] = [];
 
     return {
           usuarios: [],
@@ -270,15 +282,13 @@ export default function App() {
     pushNotification(`Solicitud de restablecimiento de PIN enviada para ${empNombre}.`, 'info');
   };
 
-  const handleUpdateUserPin = async (userId: string, newPin: string, newPassword?: string): Promise<boolean> => {
+  const handleUpdateUserPin = async (userId: string, newPin: string, adminPin?: string): Promise<boolean> => {
     const pinLimpio = String(newPin || '').trim();
-    const targetUser = state.usuarios.find(u => u.id === userId);
-    const userName = targetUser?.nombre;
 
     if (isSupabaseConfigured()) {
-      const success = await actualizarPinEnSupabase(userId, pinLimpio);
+      const success = await actualizarPinEnSupabase(userId, pinLimpio, adminPin);
       if (!success) {
-        pushNotification("No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.", "alert");
+        pushNotification("No se pudo actualizar el PIN en el servidor. Intenta de nuevo.", "alert");
         return false;
       }
 
@@ -289,36 +299,13 @@ export default function App() {
           ...prev,
           usuarios: supaProfiles
         }));
-      } else {
-        setState(prev => ({
-          ...prev,
-          usuarios: prev.usuarios.map(u => {
-            if (u.id === userId) {
-              return {
-                ...u,
-          pin: pinLimpio,
-                ...(newPassword ? { password: newPassword } : {})
-              };
-            }
-            return u;
-          })
-        }));
       }
       return true;
     } else {
-       // Sin Supabase configurado, actualizar estado local
+      // Sin Supabase configurado, actualizar estado local
       setState(prev => ({
         ...prev,
-        usuarios: prev.usuarios.map(u => {
-          if (u.id === userId) {
-            return {
-              ...u,
-          pin: pinLimpio,
-              ...(newPassword ? { password: newPassword } : {})
-            };
-          }
-          return u;
-        })
+        usuarios: prev.usuarios.map(u => (u.id === userId ? { ...u, pin: pinLimpio } : u))
       }));
       return true;
     }
@@ -422,11 +409,7 @@ export default function App() {
           });
         }
 
-        try {
-          if (consolidatedClientes.length > 0) {
-            localStorage.setItem('coccole_clientes', JSON.stringify(consolidatedClientes));
-          }
-        } catch (e) {}
+        // Los clientes se mantienen únicamente en memoria y Supabase (sin localStorage PII)
 
         return {
           ...prev,
@@ -494,9 +477,26 @@ export default function App() {
    // Sistema de notificaciones push flotantes
   const [activeToasts, setActiveToasts] = useState<ToastNotification[]>([]);
 
-  // Effect para Sincronización Inicial con Supabase y Realtime Channel
+  // Effect para lista mínima pública de colaboradores en login (sin descargar profiles completos ni datos sensibles)
   useEffect(() => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured() || activeUserRole) return;
+    let cancelled = false;
+    fetchPublicStaffListFromSupabase().then((publicStaff) => {
+      if (!cancelled && publicStaff && publicStaff.length > 0) {
+        setState((prev) => ({
+          ...prev,
+          usuarios: publicStaff
+        }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUserRole]);
+
+  // Effect para Sincronización Inicial con Supabase y Realtime Channel (solo tras autenticación)
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !activeUserRole) return;
 
     async function syncFromSupabase() {
       try {
@@ -548,12 +548,6 @@ export default function App() {
             }
           });
         }
-
-        try {
-          if (consolidatedClientes.length > 0) {
-            localStorage.setItem('coccole_clientes', JSON.stringify(consolidatedClientes));
-          }
-        } catch (e) {}
 
         setState(prev => ({
           ...prev,
@@ -927,7 +921,7 @@ export default function App() {
       email: adminData.email,
       password: adminData.password,
       clave_maestra: adminData.clave_maestra,
-      foto_avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=120'
+      foto_avatar: getInitialsAvatar(adminData.nombre)
     };
 
     setState(prev => ({
@@ -937,6 +931,21 @@ export default function App() {
 
     pushNotification(`Cuenta de Administrador Master "${newAdmin.nombre}" creada con éxito.`, 'success');
     return newAdminId;
+  };
+
+  const handleLoginSuccess = (userId: string, authenticatedUser?: Usuario) => {
+    if (authenticatedUser) {
+      setState(prev => {
+        const exists = prev.usuarios.some(u => u.id === authenticatedUser.id);
+        return {
+          ...prev,
+          usuarios: exists
+            ? prev.usuarios.map(u => (u.id === authenticatedUser.id ? { ...u, ...authenticatedUser } : u))
+            : [...prev.usuarios, authenticatedUser]
+        };
+      });
+    }
+    setActiveUserRole(userId);
   };
 
   // Detección de rutas públicas para Registro de Cliente (/registro-cliente) y Tarjeta Digital Wallet (/tarjeta/:id)
@@ -988,29 +997,33 @@ export default function App() {
 
   if (tarjetaClienteId) {
     return (
-      <>
-        <TarjetaFidelizacionDigital
-          clienteId={tarjetaClienteId}
-          onCambiarCuenta={() => {
-            try {
-              localStorage.removeItem('coccole_cliente_wallet');
-              window.history.pushState({}, '', '/registro-cliente');
-            } catch (e) {}
-            setTarjetaClienteId(null);
-            setIsRegistroClienteRoute(true);
-          }}
-        />
+      <ErrorBoundary moduleName="Tarjeta de Fidelización">
+        <Suspense fallback={<PageLoadingFallback label="Cargando tarjeta de fidelización..." />}>
+          <TarjetaFidelizacionDigital
+            clienteId={tarjetaClienteId}
+            onCambiarCuenta={() => {
+              try {
+                localStorage.removeItem('coccole_cliente_wallet');
+                window.history.pushState({}, '', '/registro-cliente');
+              } catch (e) {}
+              setTarjetaClienteId(null);
+              setIsRegistroClienteRoute(true);
+            }}
+          />
+        </Suspense>
         <PoweredByBadge />
-      </>
+      </ErrorBoundary>
     );
   }
 
   if (isRegistroClienteRoute) {
     return (
-      <>
-        <RegistroClientePublico />
+      <ErrorBoundary moduleName="Registro de Cliente">
+        <Suspense fallback={<PageLoadingFallback label="Cargando registro de fidelización..." />}>
+          <RegistroClientePublico />
+        </Suspense>
         <PoweredByBadge />
-      </>
+      </ErrorBoundary>
     );
   }
 
@@ -1018,10 +1031,13 @@ export default function App() {
   if (!activeUserRole) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-3 sm:p-6 antialiased relative">
+        <div className="fixed top-3 right-3 z-40">
+          <PWAInstallButton />
+        </div>
         <div className="w-full max-w-md mx-auto flex flex-col items-center">
           <Login
             usuarios={state.usuarios}
-            onLogin={setActiveUserRole}
+            onLogin={handleLoginSuccess}
             onCreateAdmin={handleCreateAdmin}
             onRequestPinResetNotification={handleRequestPinResetNotification}
             onUpdateUserPin={handleUpdateUserPin}
@@ -1038,18 +1054,18 @@ export default function App() {
     nombre: (window as any).sesionActual?.nombre || 'Administrador',
     email: 'admin@coccolefit.com',
     rol: 'admin',
-    pin: '1234'
+    pin: ''
   };
   const defaultEmployeeUser: Usuario = {
-    id: activeUserRole || 'usr-shelsy',
-    nombre: (window as any).sesionActual?.nombre || 'Shelsy',
+    id: activeUserRole || 'usr-staff',
+    nombre: (window as any).sesionActual?.nombre || 'Colaborador',
     rol: 'empleado',
-    pin: '1234'
+    pin: ''
   };
   const currentUser = state.usuarios.find(u => 
     u.id === activeUserRole ||
     (Boolean(activeUserRole) && u.nombre?.toLowerCase() === activeUserRole.toLowerCase())
-  ) || (activeUserRole === 'usr-admin' ? defaultAdminUser : defaultEmployeeUser);
+  ) || (activeUserRole === 'usr-admin' || (window as any).sesionActual?.rol === 'admin' ? defaultAdminUser : defaultEmployeeUser);
 
    // Obtener métricas globales del negocio
   const metrics = getGlobalMetrics(state.tareas, state.ventas, state.productos, filtroGeneral);
@@ -1080,7 +1096,7 @@ export default function App() {
       const ok = await insertDailyTaskInSupabase(tarea, assignedName);
       if (!ok) {
         console.error('Error Supabase INSERT: returned false');
-        alert('Error al crear tarea en la nube: No se pudo guardar el registro.');
+        showErrorToast('Error al crear tarea en la nube: No se pudo guardar el registro.');
         
         pushNotification('Fallo al guardar la tarea en la nube.', 'alert');
         return;
@@ -1091,7 +1107,7 @@ export default function App() {
       pushNotification(`Nueva tarea asignada a ${assignedName}.`, 'info');
     } catch (err: any) {
       console.error('Error in handleAddTarea:', err);
-      alert('Error al crear la tarea en la nube: ' + (err?.message || err));
+      showErrorToast('Error al crear la tarea en la nube: ' + (err?.message || err));
     }
   };
 
@@ -1131,7 +1147,7 @@ export default function App() {
 
       if (!allOk) {
         console.error('Error al insertar algunas tareas en Supabase');
-        alert('Algunas tareas no se pudieron guardar en la nube. Verifique la conexión.');
+        showWarningToast('Algunas tareas no se pudieron guardar en la nube. Verifique la conexión.');
       }
 
        // Sincronizar en memoria una sola vez al terminar todo el lote
@@ -1140,7 +1156,7 @@ export default function App() {
       return allOk;
     } catch (err: any) {
       console.error('Error in handleAddTareasBulk:', err);
-      alert('Error al registrar tareas en lote en la nube: ' + (err?.message || err));
+      showErrorToast('Error al registrar tareas en lote en la nube: ' + (err?.message || err));
       return false;
     }
   };
@@ -1164,7 +1180,7 @@ export default function App() {
       const ok = await insertDailyTaskInSupabase(updatedTarea, assignedUser?.nombre);
       if (!ok) {
         console.error('Error Supabase UPDATE: returned false');
-        alert('Error al actualizar la tarea en la nube: No se pudo guardar el registro.');
+        showErrorToast('Error al actualizar la tarea en la nube: No se pudo guardar el registro.');
         
         pushNotification('Fallo al actualizar la tarea en la nube.', 'alert');
         return;
@@ -1175,7 +1191,7 @@ export default function App() {
       pushNotification(`Tarea "${updatedTarea.titulo}" actualizada correctamente.`, 'info');
     } catch (err: any) {
       console.error('Error in handleEditTarea:', err);
-      alert('Error al actualizar la tarea en la nube: ' + (err?.message || err));
+      showErrorToast('Error al actualizar la tarea en la nube: ' + (err?.message || err));
     }
   };
 
@@ -1197,7 +1213,7 @@ export default function App() {
       const ok = await deleteDailyTaskFromSupabase(id);
       if (!ok) {
         console.error('Error Supabase DELETE: returned false');
-        alert('Error al borrar en la nube: No se pudo eliminar el registro.');
+        showErrorToast('Error al borrar en la nube: No se pudo eliminar el registro.');
         
         pushNotification('Fallo al eliminar la tarea de la nube.', 'alert');
         return;
@@ -1208,7 +1224,7 @@ export default function App() {
       pushNotification(`Tarea eliminada: "${deleted.titulo}"`, 'alert');
     } catch (err: any) {
       console.error('Error in handleDeleteTarea:', err);
-      alert('Error inesperado al borrar la tarea en la nube: ' + (err?.message || err));
+      showErrorToast('Error inesperado al borrar la tarea en la nube: ' + (err?.message || err));
     }
   };
 
@@ -1264,8 +1280,8 @@ export default function App() {
     const originalTask = state.tareas.find(t => t.id === id);
     if (!originalTask) return;
 
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    const nowColIso = getColombiaIsoTimestamp();
+    const timeStr = getColombiaTimeString();
 
      // 1. Actualización optimista INMEDIATA del estado local en React (0ms de latencia)
     setState(prev => ({
@@ -1275,10 +1291,10 @@ export default function App() {
           const updated: Tarea = { ...t, estado };
           if (estado === 'En proceso') {
             updated.hora_inicio = t.hora_inicio || timeStr;
-            updated.started_at = t.started_at || now.toISOString();
+            updated.started_at = t.started_at || nowColIso;
           } else if (estado === 'Completada') {
             updated.hora_fin = t.hora_fin || timeStr;
-            updated.completed_at = t.completed_at || now.toISOString();
+            updated.completed_at = t.completed_at || nowColIso;
             if (foto_url) updated.foto_url = foto_url;
             if (nota_evidencia) updated.nota_evidencia = nota_evidencia;
           } else {
@@ -1645,7 +1661,7 @@ export default function App() {
 
   const handleDeleteUsuario = (id: string) => {
     if (id === 'usr-admin') {
-      alert('No se puede eliminar al usuario administrador.');
+      showWarningToast('No se puede eliminar al usuario administrador.');
       return;
     }
     setState(prev => {
@@ -2034,7 +2050,7 @@ export default function App() {
     if (updated && updated.length > 0) {
       setTarjetasRegalo(updated);
     }
-    pushNotification(`Tarjeta Regalo ${card.codigo} por ${formatMoney(card.monto_inicial)} guardada exitosamente en Supabase.`, 'info');
+    pushNotification(`Tarjeta Regalo ${card.codigo} por $${Number(card.monto_inicial || 0).toLocaleString('es-CO')} guardada exitosamente en Supabase.`, 'info');
   };
 
   const handleRedeemTarjetaRegalo = async (codigo: string, monto: number): Promise<{ success: boolean; saldoRestante: number; error?: string }> => {
@@ -2109,7 +2125,7 @@ export default function App() {
       ...newAn,
       id: anId,
       activo: newAn.activo !== undefined ? newAn.activo : true,
-      fecha_creacion: newAn.fecha_creacion || new Date().toISOString()
+      fecha_creacion: newAn.fecha_creacion || getColombiaIsoTimestamp()
     };
 
     setState(prev => ({
@@ -2352,9 +2368,7 @@ export default function App() {
         upsertCustomerInSupabase(newCli);
       }
 
-      try {
-        localStorage.setItem('coccole_clientes', JSON.stringify(updatedClientes));
-      } catch (e) {}
+      // Los clientes se persisten únicamente en Supabase (sin localStorage PII)
     }
 
     setState(prev => ({
@@ -2464,8 +2478,14 @@ export default function App() {
   };
 
   // --- REINICIAR DATOS DEL SIMULADOR ---
-  const handleResetData = () => {
-    if (window.confirm('¿Seguro que deseas reiniciar los datos de simulación? Se borrará todo el historial creado.')) {
+  const handleResetData = async () => {
+    const confirmed = await confirmDialog({
+      title: 'Reiniciar datos locales',
+      message: '¿Seguro que deseas reiniciar los datos de simulación? Se borrará todo el historial local.',
+      confirmLabel: 'Reiniciar',
+      tone: 'danger'
+    });
+    if (confirmed) {
       setActiveUserRole(null);
       setState({ usuarios: [], tareas: [], productos: [], ventas: [], fichajes: [], incidencias: [], anuncios: [], feedbacks: [], inventario: [], horarios: [], productosCatalogo: [], ventasRegistradas: [], alertasPanico: [], cuadresCaja: [], clientes: [] });
     }
@@ -2529,8 +2549,9 @@ export default function App() {
               </button>
           </div>
 
-          {/* Derecha: Botón de reset y simulador */}
+          {/* Derecha: Instalar PWA, alarma sonora y recargar */}
           <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+            <PWAInstallButton />
             {/* Alarma sonora toggle button */}
             <button
               onClick={() => {
@@ -2742,106 +2763,114 @@ export default function App() {
 
         {currentUser.rol === 'admin' ? (
           <div className="w-full">
-            <AdminDashboard
-              openTabs={openTabs}
-              activeTab={activeTab}
-              setActiveTab={handleSelectTab}
-              onCloseTab={handleCloseTab}
-              rankingWeights={rankingWeights}
-              onUpdateRankingWeights={handleUpdateRankingWeights}
-              upsellRules={upsellRules}
-              onUpdateUpsellRules={handleUpdateUpsellRules}
-              usuarios={state.usuarios}
-              tareas={state.tareas}
-              productos={state.productos}
-              ventas={state.ventas}
-              fichajes={state.fichajes}
-              incidencias={state.incidencias}
-              anuncios={state.anuncios}
-              feedbacks={state.feedbacks || []}
-              inventario={state.inventario || []}
-              horarios={state.horarios || []}
-              productosCatalogo={state.productosCatalogo || []}
-              ventasRegistradas={state.ventasRegistradas || []}
-              cuadresCaja={state.cuadresCaja || []}
-              tarjetasRegalo={tarjetasRegalo}
-              onRedeemTarjetaRegalo={handleRedeemTarjetaRegalo}
-              alertasPanico={state.alertasPanico || []}
-              clientes={state.clientes || []}
-              onAddTarea={handleAddTarea}
-              onAddTareasBulk={handleAddTareasBulk}
-              onEditTarea={handleEditTarea}
-              onDeleteTarea={handleDeleteTarea}
-              onDeleteAllTareas={handleDeleteAllTareas}
-              onUpdateTaskOrders={handleUpdateTaskOrders}
-              onAddProducto={handleAddProducto}
-              onEditProducto={handleEditProducto}
-              onDeleteProducto={handleDeleteProducto}
-              onAddAnuncio={handleAddAnuncio}
-              onDeleteAnuncio={handleDeleteAnuncio}
-              onToggleAnuncioActivo={handleToggleAnuncioActivo}
-              onResolveIncidencia={handleResolveIncidencia}
-              onAddFeedback={handleAddFeedback}
-              onCreateUsuario={handleCreateUsuario}
-              onEditUsuario={handleEditUsuario}
-              onDeleteUsuario={handleDeleteUsuario}
-              onSaveInventarioItem={handleSaveInventarioItem}
-              onBulkSaveInventario={handleBulkSaveInventario}
-              onDeleteInventarioItem={handleDeleteInventarioItem}
-              onSaveTurno={handleSaveTurno}
-              onDeleteTurno={handleDeleteTurno}
-              onDeleteFichaje={handleDeleteFichaje}
-              onSaveProductoCatalogo={handleSaveProductoCatalogo}
-              onBulkSaveProductosCatalogo={handleBulkImportCatalog}
-              onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
-              onDuplicarHorarios={handleDuplicarHorarios}
-              onUpdateVenta={handleUpdateVenta}
-              onAnularVenta={handleAnularVenta}
-              gastos={state.gastos || []}
-              onAddTarjetaRegalo={handleAddTarjetaRegalo}
-              onDeleteTarjetaRegalo={handleDeleteTarjetaRegalo}
-              onSaveGasto={handleSaveGasto}
-              onDeleteGasto={handleDeleteGasto}
-            />
+            <ErrorBoundary moduleName="Panel de Administración">
+              <Suspense fallback={<PageLoadingFallback label="Cargando panel de administración..." />}>
+                <AdminDashboard
+                  openTabs={openTabs}
+                  activeTab={activeTab}
+                  setActiveTab={handleSelectTab}
+                  onCloseTab={handleCloseTab}
+                  rankingWeights={rankingWeights}
+                  onUpdateRankingWeights={handleUpdateRankingWeights}
+                  upsellRules={upsellRules}
+                  onUpdateUpsellRules={handleUpdateUpsellRules}
+                  usuarios={state.usuarios}
+                  tareas={state.tareas}
+                  productos={state.productos}
+                  ventas={state.ventas}
+                  fichajes={state.fichajes}
+                  incidencias={state.incidencias}
+                  anuncios={state.anuncios}
+                  feedbacks={state.feedbacks || []}
+                  inventario={state.inventario || []}
+                  horarios={state.horarios || []}
+                  productosCatalogo={state.productosCatalogo || []}
+                  ventasRegistradas={state.ventasRegistradas || []}
+                  cuadresCaja={state.cuadresCaja || []}
+                  tarjetasRegalo={tarjetasRegalo}
+                  onRedeemTarjetaRegalo={handleRedeemTarjetaRegalo}
+                  alertasPanico={state.alertasPanico || []}
+                  clientes={state.clientes || []}
+                  onAddTarea={handleAddTarea}
+                  onAddTareasBulk={handleAddTareasBulk}
+                  onEditTarea={handleEditTarea}
+                  onDeleteTarea={handleDeleteTarea}
+                  onDeleteAllTareas={handleDeleteAllTareas}
+                  onUpdateTaskOrders={handleUpdateTaskOrders}
+                  onAddProducto={handleAddProducto}
+                  onEditProducto={handleEditProducto}
+                  onDeleteProducto={handleDeleteProducto}
+                  onAddAnuncio={handleAddAnuncio}
+                  onDeleteAnuncio={handleDeleteAnuncio}
+                  onToggleAnuncioActivo={handleToggleAnuncioActivo}
+                  onResolveIncidencia={handleResolveIncidencia}
+                  onAddFeedback={handleAddFeedback}
+                  onCreateUsuario={handleCreateUsuario}
+                  onEditUsuario={handleEditUsuario}
+                  onDeleteUsuario={handleDeleteUsuario}
+                  onSaveInventarioItem={handleSaveInventarioItem}
+                  onBulkSaveInventario={handleBulkSaveInventario}
+                  onDeleteInventarioItem={handleDeleteInventarioItem}
+                  onSaveTurno={handleSaveTurno}
+                  onDeleteTurno={handleDeleteTurno}
+                  onDeleteFichaje={handleDeleteFichaje}
+                  onSaveProductoCatalogo={handleSaveProductoCatalogo}
+                  onBulkSaveProductosCatalogo={handleBulkImportCatalog}
+                  onDeleteProductoCatalogo={handleDeleteProductoCatalogo}
+                  onDuplicarHorarios={handleDuplicarHorarios}
+                  onUpdateVenta={handleUpdateVenta}
+                  onAnularVenta={handleAnularVenta}
+                  gastos={state.gastos || []}
+                  onAddTarjetaRegalo={handleAddTarjetaRegalo}
+                  onDeleteTarjetaRegalo={handleDeleteTarjetaRegalo}
+                  onSaveGasto={handleSaveGasto}
+                  onDeleteGasto={handleDeleteGasto}
+                />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         ) : (
           <div className="space-y-6 max-w-7xl mx-auto py-4">
-            <EmployeeWorkspace
-              empleado={currentUser}
-              usuarios={state.usuarios}
-              tareas={state.tareas}
-              productos={state.productos}
-              ventas={state.ventas}
-              fichajes={state.fichajes}
-              incidencias={state.incidencias}
-              anuncios={state.anuncios}
-              feedbacks={state.feedbacks || []}
-              inventario={state.inventario || []}
-              horarios={state.horarios || []}
-              productosCatalogo={state.productosCatalogo || []}
-              ventasRegistradas={state.ventasRegistradas || []}
-              cuadresCaja={state.cuadresCaja || []}
-              clientes={state.clientes || []}
-              posVentas={state.ventasRegistradas}
-              rankingWeights={rankingWeights}
-              upsellRules={upsellRules}
-              notifications={notifications}
-              onResolveIncidencia={handleResolveIncidencia}
-              onUpdateTareaEstado={handleUpdateTareaEstado}
-              onUpdateTaskOrders={handleUpdateTaskOrders}
-              onAddVentaSugerida={handleAddVentaSugerida}
-              onRegistrarFichaje={handleRegistrarFichaje}
-              onAddIncidencia={handleAddIncidencia}
-              onUpdateStock={handleUpdateStock}
-              onRegistrarVenta={handleRegistrarVenta}
-              onRegistrarCuadreCaja={handleRegistrarCuadreCaja}
-              onConfirmarLecturaAnuncio={handleConfirmarLecturaAnuncio}
-              gastos={state.gastos || []}
-              onSaveGasto={handleSaveGasto}
-              onDeleteGasto={handleDeleteGasto}
-              tarjetasRegalo={tarjetasRegalo}
-              onRedeemTarjetaRegalo={handleRedeemTarjetaRegalo}
-            />
+            <ErrorBoundary moduleName="Estación de Trabajo">
+              <Suspense fallback={<PageLoadingFallback label="Cargando estación de trabajo..." />}>
+                <EmployeeWorkspace
+                  empleado={currentUser}
+                  usuarios={state.usuarios}
+                  tareas={state.tareas}
+                  productos={state.productos}
+                  ventas={state.ventas}
+                  fichajes={state.fichajes}
+                  incidencias={state.incidencias}
+                  anuncios={state.anuncios}
+                  feedbacks={state.feedbacks || []}
+                  inventario={state.inventario || []}
+                  horarios={state.horarios || []}
+                  productosCatalogo={state.productosCatalogo || []}
+                  ventasRegistradas={state.ventasRegistradas || []}
+                  cuadresCaja={state.cuadresCaja || []}
+                  clientes={state.clientes || []}
+                  posVentas={state.ventasRegistradas}
+                  rankingWeights={rankingWeights}
+                  upsellRules={upsellRules}
+                  notifications={notifications}
+                  onResolveIncidencia={handleResolveIncidencia}
+                  onUpdateTareaEstado={handleUpdateTareaEstado}
+                  onUpdateTaskOrders={handleUpdateTaskOrders}
+                  onAddVentaSugerida={handleAddVentaSugerida}
+                  onRegistrarFichaje={handleRegistrarFichaje}
+                  onAddIncidencia={handleAddIncidencia}
+                  onUpdateStock={handleUpdateStock}
+                  onRegistrarVenta={handleRegistrarVenta}
+                  onRegistrarCuadreCaja={handleRegistrarCuadreCaja}
+                  onConfirmarLecturaAnuncio={handleConfirmarLecturaAnuncio}
+                  gastos={state.gastos || []}
+                  onSaveGasto={handleSaveGasto}
+                  onDeleteGasto={handleDeleteGasto}
+                  tarjetasRegalo={tarjetasRegalo}
+                  onRedeemTarjetaRegalo={handleRedeemTarjetaRegalo}
+                />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         )}
 

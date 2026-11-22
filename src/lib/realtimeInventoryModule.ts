@@ -3,6 +3,7 @@
 // ==========================================
 
 import { getSupabaseClient } from './supabaseClient';
+import { getColombiaIsoTimestamp } from '../utils/dateColombia';
 
 (function () {
   'use strict';
@@ -77,7 +78,7 @@ import { getSupabaseClient } from './supabaseClient';
           categoria: categoriaBodega,
           current_stock: stockActual,
           stock_actual: stockActual,
-          updated_at: new Date().toISOString()
+          updated_at: getColombiaIsoTimestamp()
         };
 
         // Si existe input de stock minimo y unidad

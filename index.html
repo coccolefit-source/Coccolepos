@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,43 +9,17 @@
     <meta property="og:description" content="Plataforma integral para la gestión de tareas diarias, control de asistencia, registro de incidencias, impulso de ventas sugeridas, cuadre de caja y tableros operativos de Coccole Fit. Herramienta creada por PRIME G." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <script>
-      // Prevent Vite HMR WebSocket errors in iframe environment where HMR is disabled
-      (function () {
-        const OrigWebSocket = window.WebSocket;
-        if (OrigWebSocket) {
-          const PatchedWebSocket = function (url, protocols) {
-            if (protocols === 'vite-hmr' || protocols === 'vite-ping') {
-              return {
-                url: String(url || ''),
-                readyState: 1,
-                OPEN: 1,
-                CONNECTING: 0,
-                CLOSING: 2,
-                CLOSED: 3,
-                send: function () {},
-                close: function () {},
-                addEventListener: function () {},
-                removeEventListener: function () {},
-              };
-            }
-            return protocols !== undefined
-              ? new OrigWebSocket(url, protocols)
-              : new OrigWebSocket(url);
-          };
-          PatchedWebSocket.prototype = OrigWebSocket.prototype;
-          PatchedWebSocket.CONNECTING = OrigWebSocket.CONNECTING;
-          PatchedWebSocket.OPEN = OrigWebSocket.OPEN;
-          PatchedWebSocket.CLOSING = OrigWebSocket.CLOSING;
-          PatchedWebSocket.CLOSED = OrigWebSocket.CLOSED;
-          window.WebSocket = PatchedWebSocket;
-        }
-      })();
-    </script>
+    <meta name="theme-color" content="#4B9CD3" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Coccole POS" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
