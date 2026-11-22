@@ -8,7 +8,7 @@ export const PoweredByBadge: React.FC = () => {
     >
       <div
         className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#0b1320]/95 hover:bg-[#060a12] text-white shadow-2xl shadow-black/50 border border-slate-700/70 backdrop-blur-md transition-all duration-200 cursor-default select-none hover:scale-[1.02] hover:border-sky-500/50"
-        title="Plataforma desarrollada por PRIME G"
+        title="Plataforma desarrollada por E-PRIME G"
       >
         {/* Glowing Geometric Prime Icon (similar to Netlify style) */}
         <div className="relative flex items-center justify-center w-4 h-4 shrink-0">
@@ -41,7 +41,7 @@ export const PoweredByBadge: React.FC = () => {
         {/* Text */}
         <div className="flex items-center gap-1 text-[13px] leading-none whitespace-nowrap">
           <span className="text-slate-300 font-normal">Powered by</span>
-          <span className="font-bold text-white tracking-wide">Prime G</span>
+          <span className="font-bold text-white tracking-wide">E-Prime G</span>
         </div>
       </div>
     </div>
