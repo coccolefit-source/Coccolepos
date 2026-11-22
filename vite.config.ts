@@ -16,6 +16,7 @@ export default defineConfig(() => {
         manifest: false, // Usamos /public/manifest.json como fuente única de verdad
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globIgnores: ['assets/aistudio/**'],
           navigateFallbackDenylist: [/^\/api\//],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         },

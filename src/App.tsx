@@ -311,15 +311,16 @@ export default function App() {
     }
   };
   
-   // Cargar ponderaciones de ranking y reglas de upsell al montar
+   // Cargar ponderaciones de ranking y reglas de upsell al montar y tras autenticación
   useEffect(() => {
+    if (!isSupabaseConfigured() || !activeUserRole) return;
     fetchRankingWeightsFromSupabase().then(weights => {
       if (weights) setRankingWeights(weights);
     });
     fetchUpsellRulesFromSupabase().then(rules => {
       if (rules && rules.length > 0) setUpsellRules(rules);
     });
-  }, []);
+  }, [activeUserRole]);
 
    // Handler para guardar ponderación de ranking
   const handleUpdateRankingWeights = async (newWeights: RankingWeights) => {
@@ -494,9 +495,10 @@ export default function App() {
     };
   }, [activeUserRole]);
 
-  // Effect para Sincronización Inicial con Supabase y Realtime Channel (solo tras autenticación)
+  // Effect para Sincronización Inicial con Supabase y Realtime Channel (se ejecuta al iniciar sesión o recargar autenticado)
   useEffect(() => {
     if (!isSupabaseConfigured() || !activeUserRole) return;
+    let isCancelled = false;
 
     async function syncFromSupabase() {
       try {
@@ -549,6 +551,7 @@ export default function App() {
           });
         }
 
+        if (isCancelled) return;
         setState(prev => ({
           ...prev,
           tareas: supaTasks && supaTasks.length > 0 ? supaTasks : prev.tareas,
@@ -747,13 +750,14 @@ export default function App() {
     );
 
     return () => {
+      isCancelled = true;
       if (typeof unsubscribe === 'function') {
         try {
           unsubscribe();
         } catch (e) {}
       }
     };
-  }, []);
+  }, [activeUserRole]);
 
   const triggerPushToast = (toastData: Omit<ToastNotification, 'id' | 'horaStr'>) => {
     const id = `push-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
