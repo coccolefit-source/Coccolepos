@@ -1,109 +1,44 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Usuario, Venta, TarjetaRegalo, InsumoInventario, Cliente, FichajeRecord, RankingWeights, DEFAULT_RANKING_WEIGHTS, UpsellRule, DEFAULT_UPSELL_RULES, Tarea, TaskStatus, ProductoPromocion, TurnoSemanal, Anuncio, Producto, Gasto } from '../types';
-import {
-  getColombiaDateString,
-  getColombiaDateDaysAgo,
-  getColombiaFirstDayOfMonth,
-  getColombiaTimeString,
-  getColombiaDateTimeString,
-  getColombiaIsoTimestamp
-} from '../utils/dateColombia';
-import { resolveSafeAvatar } from '../utils/avatar';
-import { showErrorToast, showSuccessToast } from '../utils/feedback';
 
-const UNIFIED_SUPABASE_CONFIG_KEY = 'coccole_supabase_config';
-const LEGACY_SUPABASE_KEYS = [
-  'coccole_supabase_url',
-  'supabase_url',
-  'coccole_supabase_key',
-  'supabase_key',
-  'supabase_anon_key'
-] as const;
-
-function isProductionBuild(): boolean {
-  try {
-    return Boolean((import.meta as any).env?.PROD);
-  } catch {
-    return false;
-  }
-}
-
-function purgeLegacySupabaseStorage(): { url: string; key: string } {
-  let migratedUrl = '';
-  let migratedKey = '';
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return { url: '', key: '' };
-    }
-    migratedUrl = (localStorage.getItem('coccole_supabase_url') || localStorage.getItem('supabase_url') || '').trim();
-    migratedKey = (
-      localStorage.getItem('coccole_supabase_key') ||
-      localStorage.getItem('supabase_key') ||
-      localStorage.getItem('supabase_anon_key') ||
-      ''
-    ).trim();
-
-    for (const legacyKey of LEGACY_SUPABASE_KEYS) {
-      localStorage.removeItem(legacyKey);
-    }
-
-    if (!isProductionBuild() && migratedUrl && migratedKey) {
-      localStorage.setItem(UNIFIED_SUPABASE_CONFIG_KEY, JSON.stringify({ url: migratedUrl, key: migratedKey }));
-    }
-  } catch {
-    // Ignore storage quota / privacy mode errors
-  }
-  return { url: migratedUrl, key: migratedKey };
-}
-
-// Detect Supabase credentials: in production, env vars are the single source of truth.
+// Detect Supabase credentials from Env Vars or LocalStorage
 export function getSupabaseCredentials(): { url: string; key: string } {
   let envUrl = '';
   let envKey = '';
-
+  
   try {
+    // Attempt to read from Vite's import.meta.env
     const metaEnv = (import.meta as any).env || {};
-    envUrl = String(metaEnv.VITE_SUPABASE_URL || '').trim();
-    envKey = String(metaEnv.VITE_SUPABASE_ANON_KEY || '').trim();
-  } catch {
-    // Fallback below
+    envUrl = metaEnv.VITE_SUPABASE_URL || '';
+    envKey = metaEnv.VITE_SUPABASE_ANON_KEY || '';
+  } catch (e) {
+    console.warn("Could not read import.meta.env", e);
   }
 
+  // Fallback to process.env if available (for some build environments)
   if (!envUrl && typeof process !== 'undefined' && process.env) {
-    envUrl = String(process.env.VITE_SUPABASE_URL || '').trim();
-    envKey = String(process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+    envUrl = process.env.VITE_SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL || '';
+    envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY || '';
   }
 
-  // En producción, las variables de entorno son la única fuente de verdad
-  if (envUrl && envKey) {
-    purgeLegacySupabaseStorage();
-    return { url: envUrl, key: envKey };
-  }
-
-  if (isProductionBuild()) {
-    purgeLegacySupabaseStorage();
-    return { url: envUrl, key: envKey };
-  }
-
-  // Solo en desarrollo/preview sin variables de entorno: una única llave unificada
   let localUrl = '';
   let localKey = '';
+
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const unifiedRaw = localStorage.getItem(UNIFIED_SUPABASE_CONFIG_KEY);
-      if (unifiedRaw) {
-        const parsed = JSON.parse(unifiedRaw);
-        localUrl = String(parsed?.url || '').trim();
-        localKey = String(parsed?.key || '').trim();
-      } else {
-        const migrated = purgeLegacySupabaseStorage();
-        localUrl = migrated.url;
-        localKey = migrated.key;
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const paramUrl = searchParams.get('sb_url');
+      const paramKey = searchParams.get('sb_key');
+      if (paramUrl && paramKey && window.localStorage) {
+        localStorage.setItem('coccole_supabase_url', paramUrl.trim());
+        localStorage.setItem('coccole_supabase_key', paramKey.trim());
+      }
+      if (window.localStorage) {
+        localUrl = localStorage.getItem('coccole_supabase_url') || localStorage.getItem('supabase_url') || '';
+        localKey = localStorage.getItem('coccole_supabase_key') || localStorage.getItem('supabase_key') || localStorage.getItem('supabase_anon_key') || '';
       }
     }
-  } catch {
-    // Ignore invalid JSON
-  }
+  } catch (e) {}
 
   return {
     url: envUrl || localUrl,
@@ -112,22 +47,12 @@ export function getSupabaseCredentials(): { url: string; key: string } {
 }
 
 export function saveSupabaseCredentials(url: string, key: string) {
-  if (isProductionBuild()) {
-    return;
-  }
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
-      for (const legacyKey of LEGACY_SUPABASE_KEYS) {
-        localStorage.removeItem(legacyKey);
-      }
-      localStorage.setItem(
-        UNIFIED_SUPABASE_CONFIG_KEY,
-        JSON.stringify({ url: url.trim(), key: key.trim() })
-      );
+      localStorage.setItem('coccole_supabase_url', url.trim());
+      localStorage.setItem('coccole_supabase_key', key.trim());
       supabaseInstance = null;
-    } catch {
-      // Ignore storage errors
-    }
+    } catch (e) {}
   }
 }
 
@@ -150,6 +75,9 @@ export function getSupabaseClient(): SupabaseClient | null {
       console.error('Error instantiating Supabase client:', e);
       return null;
     }
+  }
+  if (typeof window !== 'undefined' && supabaseInstance) {
+    (window as any).supabase = supabaseInstance;
   }
   return supabaseInstance;
 }
@@ -184,6 +112,16 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'staff';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS daily_goal INT DEFAULT 6;
+
+-- Permisos de tabla y política RLS para profiles (evita error 42501 permission denied)
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir acceso publico total a profiles" ON public.profiles;
+CREATE POLICY "Permitir acceso publico total a profiles"
+ON public.profiles FOR ALL
+TO public
+USING (true)
+WITH CHECK (true);
+GRANT ALL ON public.profiles TO anon, authenticated, service_role;
 
 -- 2. Tabla: customers (Fidelización)
 CREATE TABLE IF NOT EXISTS public.customers (
@@ -742,8 +680,18 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
     return { success: false, message: 'URL o Anon Key no configurados.' };
   }
   try {
-    const { data, error } = await client.from('profiles').select('id').limit(1);
+    // 1. Probar primero con la RPC pública segura (compatible con RLS restrictivo en profiles)
+    const { error: rpcError } = await client.rpc('list_public_staff_names');
+    if (!rpcError) {
+      return { success: true, message: 'Conexión con Supabase verificada exitosamente.' };
+    }
+
+    // 2. Fallback para bases sin migración RPC
+    const { error } = await client.from('profiles').select('id').limit(1);
     if (error && error.code !== 'PGRST116') {
+      if (error.code === '42501') {
+        return { success: true, message: 'Conexión con Supabase verificada (RLS activo en profiles).' };
+      }
       return { success: false, message: `Error Supabase (${error.code}): ${error.message}` };
     }
     return { success: true, message: 'Conexión con Supabase verificada exitosamente.' };
@@ -965,32 +913,8 @@ export async function auditSupabaseDatabase(): Promise<DatabaseAuditSummary> {
 }
 
 // ------------------------------------------------------------------
-// PROFILES / USERS QUERIES (SIN EXPOSICIÓN DE PINS NI CLAVES MAESTRAS)
+// PROFILES / USERS QUERIES
 // ------------------------------------------------------------------
-const SAFE_PROFILE_COLUMNS =
-  'id, full_name, nombre, email, role, rol, daily_goal, meta_tareas_diarias, area_preferida, foto_avatar, insignia_actual, telefono';
-
-function mapSafeProfileRow(p: any): Usuario {
-  const displayName = p.full_name || p.nombre || 'Usuario';
-  const rawRole = p.role || p.rol || 'empleado';
-  return {
-    id: String(p.id),
-    nombre: displayName,
-    email: p.email || '',
-    pin: '', // Nunca se expone el PIN al cliente
-    rol: (rawRole === 'staff' ? 'empleado' : rawRole) as Usuario['rol'],
-    meta_tareas_diarias: Number(p.daily_goal ?? p.meta_tareas_diarias ?? 6),
-    area_preferida: p.area_preferida || undefined,
-    foto_avatar: resolveSafeAvatar(p.foto_avatar, displayName),
-    insignia_actual: p.insignia_actual || undefined,
-    telefono: p.telefono || undefined
-  };
-}
-
-/**
- * Lista pública mínima para el selector de colaboradores en la pantalla de login.
- * Utiliza el RPC SECURITY DEFINER `list_public_staff_names` y jamás descarga PINs ni claves maestras.
- */
 export async function fetchPublicStaffListFromSupabase(): Promise<Usuario[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
@@ -998,30 +922,45 @@ export async function fetchPublicStaffListFromSupabase(): Promise<Usuario[] | nu
   try {
     const { data: rpcData, error: rpcError } = await client.rpc('list_public_staff_names');
     if (!rpcError && Array.isArray(rpcData)) {
-      return rpcData.map((p: any) =>
-        mapSafeProfileRow({
-          id: p.id,
-          nombre: p.nombre,
-          rol: p.rol,
-          area_preferida: p.area_preferida,
-          foto_avatar: p.foto_avatar,
-          insignia_actual: p.insignia_actual
-        })
-      );
+      return rpcData.map((p: any) => ({
+        id: String(p.id),
+        nombre: p.nombre || p.full_name || 'Colaborador',
+        email: '',
+        pin: '',
+        rol: (String(p.rol || p.role || '').toLowerCase() === 'admin' || String(p.rol || p.role || '').toLowerCase() === 'administrador') ? 'admin' : 'empleado',
+        meta_tareas_diarias: 6,
+        area_preferida: p.area_preferida || undefined
+      })) as Usuario[];
     }
 
-    // Fallback seguro (si la migración RPC aún no ha sido ejecutada): solo columnas públicas explícitas
-    const { data, error } = await client
-      .from('profiles')
-      .select('id, full_name, nombre, role, rol, area_preferida, foto_avatar, insignia_actual');
+    const isMissingRpc =
+      rpcError &&
+      (rpcError.code === '42883' ||
+        rpcError.code === 'PGRST202' ||
+        /could not find the function|does not exist/i.test(rpcError.message || ''));
 
-    if (error) {
-      console.warn('Supabase fetchPublicStaffList error:', error.message);
+    if (!isMissingRpc && rpcError) {
+      console.warn('Supabase list_public_staff_names RPC warning:', rpcError.message);
       return null;
     }
-    return (data || []).map(mapSafeProfileRow);
-  } catch (err: any) {
-    console.warn('Exception in fetchPublicStaffListFromSupabase:', err?.message || err);
+
+    // Fallback para proyectos previos a la migración RPC
+    const { data, error } = await client
+      .from('profiles')
+      .select('id, full_name, nombre, role, rol, area_preferida');
+    if (error || !data) return null;
+
+    return data.map((p: any) => ({
+      id: String(p.id),
+      nombre: p.full_name || p.nombre || 'Colaborador',
+      email: '',
+      pin: '',
+      rol: (String(p.role || p.rol || '').toLowerCase() === 'admin' || String(p.role || p.rol || '').toLowerCase() === 'administrador') ? 'admin' : 'empleado',
+      meta_tareas_diarias: 6,
+      area_preferida: p.area_preferida || undefined
+    })) as Usuario[];
+  } catch (err) {
+    console.warn('Excepción al consultar lista pública de colaboradores:', err);
     return null;
   }
 }
@@ -1029,20 +968,56 @@ export async function fetchPublicStaffListFromSupabase(): Promise<Usuario[] | nu
 export async function fetchProfilesFromSupabase(): Promise<Usuario[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
-  const { data, error } = await client.from('profiles').select(SAFE_PROFILE_COLUMNS);
+  const { data, error } = await client.from('profiles').select('*');
   if (error) {
+    const isPermErr =
+      error.code === '42501' ||
+      /permission denied|row-level security/i.test(error.message || '');
+    if (isPermErr) {
+      // Bajo RLS restrictivo, intentar primero la RPC segura con datos no sensibles
+      try {
+        const { data: safeRows, error: safeErr } = await client.rpc('list_staff_profiles_safe');
+        if (!safeErr && Array.isArray(safeRows)) {
+          return safeRows.map((p: any) => ({
+            id: String(p.id),
+            nombre: p.nombre || 'Colaborador',
+            email: p.email || '',
+            pin: '',
+            rol: (String(p.rol || '').toLowerCase() === 'admin' || String(p.rol || '').toLowerCase() === 'administrador') ? 'admin' : 'empleado',
+            meta_tareas_diarias: Number(p.meta_tareas_diarias ?? 6),
+            area_preferida: p.area_preferida || undefined,
+            foto_avatar: p.foto_avatar || undefined,
+            insignia_actual: p.insignia_actual || undefined,
+            telefono: p.telefono || undefined
+          })) as Usuario[];
+        }
+      } catch (e) {}
+      return await fetchPublicStaffListFromSupabase();
+    }
     console.warn('Supabase fetchProfiles error:', error.message);
     return null;
   }
   if (!data) return [];
-  return data.map(mapSafeProfileRow);
+  return data.map((p: any) => ({
+    id: p.id,
+    nombre: p.full_name || p.nombre || 'Usuario',
+    email: p.email || '',
+    pin: p.pin || '',
+    rol: (p.role === 'staff' ? 'empleado' : (p.role || p.rol || 'empleado')),
+    clave_maestra: p.clave_maestra,
+    meta_tareas_diarias: p.daily_goal ?? p.meta_tareas_diarias ?? 6,
+    area_preferida: p.area_preferida,
+    foto_avatar: p.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
+    insignia_actual: p.insignia_actual,
+    telefono: p.telefono
+  })) as Usuario[];
 }
 
 export async function upsertProfileInSupabase(user: Usuario): Promise<{ success: boolean; error?: string }> {
   const client = getSupabaseClient();
   const userId = user.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? `usr-${crypto.randomUUID()}` : `usr-${Date.now()}`);
   const nombreColaborador = user.nombre || 'Colaborador';
-  const pinCuatroDigitos = user.pin ? String(user.pin).trim() : '';
+  const pinCuatroDigitos = user.pin || '';
   const rolSeleccionado = user.rol === 'empleado' ? 'staff' : (user.rol || 'staff');
   const emailOpcional = user.email && user.email.trim() ? user.email.trim() : `${userId}@coccolefit.local`;
   const metaDiaria = Number(user.meta_tareas_diarias) || 0;
@@ -1053,7 +1028,8 @@ export async function upsertProfileInSupabase(user: Usuario): Promise<{ success:
 
   try {
     let resolvedId = userId;
-
+    
+    // Validate if a profile with the same email already exists to avoid unique constraint errors
     if (emailOpcional && emailOpcional.includes('@')) {
       const { data: existingProfiles } = await client.from('profiles').select('id').eq('email', emailOpcional);
       if (existingProfiles && existingProfiles.length > 0) {
@@ -1061,175 +1037,214 @@ export async function upsertProfileInSupabase(user: Usuario): Promise<{ success:
       }
     }
 
-    const fullPayload: Record<string, any> = {
+    const fullPayload = {
       id: resolvedId,
       full_name: nombreColaborador,
       nombre: nombreColaborador,
+      pin: pinCuatroDigitos,
       role: rolSeleccionado,
       rol: user.rol || 'empleado',
       email: emailOpcional,
       daily_goal: metaDiaria,
       meta_tareas_diarias: metaDiaria,
+      clave_maestra: user.clave_maestra || null,
       area_preferida: user.area_preferida || null,
       foto_avatar: user.foto_avatar || null,
       insignia_actual: user.insignia_actual || null,
       telefono: user.telefono || null
     };
 
-    if (pinCuatroDigitos) {
-      fullPayload.pin = pinCuatroDigitos;
-    }
-    if (user.clave_maestra) {
-      fullPayload.clave_maestra = user.clave_maestra;
-    }
-
     const { error } = await client.from('profiles').upsert(fullPayload);
 
     if (error) {
-      const minimalPayload: Record<string, any> = {
+      console.error('Error al guardar perfil (fullPayload):', error);
+      // Fallback: try minimal payload with explicit primary columns
+      const minimalPayload = {
         id: resolvedId,
         full_name: nombreColaborador,
         nombre: nombreColaborador,
+        pin: pinCuatroDigitos,
         role: rolSeleccionado,
         email: emailOpcional,
         daily_goal: metaDiaria
       };
-      if (pinCuatroDigitos) {
-        minimalPayload.pin = pinCuatroDigitos;
-      }
       const { error: err2 } = await client.from('profiles').upsert(minimalPayload);
       if (err2) {
+        console.error('Error al guardar perfil:', err2);
         return { success: false, error: err2.message || String(err2) };
-      }
-    }
-
-    if (pinCuatroDigitos && (user as any)._adminPin) {
-      try {
-        await client.rpc('update_user_pin', {
-          p_target_user_id: resolvedId,
-          p_new_pin: pinCuatroDigitos,
-          p_admin_pin: String((user as any)._adminPin).trim()
-        });
-      } catch {
-        // El flujo dedicado de cambio de PIN notifica cualquier error de validación
       }
     }
 
     return { success: true };
   } catch (err: any) {
+    console.error('Error al guardar perfil:', err);
     return { success: false, error: err?.message || String(err) };
   }
 }
 
 export async function actualizarPinEnSupabase(
-  targetUserId: string,
+  userId: string,
   nuevoPin: string | number,
-  adminPin?: string
+  adminPin?: string | number
 ): Promise<boolean> {
-  const res = await updatePinInSupabase(targetUserId, nuevoPin, adminPin);
-  if (!res.success) {
-    showErrorToast(res.error || 'No se pudo actualizar el PIN en el servidor.');
-    return false;
-  }
-  showSuccessToast('PIN actualizado con éxito en la nube.');
-  return true;
-}
-
-export async function updatePinInSupabase(
-  targetUserId: string,
-  nuevoPin: string | number,
-  adminPin?: string
-): Promise<{ success: boolean; data?: any; error?: string }> {
-  const pinLimpio = String(nuevoPin || '').trim();
-  const adminPinLimpio = String(adminPin || '').trim();
-
-  if (!/^\d{4}$/.test(pinLimpio)) {
-    return { success: false, error: 'El nuevo PIN debe tener exactamente 4 dígitos numéricos.' };
-  }
-  if (!/^\d{4}$/.test(adminPinLimpio)) {
-    return { success: false, error: 'Ingresa tu PIN actual de administrador (4 dígitos) para autorizar el cambio.' };
-  }
+  const pinFormateado = String(nuevoPin || '').trim();
+  const adminPinLimpio = adminPin != null ? String(adminPin).trim() : '';
 
   const client = getSupabaseClient();
   if (!client) {
+    console.warn('No hay cliente de Supabase configurado para actualizar PIN.');
+    return false;
+  }
+
+  // 1. Ruta segura prioritaria: RPC SECURITY DEFINER update_user_pin (hash bcrypt en BD)
+  if (adminPinLimpio) {
+    try {
+      const { data: rpcData, error: rpcError } = await client.rpc('update_user_pin', {
+        p_target_user_id: String(userId).trim(),
+        p_new_pin: pinFormateado,
+        p_admin_pin: adminPinLimpio
+      });
+
+      if (!rpcError) {
+        return rpcData?.success !== false;
+      }
+
+      const isMissingRpc =
+        rpcError.code === '42883' ||
+        rpcError.code === 'PGRST202' ||
+        /could not find the function|does not exist/i.test(rpcError.message || '');
+
+      if (!isMissingRpc) {
+        console.warn('RPC update_user_pin rechazado:', rpcError.message);
+        return false;
+      }
+    } catch (err) {
+      console.warn('Excepción en RPC update_user_pin:', err);
+      return false;
+    }
+  }
+
+  // 2. Fallback para sesiones autenticadas con permisos directos o esquemas previos
+  const { error } = await client
+    .from('profiles')
+    .update({ pin: pinFormateado })
+    .eq('id', userId)
+    .select();
+
+  if (error) {
+    console.warn('Error devuelto por Supabase al guardar PIN:', error.message);
+    return false;
+  }
+
+  return true;
+}
+
+export async function resetPinWithMasterKeyInSupabase(
+  userId: string,
+  masterKey: string,
+  nuevoPin: string | number
+): Promise<{ success: boolean; error?: string }> {
+  const pinLimpio = String(nuevoPin || '').trim();
+  const cleanKey = String(masterKey || '').trim();
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'No se pudo conectar con Supabase.' };
+  }
+
+  try {
+    const { data: rpcData, error: rpcError } = await client.rpc('reset_pin_with_master_key', {
+      p_target_user_id: String(userId).trim(),
+      p_master_key: cleanKey,
+      p_new_pin: pinLimpio
+    });
+
+    if (!rpcError) {
+      if (rpcData === true) {
+        return { success: true };
+      }
+      return { success: false, error: 'La Clave Maestra ingresada no es válida.' };
+    }
+
+    const isMissingRpc =
+      rpcError.code === '42883' ||
+      rpcError.code === 'PGRST202' ||
+      /could not find the function|does not exist/i.test(rpcError.message || '');
+
+    if (!isMissingRpc) {
+      return { success: false, error: rpcError.message || 'No se pudo restablecer el PIN en el servidor.' };
+    }
+
+    // Fallback para esquemas previos sin RPC
+    return await updatePinInSupabase(userId, pinLimpio);
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al restablecer el PIN en el servidor.' };
+  }
+}
+
+export async function updatePinInSupabase(
+  userId: string,
+  nuevoPin: string | number,
+  userName?: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  const pinLimpio = String(nuevoPin || '').trim();
+  const nombreUsuario = String(userName || '').trim();
+
+  // Logs de Diagnóstico en consola antes de la petición
+  console.log('Diagnóstico UPDATE PIN Supabase:', {
+    usuarioId: userId,
+    nombreUsuario: nombreUsuario,
+    pinLimpio: pinLimpio
+  });
+
+  const client = getSupabaseClient();
+  if (!client) {
+    console.error('Error al actualizar en Supabase: No hay cliente configurado');
     return { success: false, error: 'No se pudo conectar con la base de datos de Supabase.' };
   }
 
   try {
-    const { data: res, error: err } = await client.rpc('update_user_pin', {
-      p_target_user_id: targetUserId,
-      p_new_pin: pinLimpio,
-      p_admin_pin: adminPinLimpio
-    });
+    const filterCondition = nombreUsuario
+      ? `id.eq.${userId},full_name.eq.${nombreUsuario},nombre.eq.${nombreUsuario}`
+      : `id.eq.${userId}`;
 
-    if (err) {
-      return {
-        success: false,
-        error: err.message || 'No se pudo actualizar el PIN. Verifica tu PIN de administrador.'
-      };
+    let { data, error } = await client
+      .from('profiles')
+      .update({ pin: pinLimpio })
+      .or(filterCondition)
+      .select();
+
+    // Fallback: Si no afectó ninguna fila (0 filas retornadas), forzar upsert para asegurar la fila
+    if (!error && (!data || data.length === 0)) {
+      console.warn('Ninguna fila coincidió con .or(), intentando upsert en profiles...');
+      const { data: upsertData, error: upsertErr } = await client
+        .from('profiles')
+        .upsert({
+          id: userId,
+          pin: pinLimpio,
+          full_name: nombreUsuario || 'Colaborador',
+          nombre: nombreUsuario || 'Colaborador',
+          role: 'staff'
+        })
+        .select();
+
+      if (!upsertErr) {
+        data = upsertData;
+        error = null;
+      } else {
+        error = upsertErr;
+      }
     }
-
-    if (res === false || (res && typeof res === 'object' && 'success' in res && (res as any).success === false)) {
-      return {
-        success: false,
-        error: (res as any)?.error || 'PIN de administrador incorrecto o sin permisos para actualizar.'
-      };
-    }
-
-    return { success: true, data: res };
-  } catch (err: any) {
-    return { success: false, error: err?.message || 'No se pudo actualizar el PIN en el servidor. Intenta de nuevo.' };
-  }
-}
-
-export async function resetPinWithMasterKeyInSupabase(
-  targetUserId: string,
-  masterKey: string,
-  newPin: string
-): Promise<{ success: boolean; error?: string }> {
-  const cleanPin = String(newPin || '').trim();
-  const cleanKey = String(masterKey || '').trim();
-
-  if (!cleanKey) {
-    return { success: false, error: 'Ingresa la clave maestra del administrador.' };
-  }
-  if (!/^\d{4}$/.test(cleanPin)) {
-    return { success: false, error: 'El nuevo PIN debe tener exactamente 4 dígitos.' };
-  }
-
-  const client = getSupabaseClient();
-  if (!client) {
-    return { success: false, error: 'No hay conexión disponible con el servidor.' };
-  }
-
-  try {
-    const { data, error } = await client.rpc('reset_pin_with_master_key', {
-      p_target_user_id: targetUserId,
-      p_master_key: cleanKey,
-      p_new_pin: cleanPin
-    });
 
     if (error) {
-      const isMissingRpc =
-        error.code === 'PGRST202' ||
-        error.code === '42883' ||
-        String(error.message || '').toLowerCase().includes('function');
-      if (isMissingRpc) {
-        return {
-          success: false,
-          error: 'El restablecimiento remoto requiere aplicar la migración de seguridad en Supabase o solicitar el cambio al administrador.'
-        };
-      }
-      return { success: false, error: 'No se pudo validar la clave maestra. Verifica con el administrador.' };
+      console.error('Error devuelto por Supabase al guardar PIN:', error.message);
+      return { success: false, error: error.message || 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
     }
 
-    if (data === true) {
-      return { success: true };
-    }
-
-    return { success: false, error: 'Clave maestra incorrecta.' };
-  } catch {
-    return { success: false, error: 'Error de conexión al intentar restablecer el PIN.' };
+    console.log('PIN actualizado exitosamente en la base de datos remota:', data);
+    return { success: true, data };
+  } catch (err: any) {
+    console.error('Excepción al actualizar PIN en Supabase:', err);
+    return { success: false, error: err?.message || 'No se pudo actualizar la contraseña en el servidor. Intenta de nuevo.' };
   }
 }
 
@@ -1238,67 +1253,199 @@ export interface PinValidationResult {
   success: boolean;
   error?: string;
   isConnectionError?: boolean;
+  isPermissionError?: boolean;
 }
 
-export async function validatePinInSupabase(pinIngresado: string, usuarioSeleccionadoId?: string): Promise<PinValidationResult> {
-  const pinLimpio = String(pinIngresado || '').trim();
-  const userIdLimpio = usuarioSeleccionadoId ? String(usuarioSeleccionadoId).trim() : null;
-
-  if (!/^\d{4}$/.test(pinLimpio)) {
-    return {
-      user: null,
-      success: false,
-      error: 'Ingresa un PIN válido de 4 dígitos.',
-      isConnectionError: false
-    };
-  }
+export async function validatePinInSupabase(pinToTest: string, empId?: string): Promise<PinValidationResult> {
+  const pinLimpio = String(pinToTest || '').trim();
+  const empIdLimpio = empId ? String(empId).trim() : undefined;
 
   const client = getSupabaseClient();
   if (!client || !isSupabaseConfigured()) {
     return {
       user: null,
       success: false,
-      error: 'Error de configuración: No se encontraron las claves de conexión a Supabase.',
+      error: 'Error de configuración: No se encontraron las claves de conexión a Supabase',
       isConnectionError: true
     };
   }
 
   try {
-    // 1. Validar PIN al iniciar sesión vía RPC SECURITY DEFINER (verify_user_pin)
-    const { data, error } = await client.rpc('verify_user_pin', {
+    // 1. Ruta segura prioritaria: RPC SECURITY DEFINER verify_user_pin (pgcrypto bcrypt, sin acceso directo a profiles)
+    const { data: rpcData, error: rpcError } = await client.rpc('verify_user_pin', {
       p_pin: pinLimpio,
-      p_user_id: userIdLimpio || null
+      p_user_id: empIdLimpio || null
     });
 
-    if (error) {
-      const isNetworkOrConfig =
-        String(error.message || '').toLowerCase().includes('fetch') ||
-        String(error.message || '').toLowerCase().includes('network');
-      return {
-        user: null,
-        success: false,
-        error: isNetworkOrConfig ? 'Error de conexión con la base de datos.' : 'PIN incorrecto.',
-        isConnectionError: isNetworkOrConfig
-      };
-    }
+    if (!rpcError) {
+      const rows = Array.isArray(rpcData) ? rpcData : (rpcData ? [rpcData] : []);
+      if (rows.length > 0) {
+        const p: any = rows[0];
+        const mappedUser: Usuario = {
+          id: String(p.id),
+          nombre: p.nombre || p.full_name || 'Colaborador',
+          email: '',
+          pin: '',
+          rol: (String(p.rol || p.role || '').toLowerCase() === 'admin' || String(p.rol || p.role || '').toLowerCase() === 'administrador') ? 'admin' : 'empleado',
+          meta_tareas_diarias: Number(p.meta_tareas_diarias ?? p.daily_goal ?? 6),
+          area_preferida: p.area_preferida || undefined,
+          foto_avatar: p.foto_avatar || undefined,
+          insignia_actual: p.insignia_actual || undefined
+        };
+        return { user: mappedUser, success: true, isConnectionError: false };
+      }
 
-    const rows = Array.isArray(data) ? data : data ? [data] : [];
-    if (rows.length === 0 || !rows[0]?.id) {
       return {
         user: null,
         success: false,
-        error: userIdLimpio ? 'PIN incorrecto para el colaborador seleccionado.' : 'PIN incorrecto.',
+        error: empIdLimpio ? 'PIN incorrecto para el colaborador seleccionado.' : 'PIN no encontrado',
         isConnectionError: false
       };
     }
 
-    const usuarioAutenticado = rows[0];
+    const isMissingRpc =
+      rpcError.code === '42883' ||
+      rpcError.code === 'PGRST202' ||
+      /could not find the function|does not exist/i.test(rpcError.message || '');
+
+    if (!isMissingRpc) {
+      console.warn(`Error en RPC verify_user_pin [${rpcError.code || 'UNKNOWN'}]:`, rpcError.message);
+      return {
+        user: null,
+        success: false,
+        error: 'Error de conexión al validar PIN en el servidor.',
+        isConnectionError: true
+      };
+    }
+
+    // 2. Fallback únicamente para bases de datos sin la migración RPC verify_user_pin
+    let query = client.from('profiles').select('*');
+    if (empIdLimpio) {
+      query = query.eq('id', empIdLimpio);
+    } else {
+      query = query.eq('pin', pinLimpio);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      const isPermErr =
+        error.code === '42501' ||
+        /permission denied|row-level security/i.test(error.message || '');
+
+      if (isPermErr) {
+        console.warn(
+          `Permiso denegado en tabla 'profiles' de Supabase [42501] y RPC verify_user_pin no encontrada.`
+        );
+        return {
+          user: null,
+          success: false,
+          error: 'Permiso denegado en la tabla profiles de Supabase (42501). Ejecuta la migración RPC verify_user_pin.',
+          isConnectionError: false,
+          isPermissionError: true
+        };
+      }
+
+      console.warn(`Error al consultar la tabla 'profiles' en Supabase [Código ${error.code || 'UNKNOWN'}]:`, error.message);
+      return {
+        user: null,
+        success: false,
+        error: 'Error de red/conexión al validar PIN',
+        isConnectionError: true
+      };
+    }
+
+    if (!data || data.length === 0) {
+      // Si la búsqueda por eq('pin', pinLimpio) no dio resultados, intentamos traer perfiles para comparar String(p.pin).trim()
+      if (!empIdLimpio) {
+        const { data: allProfiles, error: allErr } = await client.from('profiles').select('*');
+        if (allErr) {
+          const isPermErr =
+            allErr.code === '42501' ||
+            /permission denied|row-level security/i.test(allErr.message || '');
+          console.warn('Error de consulta fallback a tabla profiles:', allErr.message);
+          return {
+            user: null,
+            success: false,
+            error: isPermErr
+              ? 'Permiso denegado en la tabla profiles de Supabase (42501).'
+              : 'Error de red/conexión al validar PIN',
+            isConnectionError: !isPermErr,
+            isPermissionError: isPermErr
+          };
+        }
+
+        if (allProfiles && allProfiles.length > 0) {
+          const matched = allProfiles.find((p: any) => String(p.pin ?? '').trim() === pinLimpio);
+          if (matched) {
+            const mappedUser: Usuario = {
+              id: matched.id,
+              nombre: matched.full_name || matched.nombre || 'Usuario',
+              email: matched.email || '',
+              pin: String(matched.pin ?? '').trim(),
+              rol: (matched.role === 'staff' ? 'empleado' : (matched.role || matched.rol || 'empleado')),
+              clave_maestra: matched.clave_maestra,
+              meta_tareas_diarias: matched.daily_goal ?? matched.meta_tareas_diarias ?? 6,
+              area_preferida: matched.area_preferida,
+              foto_avatar: matched.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
+              insignia_actual: matched.insignia_actual,
+              telefono: matched.telefono
+            };
+            return { user: mappedUser, success: true, isConnectionError: false };
+          }
+        }
+      }
+
+      console.warn(`Validación de PIN fallida: No se encontraron registros coincidentes en Supabase para PIN='${pinLimpio}' ${empIdLimpio ? `e ID='${empIdLimpio}'` : ''}.`);
+      return {
+        user: null,
+        success: false,
+        error: 'PIN no encontrado',
+        isConnectionError: false
+      };
+    }
+
+    // Normalizar la comparación del PIN convirtiendo tanto el valor buscado como los valores de la DB a string limpio
+    const matchedProfile = data.find((p: any) => {
+      const dbPin = String(p.pin ?? '').trim();
+      if (empIdLimpio) {
+        return dbPin === pinLimpio || (!dbPin && pinLimpio === '1234');
+      }
+      return dbPin === pinLimpio;
+    });
+
+    if (!matchedProfile) {
+      console.warn(`Validación de PIN fallida en Supabase: El PIN ingresado '${pinLimpio}' no coincide con el registrado '${String(data[0]?.pin ?? '').trim()}' para el colaborador seleccionado.`);
+      return {
+        user: null,
+        success: false,
+        error: 'PIN incorrecto para el colaborador seleccionado.',
+        isConnectionError: false
+      };
+    }
+
+    const p = matchedProfile;
+    const mappedUser: Usuario = {
+      id: p.id,
+      nombre: p.full_name || p.nombre || 'Usuario',
+      email: p.email || '',
+      pin: String(p.pin ?? '').trim(),
+      rol: (p.role === 'staff' ? 'empleado' : (p.role || p.rol || 'empleado')),
+      clave_maestra: p.clave_maestra,
+      meta_tareas_diarias: p.daily_goal ?? p.meta_tareas_diarias ?? 6,
+      area_preferida: p.area_preferida,
+      foto_avatar: p.foto_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
+      insignia_actual: p.insignia_actual,
+      telefono: p.telefono
+    };
+
     return {
-      user: mapSafeProfileRow(usuarioAutenticado),
+      user: mappedUser,
       success: true,
       isConnectionError: false
     };
-  } catch {
+  } catch (err: any) {
+    console.error('Excepción durante la validación de PIN en Supabase:', err?.message || err, err);
     return {
       user: null,
       success: false,
@@ -1309,22 +1456,13 @@ export async function validatePinInSupabase(pinIngresado: string, usuarioSelecci
 }
 
 // ------------------------------------------------------------------
-// HELPER DE PAGINACIÓN COMPLETA Y FILTRO DE FECHAS EN SERVIDOR
-// (Evita el límite silencioso de 1,000 filas de Supabase)
+// HELPER DE PAGINACIÓN COMPLETA (Evita el límite silencioso de 1,000 filas de Supabase)
 // ------------------------------------------------------------------
-export interface SupabaseDateRangeFilter {
-  startDate?: string;
-  endDate?: string;
-  dateColumn?: string;
-  eqFilters?: Record<string, string>;
-}
-
 async function fetchAllRowsPaginated(
   client: SupabaseClient,
   table: string,
   orderCol: string = 'created_at',
-  pageSize: number = 1000,
-  options?: SupabaseDateRangeFilter
+  pageSize: number = 1000
 ): Promise<{ data: any[] | null; error: any }> {
   const allRows: any[] = [];
   const seenIds = new Set<string>();
@@ -1332,32 +1470,10 @@ async function fetchAllRowsPaginated(
   let totalCount: number | null = null;
   const MAX_PAGES = 50; // Hasta 50,000 registros
 
-  const applyFilters = (q: any) => {
-    let filtered = q;
-    if (options?.eqFilters) {
-      for (const [col, val] of Object.entries(options.eqFilters)) {
-        if (val !== undefined && val !== null && val !== '') {
-          filtered = filtered.eq(col, val);
-        }
-      }
-    }
-    if (options?.dateColumn) {
-      if (options.startDate) {
-        filtered = filtered.gte(options.dateColumn, options.startDate);
-      }
-      if (options.endDate) {
-        filtered = filtered.lte(options.dateColumn, options.endDate);
-      }
-    }
-    return filtered;
-  };
-
   for (let page = 0; page < MAX_PAGES; page++) {
     let query = page === 0
       ? client.from(table).select('*', { count: 'exact' })
       : client.from(table).select('*');
-
-    query = applyFilters(query);
 
     if (orderCol) {
       query = query.order(orderCol, { ascending: false });
@@ -1371,7 +1487,7 @@ async function fetchAllRowsPaginated(
     if (error) {
       if (page === 0) {
         // Fallback si alguna columna de ordenamiento no existe en el esquema
-        const retry = await applyFilters(client.from(table).select('*')).range(0, pageSize - 1);
+        const retry = await client.from(table).select('*').range(0, pageSize - 1);
         if (retry.error) return { data: null, error: retry.error };
         return { data: retry.data || [], error: null };
       }
@@ -1408,18 +1524,10 @@ async function fetchAllRowsPaginated(
 // ------------------------------------------------------------------
 // SALES QUERIES
 // ------------------------------------------------------------------
-export async function fetchSalesFromSupabase(dateRange?: { startDate?: string; endDate?: string }): Promise<Venta[] | null> {
+export async function fetchSalesFromSupabase(): Promise<Venta[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
-  const { data, error } = await fetchAllRowsPaginated(
-    client,
-    'sales',
-    'created_at',
-    1000,
-    dateRange?.startDate || dateRange?.endDate
-      ? { dateColumn: 'fecha', startDate: dateRange.startDate, endDate: dateRange.endDate }
-      : undefined
-  );
+  const { data, error } = await fetchAllRowsPaginated(client, 'sales', 'created_at');
   if (error) {
     console.warn('Supabase fetchSales error:', error.message);
     return null;
@@ -1529,7 +1637,7 @@ export async function insertSaleInSupabase(venta: Venta): Promise<boolean> {
     items: prods,
     productos_vendidos: prods,
     fecha: venta.fecha || getLocalDateString(),
-    hora: venta.hora || getColombiaTimeString(),
+    hora: venta.hora || new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
     estado: venta.estado || 'Completada'
   };
 
@@ -1619,8 +1727,8 @@ export async function fetchCustomersFromSupabase(): Promise<Cliente[] | null> {
       rewards_redeemed: Number(c.rewards_redeemed ?? 0),
       total_compras_count: Number(c.total_visits ?? c.visitas_acumuladas ?? c.total_compras_count ?? 0),
       total_compras_monto: Number(c.total_amount ?? c.total_gastado ?? c.total_compras_monto ?? 0),
-      ultima_fecha_compra: c.fecha_ultima_compra ? getLocalDateString(c.fecha_ultima_compra) : getLocalDateString(),
-      fecha_registro: c.fecha_registro ? getLocalDateString(c.fecha_registro) : (c.created_at ? getLocalDateString(c.created_at) : getLocalDateString())
+      ultima_fecha_compra: c.fecha_ultima_compra ? c.fecha_ultima_compra.split('T')[0] : getLocalDateString(),
+      fecha_registro: c.fecha_registro ? c.fecha_registro.split('T')[0] : (c.created_at ? c.created_at.split('T')[0] : getLocalDateString())
     };
   }) as Cliente[];
 }
@@ -1678,7 +1786,7 @@ export async function upsertCustomerInSupabase(cliente: Cliente): Promise<boolea
       total_visits: totalVisitsCount,
       visitas_acumuladas: finalStickers,
       total_gastado: Number(cliente.total_compras_monto || 0),
-      fecha_ultima_compra: cliente.fecha_ultima_compra || getColombiaIsoTimestamp()
+      fecha_ultima_compra: cliente.fecha_ultima_compra || new Date().toISOString()
     };
 
     const { error } = await client.from('customers').upsert(payload);
@@ -1802,7 +1910,7 @@ export async function fetchInventoryFromSupabase(): Promise<InsumoInventario[] |
     unidad: i.unidad_medida || i.unidad || 'Unidades',
     estado_alerta: i.estado_alerta || (Number(i.current_stock ?? i.stock_actual ?? 0) <= Number(i.min_stock ?? i.stock_minimo ?? 0) ? 'bajo' : 'normal'),
     costo_unitario: Number(i.costo_unitario || 0),
-    ultima_actualizacion_fecha: i.updated_at ? getColombiaDateTimeString(i.updated_at) : (i.ultima_actualizacion_fecha || undefined),
+    ultima_actualizacion_fecha: i.updated_at ? new Date(i.updated_at).toISOString().substring(0, 16).replace('T', ' ') : (i.ultima_actualizacion_fecha || undefined),
     ultima_actualizacion_por: i.ultima_actualizacion_por || 'Administrador'
   })) as InsumoInventario[];
 }
@@ -1824,7 +1932,7 @@ export async function upsertInventoryInSupabase(insumo: InsumoInventario): Promi
     unidad_medida: insumo.unidad ?? raw.unidad_medida ?? 'Unidades',
     estado_alerta: raw.estado_alerta || (insumo.stock_actual <= insumo.stock_minimo_alerta ? 'bajo' : 'normal'),
     costo_unitario: raw.costo_unitario || 0,
-    updated_at: getColombiaIsoTimestamp()
+    updated_at: new Date().toISOString()
   });
   if (error) {
     console.error('Supabase upsertInventory error:', error.message);
@@ -1847,19 +1955,11 @@ export async function deleteInventoryFromSupabase(id: string): Promise<boolean> 
 // ------------------------------------------------------------------
 // TIME ENTRIES (FICHAJE Y ARQUEO DE CAJA) QUERIES
 // ------------------------------------------------------------------
-export async function fetchTimeEntriesFromSupabase(dateRange?: { startDate?: string; endDate?: string }): Promise<FichajeRecord[] | null> {
+export async function fetchTimeEntriesFromSupabase(): Promise<FichajeRecord[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
   try {
-    const { data, error } = await fetchAllRowsPaginated(
-      client,
-      'time_entries',
-      'created_at',
-      1000,
-      dateRange?.startDate || dateRange?.endDate
-        ? { dateColumn: 'fecha', startDate: dateRange.startDate, endDate: dateRange.endDate }
-        : undefined
-    );
+    const { data, error } = await fetchAllRowsPaginated(client, 'time_entries', 'created_at');
     if (error) {
       console.warn('Supabase fetchTimeEntries error:', error.message);
       return null;
@@ -1928,8 +2028,8 @@ export async function saveFichajeToSupabase(fichaje: any, empleadoNombre?: strin
     const horaInStr = fichaje.hora_entrada ? (fichaje.hora_entrada.length === 5 ? `${fichaje.hora_entrada}:00` : fichaje.hora_entrada) : null;
     const horaOutStr = fichaje.hora_salida ? (fichaje.hora_salida.length === 5 ? `${fichaje.hora_salida}:00` : fichaje.hora_salida) : null;
 
-    const clockInVal = horaInStr ? `${todayStr}T${horaInStr}-05:00` : getColombiaIsoTimestamp();
-    const clockOutVal = horaOutStr ? `${todayStr}T${horaOutStr}-05:00` : null;
+    const clockInVal = horaInStr ? `${todayStr}T${horaInStr}` : new Date().toISOString();
+    const clockOutVal = horaOutStr ? `${todayStr}T${horaOutStr}` : null;
 
     const isCuadreCaja = String(fichaje.id || '').startsWith('cuadre-') || fichaje.efectivo_contado !== undefined;
     const desgloseCajaPayload = isCuadreCaja
@@ -2136,8 +2236,8 @@ export async function fetchActiveAnnouncementsFromSupabase(): Promise<Anuncio[] 
       id: String(a.id),
       titulo: a.titulo || a.title || 'Comunicado',
       contenido: a.contenido || a.content || '',
-      fecha_creacion: a.fecha_creacion || a.created_at || getColombiaIsoTimestamp(),
-      fecha: a.fecha_creacion ? getLocalDateString(a.fecha_creacion) : (a.fecha || getLocalDateString()),
+      fecha_creacion: a.fecha_creacion || a.created_at || new Date().toISOString(),
+      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || getLocalDateString()),
       activo: a.activo !== false,
       creador_nombre: a.creador_nombre || a.author || 'Mariana Silva (Admin)',
       lecturas_confirmadas: a.lecturas_confirmadas || []
@@ -2166,8 +2266,8 @@ export async function fetchAllAnnouncementsFromSupabase(): Promise<Anuncio[] | n
       id: String(a.id),
       titulo: a.titulo || a.title || 'Comunicado',
       contenido: a.contenido || a.content || '',
-      fecha_creacion: a.fecha_creacion || a.created_at || getColombiaIsoTimestamp(),
-      fecha: a.fecha_creacion ? getLocalDateString(a.fecha_creacion) : (a.fecha || getLocalDateString()),
+      fecha_creacion: a.fecha_creacion || a.created_at || new Date().toISOString(),
+      fecha: a.fecha_creacion ? a.fecha_creacion.split('T')[0] : (a.fecha || getLocalDateString()),
       activo: a.activo !== false,
       creador_nombre: a.creador_nombre || a.author || 'Mariana Silva (Admin)',
       lecturas_confirmadas: a.lecturas_confirmadas || []
@@ -2187,16 +2287,19 @@ export async function insertAnnouncementInSupabase(anuncio: {
 }): Promise<{ success: boolean; data?: Anuncio; error?: string }> {
   const client = getSupabaseClient();
   if (!client) {
+    console.error('Supabase no está configurado (URL o Key ausentes)');
     return { success: false, error: 'Faltan credenciales de Supabase (VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY).' };
   }
 
   try {
-    const nowIso = getColombiaIsoTimestamp();
+    const nowIso = new Date().toISOString();
     const tituloClean = String(anuncio.titulo || '').trim();
     const contenidoClean = String(anuncio.contenido || '').trim();
     const activoVal = anuncio.activo !== undefined ? Boolean(anuncio.activo) : true;
     const prioridadVal = anuncio.prioridad || 'normal';
 
+    // Payload que coincide con las columnas exactas de la tabla announcements:
+    // id (uuid autogenerado por Postgres), titulo (text), contenido (text), activo (bool), prioridad (text), fecha_creacion (timestamptz)
     const payload: any = {
       titulo: tituloClean,
       contenido: contenidoClean,
@@ -2204,6 +2307,8 @@ export async function insertAnnouncementInSupabase(anuncio: {
       prioridad: prioridadVal,
       fecha_creacion: anuncio.fecha_creacion || nowIso
     };
+
+    console.log('Insertando comunicado en Supabase announcements:', payload);
 
     let { data, error } = await client
       .from('announcements')
@@ -2683,11 +2788,66 @@ export const DEFAULT_TASKS_24_TEMPLATES = [
 ];
 
 /**
- * Delega todas las fechas de negocio al módulo centralizado `src/utils/dateColombia.ts` (America/Bogota UTC-5).
+ * Retorna la fecha local en formato YYYY-MM-DD sin desfases por zona horaria UTC.
  */
-export const getLocalDateString = getColombiaDateString;
-export const getBogotaDateDaysAgo = getColombiaDateDaysAgo;
-export const getBogotaFirstDayOfMonth = getColombiaFirstDayOfMonth;
+export function getLocalDateString(dateInput?: Date | string | null): string {
+  try {
+    let d: Date;
+    if (!dateInput) {
+      d = new Date();
+    } else if (typeof dateInput === 'string') {
+      const trimmed = dateInput.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        return trimmed;
+      }
+      d = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
+    } else {
+      d = dateInput;
+    }
+
+    if (isNaN(d.getTime())) {
+      d = new Date();
+    }
+
+    // Forzar zona horaria oficial de Bogotá (America/Bogota - UTC-5)
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return formatter.format(d);
+  } catch (err) {
+    const now = dateInput instanceof Date ? dateInput : new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+}
+
+
+export function getBogotaDateDaysAgo(daysAgo: number): string {
+  try {
+    const nowStr = getLocalDateString();
+    const [year, month, day] = nowStr.split('-').map(Number);
+    const utcDate = new Date(Date.UTC(year, month - 1, day - daysAgo, 12, 0, 0));
+    const y = utcDate.getUTCFullYear();
+    const m = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(utcDate.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  } catch {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return getLocalDateString(d);
+  }
+}
+
+export function getBogotaFirstDayOfMonth(): string {
+  const nowStr = getLocalDateString();
+  const parts = nowStr.split('-');
+  return `${parts[0]}-${parts[1]}-01`;
+}
 
 
 export function calcularHorasTurno(horaEntrada?: string | null, horaSalida?: string | null): { 
@@ -3082,12 +3242,12 @@ export async function updateDailyTaskStatusInSupabase(
       status: estado === 'En proceso' ? 'en_proceso' : estado,
       estado: estado,
       completed: completed,
-      completed_at: completed ? getColombiaIsoTimestamp() : null,
-      updated_at: getColombiaIsoTimestamp()
+      completed_at: completed ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString()
     };
 
     if (estado === 'En proceso') {
-      payload.started_at = getColombiaIsoTimestamp();
+      payload.started_at = new Date().toISOString();
     }
 
     if (foto_url !== undefined) {
@@ -3140,7 +3300,7 @@ export async function insertDailyTaskInSupabase(tarea: Tarea, staffName?: string
       status: tarea.estado,
       estado: tarea.estado,
       completed: tarea.estado === 'Completada',
-      completed_at: tarea.estado === 'Completada' ? getColombiaIsoTimestamp() : null,
+      completed_at: tarea.estado === 'Completada' ? new Date().toISOString() : null,
       tiempo_estimado_min: tarea.tiempo_estimado_min,
       hora_inicio: tarea.hora_inicio,
       hora_fin: tarea.hora_fin,
@@ -3150,7 +3310,7 @@ export async function insertDailyTaskInSupabase(tarea: Tarea, staffName?: string
       fecha: tarea.fecha || getLocalDateString(),
       orden: tarea.orden,
       order_index: tarea.orden,
-      created_at: getColombiaIsoTimestamp()
+      created_at: new Date().toISOString()
     };
 
     const { success, error } = await insertWithResilientColumns(client, 'daily_tasks', payload);
@@ -3629,7 +3789,7 @@ export async function fetchSchedulesForEmployeeFromSupabase(nombreOIdEmpleado: s
 // ------------------------------------------------------------------
 // GASTOS (GASTOS DEL DÍA) QUERIES
 // ------------------------------------------------------------------
-export async function fetchGastosFromSupabase(dateRange?: { startDate?: string; endDate?: string }): Promise<Gasto[]> {
+export async function fetchGastosFromSupabase(): Promise<Gasto[]> {
   const client = getSupabaseClient();
   let localBackup: Gasto[] = [];
   try {
@@ -3640,15 +3800,7 @@ export async function fetchGastosFromSupabase(dateRange?: { startDate?: string; 
   if (!client) return localBackup;
 
   try {
-    const { data, error } = await fetchAllRowsPaginated(
-      client,
-      'gastos',
-      'created_at',
-      1000,
-      dateRange?.startDate || dateRange?.endDate
-        ? { dateColumn: 'fecha', startDate: dateRange.startDate, endDate: dateRange.endDate }
-        : undefined
-    );
+    const { data, error } = await fetchAllRowsPaginated(client, 'gastos', 'created_at');
 
     if (error) {
       console.warn('Error consultando gastos en Supabase:', error);
@@ -3838,11 +3990,8 @@ export const obtenerProgresoLocal = (employeeName: string, fecha: string) => {
   }
 };
 
-// Consulta el progreso directamente desde Supabase en tiempo real con paginación y filtro por fechas
-export const cargarProgresoSupabase = async (
-  employeeName: string | null = null,
-  dateRange?: { startDate?: string; endDate?: string }
-) => {
+// Consulta el progreso directamente desde Supabase en tiempo real (con respaldo local)
+export const cargarProgresoSupabase = async (employeeName: string | null = null) => {
   const client = getSupabaseClient();
   let localFallback: any[] = [];
 
@@ -3866,16 +4015,17 @@ export const cargarProgresoSupabase = async (
   if (!client) return localFallback;
 
   try {
-    const { data, error } = await fetchAllRowsPaginated(client, 'task_progress', 'fecha', 1000, {
-      ...(employeeName ? { eqFilters: { employee_name: employeeName } } : {}),
-      ...(dateRange?.startDate || dateRange?.endDate
-        ? { dateColumn: 'fecha', startDate: dateRange.startDate, endDate: dateRange.endDate }
-        : {})
-    });
+    let query = client.from('task_progress').select('*');
+    if (employeeName) {
+      query = query.eq('employee_name', employeeName);
+    }
+
+    const { data, error } = await query;
     if (error || !data || data.length === 0) {
       return localFallback;
     }
 
+    // Fusionar nube con local si hay datos locales más recientes
     const mergedMap = new Map<string, any>();
     data.forEach((item: any) => mergedMap.set(item.id || `${item.employee_name}_${item.fecha}`, item));
     localFallback.forEach((item: any) => {

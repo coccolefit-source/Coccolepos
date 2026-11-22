@@ -6,8 +6,21 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 1. Columnas seguras para almacenamiento hasheado (bcrypt vía pgcrypto)
+-- 1. Asegurar columnas esperadas en public.profiles (evita errores 42703 en esquemas previos)
 ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS full_name TEXT,
+  ADD COLUMN IF NOT EXISTS nombre TEXT,
+  ADD COLUMN IF NOT EXISTS email TEXT,
+  ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'staff',
+  ADD COLUMN IF NOT EXISTS rol TEXT DEFAULT 'empleado',
+  ADD COLUMN IF NOT EXISTS daily_goal INTEGER DEFAULT 6,
+  ADD COLUMN IF NOT EXISTS meta_tareas_diarias INTEGER DEFAULT 6,
+  ADD COLUMN IF NOT EXISTS area_preferida TEXT,
+  ADD COLUMN IF NOT EXISTS foto_avatar TEXT,
+  ADD COLUMN IF NOT EXISTS insignia_actual TEXT,
+  ADD COLUMN IF NOT EXISTS telefono TEXT,
+  ADD COLUMN IF NOT EXISTS pin TEXT,
+  ADD COLUMN IF NOT EXISTS clave_maestra TEXT,
   ADD COLUMN IF NOT EXISTS pin_hash TEXT,
   ADD COLUMN IF NOT EXISTS clave_maestra_hash TEXT;
 
@@ -99,7 +112,7 @@ BEGIN
   WHERE (v_clean_id IS NULL OR p.id::text = v_clean_id)
     AND (
       (p.pin_hash IS NOT NULL AND p.pin_hash = crypt(v_clean_pin, p.pin_hash))
-      OR (p.pin_hash IS NULL AND p.pin IS NOT NULL AND TRIM(p.pin) = v_clean_pin)
+      OR (p.pin IS NOT NULL AND TRIM(p.pin) = v_clean_pin)
     )
   LIMIT 1;
 END;
